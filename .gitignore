@@ -1,0 +1,60 @@
+# Run history from the companion scripts. Local to whoever ran them, and it
+# carries their timestamps -- no reason for anybody else to have it.
+tools/*.log
+
+# Battle.net API credentials, if the Blizzard probe is ever used. A client
+# secret is a password: it must never reach a repository, and least of all one
+# that becomes a public addon.
+tools/blizzard-credentials.txt
+
+# What the passes remember between runs. All of it rebuilds itself, none of it
+# means anything on another machine, and together it is about 1.5 MB -- more
+# than the addon's own source.
+#
+#   Baseline-*    where everybody stood last time, for the change columns
+#   LiveCache-*   each character's last self-report, for conditional requests
+#   SpecsSeen-*   every character ever asked about, so the rolling slice works
+#   InspectSeen-* games played when gear was last read, for carry-forward
+tools/Baseline-*.txt
+tools/LiveCache-*.txt
+tools/SpecsSeen-*.txt
+tools/InspectSeen-*.txt
+tools/SnapshotHistory.txt
+
+# One run's claim on a region. Holds a pid, and a stale one from somebody else's
+# machine would be read as a run in progress.
+tools/*.lock
+tools/*.progress
+
+# Which intervals this machine's dashboard is set to, and where it puts itself.
+tools/dashboard-settings.txt
+
+# Built from ArenaPlusDashboard.cs by Build.cmd, using the csc.exe that ships
+# with the .NET Framework. The source is here; the binary is a build artefact,
+# and a committed .exe in an addon repository is a thing users are right to
+# distrust.
+tools/ArenaPlusDashboard.exe
+
+# Windows and macOS leave these lying about.
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Deliberately NOT ignored, despite being generated:
+#
+#   Cutoffs.lua
+#   Leaderboard.lua
+#
+# Both are written by tools\UpdateCutoffs.ps1 and tools\UpdateLeaderboard.ps1,
+# which looks like a reason to keep them out of the repository. It is the
+# opposite. Addons cannot reach the network, so these files *are* the data --
+# somebody installing from CurseForge has no scripts, no scheduled task and no
+# way to produce them. Ignore them and the addon ships with no cutoffs and an
+# empty ladder.
+#
+# They are committed on purpose, and whatever ends up doing the release should
+# make sure the newest scrape is in the build.
+
+# Left over from the talent solver, which was deleted once the client turned
+# out to answer GetTalentInfoByID directly. Nothing reads it any more.
+tools/TalentGrid.txt

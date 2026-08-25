@@ -1,0 +1,38 @@
+﻿## Interface: 50500, 50502, 50503, 50504, 50505
+## Title: ArenaPlus
+## Author: David / Atlas-Engine
+## Version: 1.0
+## Notes: Rated arena and battleground tracking - match history with specs and crowd control, live title cutoffs and the ladder.
+## SavedVariables: ArenaPlus_SavedVars
+
+# Core
+Locales.lua
+Cutoffs-us.lua
+Cutoffs-eu.lua
+Leaderboard-us.lua
+Leaderboard-eu.lua
+Specs-us.lua
+Specs-eu.lua
+Inspect-us.lua
+Inspect-eu.lua
+# After the Inspect files, so its grid replaces the one they used to carry.
+TalentGrid.lua
+GlyphData.lua
+HardCC.lua
+SpecData.lua
+SpecSpells.lua
+SpecFixups.lua
+HistorySeed.lua
+Core.lua
+
+# Modules
+Modules\MinimapButton.lua
+Modules\UnitTooltip.lua
+Modules\LFGStanding.lua
+Modules\PvPDefaultPage.lua
+Modules\ArenaMMR.lua
+Modules\RatedPage.lua
+Modules\ArenaLadder.lua
+Modules\InspectPanel.lua
+Modules\AuctionPvP.lua
+Modules\ArenaHistory.lua
