@@ -1,4 +1,4 @@
-# What would gear, talents and glyphs actually cost to ship?
+﻿# What would gear, talents and glyphs actually cost to ship?
 #
 # The API carries all of it (see ProbeCharacterDetail.ps1). What decides whether
 # it is worth building is size: this file would ship to everybody who installs
@@ -18,6 +18,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root     = Split-Path $PSScriptRoot -Parent
+# Everything the passes write lives under Data\, so the addon root stays
+# readable. Built once here: nine separate literals is nine chances for one
+# to keep pointing at the old place, and a pass that writes where nothing
+# reads fails silently.
+$data       = Join-Path $root "Data"
 $credFile = Join-Path $PSScriptRoot "blizzard-credentials.txt"
 
 $clientId = $null
@@ -37,7 +42,7 @@ $ns      = "profile-classic-$Region"
 # Straight off the top of the ladder: the characters anyone would actually want
 # to look at, and the ones with the most gear to record.
 $who = @()
-foreach ($line in Get-Content (Join-Path $root ("Leaderboard-$Region.lua"))) {
+foreach ($line in Get-Content (Join-Path $data ("Leaderboard-$Region.lua"))) {
     $m = [regex]::Match($line, 'name="([^"]+)", realm="([^"]*)"')
     if ($m.Success) {
         $who += @{ Name = $m.Groups[1].Value; Realm = $m.Groups[2].Value }
@@ -122,5 +127,5 @@ foreach ($n in @(100, 500, 1000, 5000, 10400)) {
 }
 ""
 "For scale: Leaderboard-us.lua is {0:N0} KB and Specs-us.lua is {1:N0} KB." -f `
-    ((Get-Item (Join-Path $root "Leaderboard-$Region.lua")).Length / 1KB), `
-    ((Get-Item (Join-Path $root "Specs-$Region.lua")).Length / 1KB)
+    ((Get-Item (Join-Path $data "Leaderboard-$Region.lua")).Length / 1KB), `
+    ((Get-Item (Join-Path $data "Specs-$Region.lua")).Length / 1KB)

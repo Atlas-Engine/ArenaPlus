@@ -46,7 +46,9 @@ ArenaPlus exposes `ArenaPlusAPI` — a small, stable global for looking a charac
 
 Blizzard's own Game Data API — the leaderboards, the reward cutoffs, and the character profiles behind gear and specs. Nothing is scraped from a third-party site.
 
-The scripts that do it live in `tools/` and are not part of the download. They need a Battle.net API client, which is free and self-service; `tools/blizzard-credentials.example.txt` explains how to get one. **A client secret is a password — it never belongs in this repository.**
+What they produce lives in `Data/` — the ladder, the cutoffs, the specs, the gear, plus two tables harvested once from the client. None of it is hand-written; edit the scripts, not the tables.
+
+The scripts themselves live in `tools/` and are not part of the download. They need a Battle.net API client, which is free and self-service; `tools/blizzard-credentials.example.txt` explains how to get one. **A client secret is a password — it never belongs in this repository.**
 
 Gear, talents and glyphs are recorded for the top five of each spec in each bracket rather than the whole ladder, which is the sample somebody comparing their own spec would actually want.
 

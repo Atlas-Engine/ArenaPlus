@@ -61,8 +61,13 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root       = Split-Path $PSScriptRoot -Parent
-$cutoffFile = Join-Path $root ("Cutoffs-" + $Region + ".lua")
-$ladderFile = Join-Path $root ("Leaderboard-" + $Region + ".lua")
+# Everything the passes write lives under Data\, so the addon root stays
+# readable. Built once here: nine separate literals is nine chances for one
+# to keep pointing at the old place, and a pass that writes where nothing
+# reads fails silently.
+$data       = Join-Path $root "Data"
+$cutoffFile = Join-Path $data ("Cutoffs-" + $Region + ".lua")
+$ladderFile = Join-Path $data ("Leaderboard-" + $Region + ".lua")
 $logFile    = Join-Path $PSScriptRoot "UpdateFromBlizzard.log"
 $credFile   = Join-Path $PSScriptRoot "blizzard-credentials.txt"
 

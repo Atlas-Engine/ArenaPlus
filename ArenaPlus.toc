@@ -6,18 +6,22 @@
 ## SavedVariables: ArenaPlus_SavedVars
 
 # Core
+#
+# Data\ holds what the tools produce: the ladder, the cutoffs, the specs, the
+# gear, and the two tables harvested once from the client. None of it is
+# hand-written -- edit the scripts in tools\, not these.
 Locales.lua
-Cutoffs-us.lua
-Cutoffs-eu.lua
-Leaderboard-us.lua
-Leaderboard-eu.lua
-Specs-us.lua
-Specs-eu.lua
-Inspect-us.lua
-Inspect-eu.lua
+Data\Cutoffs-us.lua
+Data\Cutoffs-eu.lua
+Data\Leaderboard-us.lua
+Data\Leaderboard-eu.lua
+Data\Specs-us.lua
+Data\Specs-eu.lua
+Data\Inspect-us.lua
+Data\Inspect-eu.lua
 # After the Inspect files, so its grid replaces the one they used to carry.
-TalentGrid.lua
-GlyphData.lua
+Data\TalentGrid.lua
+Data\GlyphData.lua
 HardCC.lua
 SpecData.lua
 SpecSpells.lua

@@ -71,8 +71,13 @@ function ConvertTo-LuaLower([string]$text) {
 }
 
 $root       = Split-Path $PSScriptRoot -Parent
-$ladderFile = Join-Path $root ("Leaderboard-" + $Region + ".lua")
-$specFile   = Join-Path $root ("Specs-" + $Region + ".lua")
+# Everything the passes write lives under Data\, so the addon root stays
+# readable. Built once here: nine separate literals is nine chances for one
+# to keep pointing at the old place, and a pass that writes where nothing
+# reads fails silently.
+$data       = Join-Path $root "Data"
+$ladderFile = Join-Path $data ("Leaderboard-" + $Region + ".lua")
+$specFile   = Join-Path $data ("Specs-" + $Region + ".lua")
 $logFile    = Join-Path $PSScriptRoot "UpdateSpecs.log"
 $credFile   = Join-Path $PSScriptRoot "blizzard-credentials.txt"
 

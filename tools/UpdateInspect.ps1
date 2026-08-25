@@ -1,4 +1,4 @@
-# Gear, enchants, gems, talents and glyphs for the top of each ladder.
+﻿# Gear, enchants, gems, talents and glyphs for the top of each ladder.
 #
 # Separate from UpdateSpecs.ps1 because the two answer different questions and
 # cost very differently. A spec is one word and is wanted for every one of the
@@ -60,8 +60,13 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root       = Split-Path $PSScriptRoot -Parent
-$ladderFile = Join-Path $root ("Leaderboard-" + $Region + ".lua")
-$outFile    = Join-Path $root ("Inspect-" + $Region + ".lua")
+# Everything the passes write lives under Data\, so the addon root stays
+# readable. Built once here: nine separate literals is nine chances for one
+# to keep pointing at the old place, and a pass that writes where nothing
+# reads fails silently.
+$data       = Join-Path $root "Data"
+$ladderFile = Join-Path $data ("Leaderboard-" + $Region + ".lua")
+$outFile    = Join-Path $data ("Inspect-" + $Region + ".lua")
 $logFile    = Join-Path $PSScriptRoot "UpdateInspect.log"
 $credFile   = Join-Path $PSScriptRoot "blizzard-credentials.txt"
 
