@@ -1,4 +1,4 @@
-﻿# Does Blizzard's own API serve a live MoP Classic PvP leaderboard?
+# Does Blizzard's own API serve a live MoP Classic PvP leaderboard?
 #
 # The question behind it: if it does, the ladder can be read from Blizzard
 # directly rather than scraped from a third party -- no load on somebody else's
@@ -15,7 +15,7 @@
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File "<path>\CheckBlizzardApi.ps1"
-#   powershell -ExecutionPolicy Bypass -File "<path>\CheckBlizzardApi.ps1" -Name Gcmte -Bracket 3v3
+#   powershell -ExecutionPolicy Bypass -File "<path>\CheckBlizzardApi.ps1" -Name Somebody -Bracket 3v3
 
 param(
     [string]$Region  = "us",

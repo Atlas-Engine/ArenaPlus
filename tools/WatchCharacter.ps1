@@ -26,7 +26,7 @@
 # polling will ever reach it sooner.
 #
 # Usage:
-#   powershell -ExecutionPolicy Bypass -File "<path>\WatchCharacter.ps1" -Name Gcdsk -Realm raden
+#   powershell -ExecutionPolicy Bypass -File "<path>\WatchCharacter.ps1" -Name Somebody -Realm your-realm
 
 param(
     [Parameter(Mandatory=$true)][string]$Name,

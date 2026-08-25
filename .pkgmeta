@@ -1,0 +1,22 @@
+package-as: ArenaPlus
+
+ignore:
+  # The data pipeline. It has to live in the repository, because that is what
+  # the scheduled GitHub Action checks out and runs -- but it has no business
+  # in the download. Nobody installing an addon from CurseForge is going to run
+  # a PowerShell script against the Battle.net API, and it is about 200 KB of
+  # things they cannot use.
+  #
+  # Note what is NOT ignored: Cutoffs-*, Leaderboard-*, Specs-* and Inspect-*
+  # at the addon root. Those are the pipeline's *output* and the addon is
+  # useless without them -- an addon cannot reach the network, so the shipped
+  # tables are the data.
+  - tools
+
+  # Repository furniture the game never reads.
+  - README.md
+  - LICENSE
+  - .git
+  - .gitignore
+  - .github
+  - .pkgmeta
