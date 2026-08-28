@@ -705,6 +705,19 @@ end
 -- heading's width changes with the bracket and the region, so anything anchored
 -- behind it moved every time the picker was used, which is the one thing a row
 -- of buttons must never do.
+-- One button per bracket, and the gap between them.
+local BRACKET_BUTTON_W   = 46
+local BRACKET_BUTTON_GAP = 2
+
+-- How wide the row comes out.
+--
+-- Exported because anything placed after the row has to know where it ends,
+-- and a number copied into a window is one that goes stale the moment this
+-- changes. That is exactly how the history window's record ended up sitting
+-- under the tabs: it was written as "the picker's x plus 210", which was true
+-- until the picker moved.
+ns.BRACKET_PICKER_WIDTH = (4*BRACKET_BUTTON_W) + (3*BRACKET_BUTTON_GAP)
+
 function ns.BuildBracketPicker(frame,point,x,y)
 	local names=ns.BRACKET_NAMES
 	local buttons={}
@@ -712,7 +725,7 @@ function ns.BuildBracketPicker(frame,point,x,y)
 
 	for bracket=1,4 do
 		local button=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
-		button:SetSize(46,20)
+		button:SetSize(BRACKET_BUTTON_W,20)
 		button:SetText(names[bracket])
 		button.bracket=bracket
 
@@ -722,9 +735,9 @@ function ns.BuildBracketPicker(frame,point,x,y)
 
 		if previous then
 			if rightwards then
-				button:SetPoint("LEFT",previous,"RIGHT",2,0)
+				button:SetPoint("LEFT",previous,"RIGHT",BRACKET_BUTTON_GAP,0)
 			else
-				button:SetPoint("RIGHT",previous,"LEFT",-2,0)
+				button:SetPoint("RIGHT",previous,"LEFT",-BRACKET_BUTTON_GAP,0)
 			end
 		else
 			button:SetPoint(rightwards and "TOPLEFT" or "TOPRIGHT",frame,point,x,y)

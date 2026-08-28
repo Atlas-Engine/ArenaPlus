@@ -2413,7 +2413,11 @@ local function CreateWindow()
 	-- Won and lost over everything recorded, not only the ten on the panel.
 	-- Same two colours, so the small number and the big one read the same way.
 	frame.record=frame:CreateFontString(nil,"OVERLAY","GameFontNormal")
-	frame.record:SetPoint("LEFT",frame,"TOPLEFT",BRACKET_X+210,HEADER_MID)
+	-- After the bracket row, wherever that now ends. Written out rather than
+	-- guessed at a fixed offset, which is what put this under the tabs when the
+	-- row moved along to make room for the swap button.
+	frame.record:SetPoint("LEFT",frame,"TOPLEFT",
+		BRACKET_X+SWAP_W+SWAP_GAP+(ns.BRACKET_PICKER_WIDTH or 190)+20,HEADER_MID)
 	frame.record:SetJustifyH("LEFT")
 
 	-- How many are listed below, which is not always the season's own count:
