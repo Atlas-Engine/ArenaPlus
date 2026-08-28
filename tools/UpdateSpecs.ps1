@@ -151,12 +151,43 @@ Write-Host ("{0} distinct characters on the {1} ladder." -f $wanted.Count, $Regi
 $cacheFile = Join-Path $PSScriptRoot ("SpecsSeen-" + $Region + ".txt")
 
 $specList = New-Object System.Collections.Generic.List[string]
+
+# The list exactly as the shipped file carries it, junk and all, positions
+# intact. The seeding branch further down resolves that file's own indices
+# against it, so it has to mirror the file rather than the cleaned-up list --
+# resolving old indices against a filtered list would hand every character
+# somebody else's spec, silently.
+$fileList = New-Object System.Collections.Generic.List[string]
 $seen = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([System.StringComparer]::Ordinal)
 $lastFull = [datetime]::MinValue
 
 if (Test-Path $specFile) {
     $text = Get-Content $specFile -Raw
-    foreach ($m in [regex]::Matches($text, '"([a-z-]+)",')) { $null = $specList.Add($m.Groups[1].Value) }
+
+    # The slug table's own body, and only real slugs out of it.
+    #
+    # This read the whole file for '"([a-z-]+)",' -- which also matched the word
+    # inside the comment above the table, the one explaining the `X = X or {}`
+    # idiom. So every run harvested one more "or" and put it at the front of the
+    # list, and the table grew by one junk entry per run: 239 of them before
+    # anybody looked, every one shipped to every user.
+    #
+    # It never displayed anything wrong, because the indices were computed
+    # against the same polluted list the addon then read. That is exactly why it
+    # survived so long -- the damage was unbounded growth, not wrong specs.
+    #
+    # Two guards, because either alone would have let it through: take the table
+    # body rather than the file, and require the hyphen that separates class
+    # from spec. The second is what flushes the junk already in the file.
+    $block = [regex]::Match($text,
+        '(?s)SPEC_SLUGS_BY_REGION\["' + $Region + '"\]\s*=\s*\{(.*?)\n\}')
+    $body = if ($block.Success) { $block.Groups[1].Value } else { "" }
+
+    foreach ($m in [regex]::Matches($body, '"([a-z-]+)",')) {
+        $slug = $m.Groups[1].Value
+        $null = $fileList.Add($slug)
+        if ($slug -match '-') { $null = $specList.Add($slug) }
+    }
 }
 
 if (Test-Path $cacheFile) {
@@ -188,7 +219,9 @@ elseif (Test-Path $specFile) {
     $today = Get-Date -Format 'yyyy-MM-dd'
     foreach ($m in [regex]::Matches($text, '\["([^"]+)"\]=(\d+)')) {
         $index = [int]$m.Groups[2].Value
-        $slug = if ($index -gt 0 -and $index -le $specList.Count) { $specList[$index - 1] } else { '' }
+        # $fileList, not $specList: these indices were written against the file
+        # as it stands, so they have to be read against the same thing.
+        $slug = if ($index -gt 0 -and $index -le $fileList.Count) { $fileList[$index - 1] } else { '' }
         $seen[$m.Groups[1].Value] = @{ Slug = $slug; Seen = $today }
     }
     # The shipped file was itself written by a full pass, so its timestamp is

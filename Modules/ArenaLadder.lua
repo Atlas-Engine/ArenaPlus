@@ -350,6 +350,49 @@ local function LiveStanding(bracket)
 	return L.LADDER_LIVE_SELF:format(hex,ranking,hex,rating)
 end
 
+-- "13 minutes ago", from the stamp the companion script wrote.
+--
+-- That stamp is local time on the machine that ran the script, which is this
+-- one -- so it is compared against local time here. If the collector ever moves
+-- to a machine in another timezone, this is the line that has to learn about
+-- it.
+--
+-- Falls back to the stamp itself rather than to nothing: a time the reader has
+-- to subtract is still better than a blank.
+local function Ago(stamp)
+	if not stamp or stamp=="" then return "?" end
+
+	local y,mo,d,h,mi,ap=stamp:match("(%d+)-(%d+)-(%d+)%s+(%d+):(%d+)%s*([AP]M)")
+	if not y then return stamp:match("(%d+:%d+%s*[AP]?M?)") or stamp end
+
+	h=tonumber(h)
+	-- 12 AM is hour 0 and 12 PM is hour 12; every other PM adds twelve.
+	if ap=="AM" then
+		if h==12 then h=0 end
+	elseif h~=12 then
+		h=h+12
+	end
+
+	local when=time({ year=tonumber(y), month=tonumber(mo), day=tonumber(d),
+	                  hour=h, min=tonumber(mi), sec=0 })
+	if not when then return stamp end
+
+	local seconds=difftime(time(),when)
+	if seconds<0 then return L.LADDER_AGO_NOW end
+
+	local minutes=math.floor(seconds/60)
+	if minutes<1  then return L.LADDER_AGO_NOW end
+	if minutes<60 then return L.LADDER_AGO_MINUTES:format(minutes) end
+
+	local hours=math.floor(minutes/60)
+	if hours==1 then return L.LADDER_AGO_HOUR end
+	if hours<24 then return L.LADDER_AGO_HOURS:format(hours) end
+
+	local days=math.floor(hours/24)
+	if days==1 then return L.LADDER_AGO_DAY end
+	return L.LADDER_AGO_DAYS:format(days)
+end
+
 ----------------------------------------------------------------
 -- Drawing
 ----------------------------------------------------------------
@@ -784,8 +827,7 @@ local function Refresh()
 		local read
 		local snapshot=board and board.snapshot and board.snapshot:match("(%d%d:%d%d)$")
 		if snapshot then
-			local checked=(board.checked or ""):match("(%d+:%d+%s*[AP]?M?)") or "?"
-			read=L.CUTOFF_SOURCE_SNAPSHOT:format(snapshot,checked)
+			read=L.CUTOFF_SOURCE_SNAPSHOT:format(snapshot,Ago(board.checked))
 		else
 			read=L.CUTOFF_SOURCE:format((board and board.checked) or "?")
 		end
@@ -1361,8 +1403,11 @@ local function CreateWindow()
 	frame.pageFirst:SetPoint("RIGHT",frame.pagePrev,"LEFT",-2,0)
 	frame.pageFirst:SetScript("OnClick",function() TurnPage(1) end)
 
-	frame.mineButton:SetPoint("RIGHT",frame.pageFirst,"LEFT",-10,0)
-	frame.altsButton:SetPoint("RIGHT",frame.mineButton,"LEFT",-6,0)
+	-- My rank first, then My alts: the ladder is what this window is, and
+	-- your own characters are the aside. The source line anchors to whichever
+	-- of the two ends up leftmost, which is now My rank.
+	frame.altsButton:SetPoint("RIGHT",frame.pageFirst,"LEFT",-10,0)
+	frame.mineButton:SetPoint("RIGHT",frame.altsButton,"LEFT",-6,0)
 
 	frame.pageLast=PageButton(">>",32)
 	frame.pageLast:SetPoint("LEFT",frame.pageNext,"RIGHT",2,0)

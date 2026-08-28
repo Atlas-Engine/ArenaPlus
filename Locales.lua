@@ -180,7 +180,17 @@ L.CUTOFF_SOURCE           = "|cff9a9a9aBlizzard API|r, updated %s"
 -- explanation when a rating that has clearly changed is not in here yet:
 -- Blizzard rebuilds these snapshots on their own schedule, measured at nearly
 -- two hours behind, and nothing we do reaches data they have not published.
-L.CUTOFF_SOURCE_SNAPSHOT  = "|cff9a9a9aBlizzard|r %s UTC |cff6a6a6a(read %s)|r"
+L.CUTOFF_SOURCE_SNAPSHOT  = "|cff9a9a9aBlizzard|r %s UTC |cff6a6a6a(%s)|r"
+
+-- How long ago the companion script last read Blizzard. Relative, because the
+-- question is whether it is recent, and a clock time makes the reader work
+-- that out.
+L.LADDER_AGO_NOW          = "just now"
+L.LADDER_AGO_MINUTES      = "%d minutes ago"
+L.LADDER_AGO_HOUR         = "an hour ago"
+L.LADDER_AGO_HOURS        = "%d hours ago"
+L.LADDER_AGO_DAY          = "a day ago"
+L.LADDER_AGO_DAYS         = "%d days ago"
 
 -- The inspect panel. Only the best few of each spec in each bracket carry gear,
 -- talents and glyphs, so some of these say why there is nothing to show.
@@ -336,7 +346,7 @@ L.LADDER_SWAP             = "History"
 L.LADDER_PAGE             = "page %d of %d"
 -- Tier colour, rank, rating. Said on the source line rather than in the list:
 -- the rows are a snapshot and stay one, and this is the live number.
-L.LADDER_LIVE_SELF        = "   |cff9a9a9a--|r  you are |cff%s#%d|r right now, at |cff%s%d|r"
+L.LADDER_LIVE_SELF        = "   |cff9a9a9a--|r  you |cff%s#%d|r at |cff%s%d|r"
 L.LADDER_EMPTY            = "No ladder recorded for this bracket."
 -- The My alts view: your own characters, numbered among themselves rather than
 -- by where they sit on the ladder. An alt at 1400 has no ladder place at all,
