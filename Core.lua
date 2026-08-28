@@ -1,5 +1,25 @@
-local ADDON_NAME, ns = ...
+﻿local ADDON_NAME, ns = ...
 local L = ns.L
+
+-- Everything ArenaPlus_Data shipped, copied into our own namespace.
+--
+-- The ladder, the cutoffs, the specs and the gear are a separate addon so they
+-- can be republished without reshipping the code. A separate addon has a
+-- separate namespace, so it leaves its tables on a global and this picks them
+-- up -- once, here, rather than teaching seventy reader sites about a second
+-- place to look.
+--
+-- Absent when the data addon is not installed, and that is survivable: the
+-- ladder comes out empty and the cutoffs unknown, which the windows already
+-- cope with because they have to cope with a region that has no file yet.
+--
+-- Never overwrites: anything this addon has already defined under the same name
+-- wins, so a stale data addon cannot quietly replace live code.
+if ArenaPlusData then
+	for key, value in pairs(ArenaPlusData) do
+		if ns[key] == nil then ns[key] = value end
+	end
+end
 
 local CURRENT_DB_VERSION = 1
 
@@ -934,6 +954,43 @@ function ns.SetGlow(owner,anchorTo,hex,opts)
 	glow:SetAlpha(opts.alpha or 1)
 
 	glow:Show()
+end
+
+-- A scale that keeps a window on the screen it is opened on.
+--
+-- The windows were built at a fixed size and then scaled by a fixed 1.15, which
+-- is fine on the monitor they were drawn on and wrong everywhere else: the
+-- history window is 850x460 before scaling, so at 1.15 it wants 978x529, and on
+-- a 1280x720 laptop -- or with the game's own UI Scale slider pushed up -- the
+-- bottom of it is off the screen with the close button on it.
+--
+-- Measured against UIParent rather than the monitor, deliberately. UIParent's
+-- own scale already carries the user's UI Scale setting and their resolution,
+-- so its height in these units *is* the room actually available. Reading
+-- GetPhysicalScreenSize and doing the arithmetic again would be a second,
+-- disagreeing answer to a question already answered.
+--
+-- Only ever scales down. Somebody on a large monitor asked for 1.15 and should
+-- get 1.15; a window growing to fill a 4K screen is not what anybody wanted.
+--
+-- The margins leave room for the taskbar-ish furniture at the bottom of the
+-- WoW screen -- the action bars and the chat frame -- rather than fitting the
+-- window to the last pixel and having it sit under them.
+function ns.FitScale(width,height,preferred)
+	preferred=preferred or 1
+
+	local room=UIParent and UIParent.GetWidth and UIParent:GetWidth()
+	local tall=UIParent and UIParent.GetHeight and UIParent:GetHeight()
+	if not (room and tall and width and height and width>0 and height>0) then
+		return preferred
+	end
+
+	local fits=math.min((room*0.95)/width,(tall*0.90)/height)
+	if fits>=preferred then return preferred end
+
+	-- Below this it is too small to read, and a window that cannot be read is
+	-- no better than one that is off the edge -- but it can at least be moved.
+	return math.max(fits,0.65)
 end
 
 function ns.StyleAsPanel(frame)

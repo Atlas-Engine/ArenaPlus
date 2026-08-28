@@ -1,4 +1,4 @@
-local ADDON_NAME, ns = ...
+﻿local ADDON_NAME, ns = ...
 local L = ns.L
 
 -- What one ladder character is wearing, running and glyphed with.
@@ -1148,9 +1148,55 @@ local function AuctionHouseIsOpen()
 	return false
 end
 
+-- The same gem under its other name.
+--
+-- A jewelcrafter's perfect cut is a separate item with a separate name --
+-- "Perfect Delicate Pandarian Garnet" beside "Delicate Pandarian Garnet" -- and
+-- for somebody copying a build the two are the same purchase. Searching only
+-- what the inspected player happened to be wearing shows half the shelf, and on
+-- this ladder it is not a rare half: 11 of the 41 gems worn are perfect cuts.
+--
+-- Only the perfect-to-plain direction. The plain name is a real item every
+-- time, where "Perfect <rare gem>" is not -- perfect cuts exist only for the
+-- uncommon gems -- so going the other way would send searches for items that
+-- cannot exist.
+--
+-- English clients only, honestly. The name comes from GetItemInfo and is
+-- localised, so this matches nothing on a French or German client and the
+-- search behaves exactly as it did before. That is a missing improvement rather
+-- than a fault, which is why there is no table of translations here to keep in
+-- step with Blizzard.
+local function PlainCut(name)
+	return name and name:match("^Perfect%s+(.+)$") or nil
+end
+
+-- Whether there is anything here that can search.
+--
+-- The fallback below types into Blizzard's own browse box, which does not exist
+-- on this client: the modern auction house replaced BrowseName, so without
+-- Auctionator a click has nowhere to go and silently does nothing. Saying so
+-- beats looking broken.
+local function HaveAuctionator()
+	local api=Auctionator and Auctionator.API and Auctionator.API.v1
+	return (api and (api.MultiSearchAdvanced or api.MultiSearch or api.MultiSearchExact)) and true or false
+end
+
+-- Why a click did nothing, in the order the reasons actually apply.
+local function ExplainNoSearch(name)
+	if not AuctionHouseIsOpen() then
+		ns.Print(L.INSPECT_AH_CLOSED,name)
+	elseif not HaveAuctionator() then
+		ns.Print(L.INSPECT_AH_NEEDS_AUCTIONATOR,name)
+	else
+		ns.Print(L.INSPECT_AH_CLOSED,name)
+	end
+end
+
 local function SearchAuctionHouse(name,howMany,loose)
 	if not (name and name~="") then return false end
 	if not AuctionHouseIsOpen() then return false end
+
+	local plain=PlainCut(name)
 
 	-- A quoted name is Auctionator's own syntax for an exact search, and it
 	-- refuses a term that arrives already wrapped in quotes -- so the name goes
@@ -1164,7 +1210,17 @@ local function SearchAuctionHouse(name,howMany,loose)
 		-- would do anyway, and leaving the field empty keeps the search simple.
 		if howMany and howMany>1 then term.quantity=howMany end
 
-		if pcall(api.MultiSearchAdvanced,AUCTIONATOR_ID,{ term }) then return true end
+		-- Two terms rather than one when the cut has a plain twin. Auctionator
+		-- takes a list and puts each on its own line of the shopping list, so
+		-- the two prices sit next to each other and the cheaper one is obvious.
+		local terms={ term }
+		if plain then
+			local other={ searchString=plain, isExact=not loose }
+			if howMany and howMany>1 then other.quantity=howMany end
+			terms[#terms+1]=other
+		end
+
+		if pcall(api.MultiSearchAdvanced,AUCTIONATOR_ID,terms) then return true end
 	end
 
 	if loose and api and api.MultiSearch then
@@ -1172,7 +1228,9 @@ local function SearchAuctionHouse(name,howMany,loose)
 	end
 
 	if not loose and api and api.MultiSearchExact then
-		if pcall(api.MultiSearchExact,AUCTIONATOR_ID,{ name }) then return true end
+		local both={ name }
+		if plain then both[#both+1]=plain end
+		if pcall(api.MultiSearchExact,AUCTIONATOR_ID,both) then return true end
 	end
 
 	-- No Auctionator: the auction house's own browse tab, filled in and
@@ -1182,7 +1240,11 @@ local function SearchAuctionHouse(name,howMany,loose)
 	local box=_G.BrowseName
 	if not box then return false end
 
-	box:SetText(name)
+	-- One box, so one term -- and the plain name is the better one. Blizzard's
+	-- browse matches on a substring, and "Delicate Pandarian Garnet" is a
+	-- substring of the perfect cut's own name, so typing the plain form finds
+	-- both while typing the perfect form finds only itself.
+	box:SetText(plain or name)
 	box:SetFocus()
 	box:HighlightText(0,0)
 
@@ -1329,6 +1391,11 @@ local function FillSockets(gear,glyphs,class)
 	socketGlyphs=glyphs
 	socketClass=class
 
+	-- Set here rather than when the page was built: Auctionator can be
+	-- disabled between sessions, and a line promising a search that cannot
+	-- happen is worse than no line.
+	page.hint:SetText(HaveAuctionator() and L.INSPECT_AH_HINT or L.INSPECT_AH_HINT_NO_AUCTIONATOR)
+
 	local gemOrder,gemCount,enchants=SocketTally(gear)
 
 	for index,row in ipairs(page.gems) do
@@ -1378,7 +1445,7 @@ local function FillSockets(gear,glyphs,class)
 				else
 					-- Said out loud rather than silently doing nothing, which
 					-- is indistinguishable from a broken button.
-					ns.Print(L.INSPECT_AH_CLOSED,self.gemName)
+					ExplainNoSearch(self.gemName)
 				end
 			end)
 			row:Show()
@@ -1461,7 +1528,7 @@ local function FillSockets(gear,glyphs,class)
 				if SearchAuctionHouse(self.gemName,1,self.gemLoose) then
 					ns.Print(L.INSPECT_AH_SEARCHED,self.gemName)
 				else
-					ns.Print(L.INSPECT_AH_CLOSED,self.gemName)
+					ExplainNoSearch(self.gemName)
 				end
 			end)
 			row:Show()
@@ -1555,7 +1622,7 @@ local function FillSockets(gear,glyphs,class)
 				if SearchAuctionHouse(self.gemName,1) then
 					ns.Print(L.INSPECT_AH_SEARCHED,self.gemName)
 				else
-					ns.Print(L.INSPECT_AH_CLOSED,self.gemName)
+					ExplainNoSearch(self.gemName)
 				end
 			end)
 			row:Show()
@@ -1813,15 +1880,28 @@ local function BuildWindow()
 	frame=CreateFrame("Frame","ArenaPlus_Inspect",UIParent,"BackdropTemplate")
 	frame:Hide()
 	frame:SetSize(WIDTH,HEIGHT)
+	-- The tallest window here, and the only one that never had a scale at
+	-- all: at 660x560 it runs off the bottom of a small screen, taking the
+	-- tab row with it.
+	if ns.FitScale then frame:SetScale(ns.FitScale(WIDTH,HEIGHT,1)) end
 	frame:SetPoint("CENTER")
 	-- Above the ladder, which is also DIALOG and was drawing straight over the
 	-- top of this -- the panel looked transparent when it was simply behind.
 	frame:SetFrameStrata("FULLSCREEN_DIALOG")
 	frame:SetToplevel(true)
 	frame:EnableMouse(true)
+	-- Movable, except when it is hanging off the auction house.
+	--
+	-- Opened from the ladder it is a window in its own right and drags like
+	-- one. Opened from the auction house it is the third panel in a row --
+	-- house, top players, their gems -- and a row you can pull one piece out of
+	-- is a row that ends up wrong.
 	frame:SetMovable(true)
 	frame:RegisterForDrag("LeftButton")
-	frame:SetScript("OnDragStart",frame.StartMoving)
+	frame:SetScript("OnDragStart",function(self)
+		if self.attached then return end
+		self:StartMoving()
+	end)
 	frame:SetScript("OnDragStop",frame.StopMovingOrSizing)
 	ns.StyleAsPanel(frame)
 
@@ -2300,6 +2380,19 @@ function ns.ShowInspect(entry,region,bracket)
 	-- Always opens on the paper doll, whatever tab was left showing last time:
 	-- the row that was clicked is a person, and the gear is what "look at them"
 	-- means.
+	-- Where it opens depends on what opened it, and this is the only place that
+	-- decides. Against the auction house's panel when that panel is up -- the
+	-- third in a row of three -- and a free window in the middle otherwise.
+	--
+	-- Only detaches if it was attached, so a window dragged somewhere while
+	-- reading the ladder stays where it was put.
+	local shelf=_G.ArenaPlus_AuctionPvP
+	if shelf and shelf:IsShown() then
+		if ns.InspectAttachToAuction then ns.InspectAttachToAuction() end
+	elseif frame.attached and ns.InspectDetachFromAuction then
+		ns.InspectDetachFromAuction()
+	end
+
 	ShowPage("character")
 	frame:Show()
 
@@ -2310,6 +2403,44 @@ function ns.ShowInspect(entry,region,bracket)
 	local look={ race=data.r or 0, gender=data.x or 0 }
 	frame.pages.character.hint:SetText(L.INSPECT_HINT_OWN_RACE)
 	DressWhenReady(gear,look)
+end
+
+-- Third in the row, against the auction house's PvP panel.
+--
+-- The chain is the auction house, then the list of top players, then the gems
+-- belonging to whoever was clicked -- so this hangs off that middle panel
+-- rather than off the house, and moves with it.
+--
+-- Anchored, not merely placed: the panel is itself anchored to the house, so
+-- following it keeps all three lined up whatever the user's UI Scale is.
+function ns.InspectAttachToAuction()
+	local shelf=_G.ArenaPlus_AuctionPvP
+	if not (frame and shelf) then return false end
+
+	frame.attached=true
+	frame:ClearAllPoints()
+	-- The same eleven as everywhere else: our opaque layer starts that far in,
+	-- so butting the frames together at zero leaves the width of two borders
+	-- between them.
+	frame:SetPoint("TOPLEFT",shelf,"TOPRIGHT",-11,0)
+	return true
+end
+
+-- Follow the panel when it moves, but only if we were already following it.
+--
+-- Called when the auction house panel re-anchors itself. Without the guard this
+-- would drag a window opened from the ladder across the screen the moment
+-- somebody opened the auction house.
+function ns.InspectReanchor()
+	if frame and frame.attached then ns.InspectAttachToAuction() end
+end
+
+-- Back to being a window of its own.
+function ns.InspectDetachFromAuction()
+	if not frame then return end
+	frame.attached=nil
+	frame:ClearAllPoints()
+	frame:SetPoint("CENTER")
 end
 
 -- Open on a particular tab.

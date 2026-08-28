@@ -1,4 +1,4 @@
-local ADDON_NAME, ns = ...
+﻿local ADDON_NAME, ns = ...
 local L = ns.L
 
 -- Shopping for somebody else's gems, from inside the auction house.
@@ -138,10 +138,31 @@ end
 
 -- ---------------------------------------------------------------- window
 
+-- Anything a previous version stored about where this window sat.
+--
+-- It was briefly draggable and remembered where it landed. Now that it is fixed
+-- to the auction house, a leftover offset is not merely unused -- it is the one
+-- thing that could still put the window somewhere wrong if this ever reads that
+-- table again. Cleared once, rather than left as a trap.
+local function ForgetStoredPosition()
+	if ArenaPlus_SavedVars then ArenaPlus_SavedVars.auctionPvP = nil end
+end
+
+-- Named before they are written, because BuildPanel's drag handler calls
+-- Attach and both of those are defined further down.
+local Attach, OpenPanel
+
 local function BuildPanel()
 	if panel then return panel end
 
-	panel = CreateFrame("Frame", "ArenaPlus_AuctionPvP", UIParent, "BackdropTemplate")
+	-- A child of the auction house when there is one.
+	--
+	-- Parented to UIParent it was only ever *near* the house: its own scale,
+	-- its own coordinates, and an offset tuned by eye on one monitor. A child
+	-- inherits its parent's scale and position, so the two line up at any UI
+	-- Scale and stay lined up if the house moves -- and it hides with the house
+	-- for free.
+	panel = CreateFrame("Frame", "ArenaPlus_AuctionPvP", AuctionHouseFrame or UIParent, "BackdropTemplate")
 	panel:SetSize(PANEL_WIDTH, PANEL_HEIGHT)
 	panel:Hide()
 
@@ -161,12 +182,16 @@ local function BuildPanel()
 	solid:SetPoint("TOPLEFT", panel, "TOPLEFT", 11, -12)
 	solid:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 11)
 	solid:SetColorTexture(0.04, 0.04, 0.05, 1)
+	panel.solid = solid
 
+	-- Takes the mouse, but does not move.
+	--
+	-- It was draggable, and dragging stored where it landed so the position
+	-- survived a reload. That is the wrong trade for a window that belongs to
+	-- another window: every stored position is a chance to be wrong, and "it
+	-- opened somewhere odd" is a worse bug than "it cannot be nudged". Fixed to
+	-- the auction house, there is exactly one place it can be.
 	panel:EnableMouse(true)
-	panel:SetMovable(true)
-	panel:RegisterForDrag("LeftButton")
-	panel:SetScript("OnDragStart", panel.StartMoving)
-	panel:SetScript("OnDragStop", panel.StopMovingOrSizing)
 
 	panel.title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 	panel.title:SetPoint("TOP", 0, -14)
@@ -420,6 +445,246 @@ function ns.AuctionPvPShow(spec)
 	panel:Show()
 end
 
+-- Put it back against the auction house.
+--
+-- Frames and artwork are not the same rectangle, and this is the whole of why
+-- it looked crooked while being anchored perfectly. Measured with
+-- /arena ahalign:
+--
+--   auction house  L36 T844 R836 B306   scale 0.800
+--   top pvp gear   L825 T844 R1075 B470 scale 0.800
+--   horizontal -11.0 (anchored at -11)  vertical 0.0 (anchored at 0)
+--
+-- Both tops on 844 exactly: the frames agreed and the windows still did not
+-- line up. This panel's opaque layer starts 11 in and 12 down from its own
+-- corner, while the auction house draws from textures with no backdrop inset to
+-- read -- its art begins at its frame edge. So the horizontal already
+-- compensated and the vertical never did.
+--
+-- Then measured again, because a correction that assumed which way the art was
+-- offset overshot. What the textures actually say:
+--
+--   auction house  NineSlice top 844   = its frame top
+--   top pvp gear   opaque fill top    -12 from its frame top
+--
+-- The two windows cannot be aligned by both criteria at once, because their
+-- borders are different thicknesses. At 0 the *borders* meet exactly, both on
+-- 844, and our darker fill starts 12 lower. At 12 the *fills* meet and our
+-- border stands 12 proud of theirs.
+--
+-- Settled by looking: -1, 1.
+--
+-- Worth saying that neither reading won. The measurements narrowed each axis to
+-- a choice of two -- borders meeting (0) or fills meeting (-11 across, -12
+-- down) -- and the answer was a unit off *border* to border on both, which is
+-- neither. Two windows with borders of different thicknesses do not have a
+-- correct offset, only one that reads as deliberate, and no amount of reading
+-- texture bounds produces it.
+--
+-- The arithmetic was still worth doing: it is what turned an open-ended nudge
+-- into a one-unit correction from a known reference, and it is what says these
+-- numbers hold at any UI scale rather than only on the monitor they were found
+-- on.
+--
+-- Re-measure or re-nudge with /arena ahalign, which takes <x> <y> and moves the
+-- window live. Both numbers are relative to the auction house's own corner, so
+-- they only need revisiting if Blizzard changes that window's art.
+local ATTACH_X, ATTACH_Y = -1, 1
+
+function Attach()
+	if not (panel and AuctionHouseFrame) then return end
+
+	-- Re-parented as well as re-anchored: the panel may have been built before
+	-- the auction house existed, in which case it is still a child of UIParent
+	-- and would not follow the house at all.
+	if panel:GetParent() ~= AuctionHouseFrame then
+		panel:SetParent(AuctionHouseFrame)
+		panel:SetFrameStrata("FULLSCREEN_DIALOG")
+		panel:SetToplevel(true)
+	end
+
+	ForgetStoredPosition()
+
+	panel:ClearAllPoints()
+	panel:SetPoint("TOPLEFT", AuctionHouseFrame, "TOPRIGHT", ATTACH_X, ATTACH_Y)
+
+	-- Anything already hanging off this one comes with it.
+	if ns.InspectReanchor then ns.InspectReanchor() end
+end
+
+-- Everything that opening it involves, in one place.
+--
+-- It was inline in the button's OnClick, which was fine while clicking the
+-- button was the only way in. Opening with the auction house needs the same
+-- steps, and two copies of them would drift.
+function OpenPanel()
+	BuildPanel()
+	Attach()
+	panel:Show()
+
+	-- Back to your own spec, your last bracket and your own region every time
+	-- it opens, whatever was being looked at when it was closed.
+	local want = Defaults()
+	panel.bracket = want.bracket
+	panel.region = want.region
+
+	local specs = RefreshSpecs()
+
+	-- Matched by id rather than by position: our list is sorted by spec id and
+	-- the game's index is its own ordering.
+	local chosen = specs[1]
+	if want.specID then
+		for _, spec in ipairs(specs) do
+			if spec.id == want.specID then chosen = spec break end
+		end
+	end
+
+	if chosen then
+		ns.AuctionPvPShow(chosen)
+	else
+		-- Said out loud rather than shown as an empty row of nothing.
+		panel.note:SetText(L.AH_PVP_NO_SPECS)
+	end
+end
+
+-- Where the three windows actually are, in the game's own numbers.
+--
+-- The panel anchors TOPLEFT to the auction house's TOPRIGHT, which lines up the
+-- two *frames*. What a player sees is the two backdrops, and a frame is not its
+-- backdrop: Blizzard's windows carry transparent padding, and the portrait on
+-- this one hangs above the frame entirely. So "aligned" by anchor can still
+-- read as crooked, and the correction is whatever the difference turns out to
+-- be rather than whatever looks right in a screenshot.
+--
+--   open the auction house, click a player, then: /arena ahalign
+ns.SlashCommands["ahalign"] = function(argument)
+	-- With a number, move it and look: the alignment that reads best is a
+	-- judgement about two borders of different thicknesses, and that is settled
+	-- by looking rather than by arithmetic. Not saved -- tell me the number
+	-- that wins and it goes in the file, where it belongs.
+	local first, second = (argument or ""):match("^%s*(-?%d+)%s*(-?%d*)%s*$")
+	if first then
+		if second and second ~= "" then
+			ATTACH_X, ATTACH_Y = tonumber(first), tonumber(second)
+		else
+			-- One number is the vertical, which is the axis that needed
+			-- settling first and the one most likely to be tweaked again.
+			ATTACH_Y = tonumber(first)
+		end
+
+		if Attach then Attach() end
+		ns.Print("offset now x=%d y=%d. No number measures instead; the pair is x then y.",
+			ATTACH_X, ATTACH_Y)
+		return
+	end
+
+	local function Say(frame, label)
+		if not frame then
+			ns.Print("  %s: not there", label)
+			return
+		end
+		if not frame:IsShown() then
+			ns.Print("  %s: exists but hidden", label)
+			return
+		end
+
+		ns.Print("  %-14s L%.0f T%.0f R%.0f B%.0f   %.0fx%.0f   scale %.3f",
+			label,
+			frame:GetLeft() or 0, frame:GetTop() or 0,
+			frame:GetRight() or 0, frame:GetBottom() or 0,
+			frame:GetWidth() or 0, frame:GetHeight() or 0,
+			frame:GetEffectiveScale() or 0)
+	end
+
+	local house = AuctionHouseFrame
+	local shelf = _G.ArenaPlus_AuctionPvP
+	local gems  = _G.ArenaPlus_Inspect
+
+	ns.Print("frames, in UI units:")
+	Say(house, "auction house")
+	Say(shelf, "top pvp gear")
+	Say(gems,  "shopping list")
+
+	-- The number that matters. Anchored TOPLEFT to TOPRIGHT, these should be
+	-- zero apart in the vertical and ATTACH_X apart in the horizontal; whatever
+	-- they are instead is the correction to apply.
+	if house and shelf and house:IsShown() and shelf:IsShown() then
+		ns.Print("gaps, house -> panel:")
+		ns.Print("  horizontal %.1f  (anchored at %d)", (shelf:GetLeft() or 0) - (house:GetRight() or 0), ATTACH_X)
+		ns.Print("  vertical   %.1f  (anchored at %d)", (shelf:GetTop() or 0) - (house:GetTop() or 0), ATTACH_Y)
+	end
+
+	if shelf and gems and shelf:IsShown() and gems:IsShown() then
+		ns.Print("gaps, panel -> shopping list:")
+		ns.Print("  horizontal %.1f", (gems:GetLeft() or 0) - (shelf:GetRight() or 0))
+		ns.Print("  vertical   %.1f", (gems:GetTop() or 0) - (shelf:GetTop() or 0))
+	end
+
+	-- Where the paint actually is.
+	--
+	-- The frame numbers above already agreed once while the windows plainly did
+	-- not line up, and guessing which way the art was offset from that made it
+	-- worse. A frame is an invisible rectangle; what a player sees is textures,
+	-- and those have their own edges. So this reads them.
+	local function Extent(frame, label)
+		if not (frame and frame:IsShown()) then return end
+
+		local top, left, right, bottom
+		for _, region in ipairs({ frame:GetRegions() }) do
+			if region.GetObjectType and region:GetObjectType() == "Texture"
+				and region:IsShown() and region:GetTop() then
+				top    = math.max(top or -99999, region:GetTop())
+				bottom = math.min(bottom or 99999, region:GetBottom() or 99999)
+				left   = math.min(left or 99999, region:GetLeft() or 99999)
+				right  = math.max(right or -99999, region:GetRight() or -99999)
+			end
+		end
+
+		if top then
+			ns.Print("  %-14s textures  L%.0f T%.0f R%.0f B%.0f", label, left, top, right, bottom)
+			ns.Print("       vs frame            %+.0f  %+.0f  %+.0f  %+.0f",
+				left - (frame:GetLeft() or 0), top - (frame:GetTop() or 0),
+				right - (frame:GetRight() or 0), bottom - (frame:GetBottom() or 0))
+		else
+			ns.Print("  %-14s no textures of its own (drawn by children)", label)
+		end
+	end
+
+	ns.Print("painted edges, and how far they sit from the frame:")
+	Extent(house, "auction house")
+	Extent(shelf, "top pvp gear")
+
+	-- Modern Blizzard windows put their border in a NineSlice child, which is
+	-- the thing whose top edge a player reads as "the top of the window".
+	if house and house.NineSlice and house.NineSlice:GetTop() then
+		ns.Print("  auction house NineSlice top %.0f  (frame top %.0f, difference %+.0f)",
+			house.NineSlice:GetTop(), house:GetTop() or 0,
+			house.NineSlice:GetTop() - (house:GetTop() or 0))
+	else
+		ns.Print("  auction house has no NineSlice")
+	end
+
+	if shelf and shelf.solid and shelf.solid:GetTop() then
+		ns.Print("  top pvp gear opaque top %.0f  (frame top %.0f, difference %+.0f)",
+			shelf.solid:GetTop(), shelf:GetTop() or 0,
+			shelf.solid:GetTop() - (shelf:GetTop() or 0))
+		ns.Print("  top pvp gear opaque left %.0f  (frame left %.0f, difference %+.0f)",
+			shelf.solid:GetLeft() or 0, shelf:GetLeft() or 0,
+			(shelf.solid:GetLeft() or 0) - (shelf:GetLeft() or 0))
+	end
+
+	-- The horizontal has the same two readings as the vertical had. Border to
+	-- border is our frame left meeting their frame right; fill to fill is 11
+	-- further in, which is what -11 has been doing all along and why the gap
+	-- looked closed while the tops did not.
+	if house and shelf and house:IsShown() and shelf:IsShown() then
+		ns.Print("  borders meet at x=%d, fills meet at x=%d, currently x=%d",
+			0, -11, ATTACH_X)
+	end
+
+	ns.Print("ATTACH_Y is %d. Add whatever the two painted tops differ by.", ATTACH_Y)
+end
+
 -- ---------------------------------------------------------------- the button
 
 local hooked = false
@@ -439,51 +704,14 @@ local function PlaceButton()
 	button:SetText(L.AH_PVP_BUTTON)
 	button:SetPoint("RIGHT", anchor, "LEFT", -4, 0)
 
+	-- The button is now a way to put it *back*, since it opens with the house.
 	button:SetScript("OnClick", function()
 		BuildPanel()
 		if panel:IsShown() then
 			panel:Hide()
 			return
 		end
-
-		-- Beside the auction house rather than over it: the whole point is to
-		-- read one and type into the other.
-		--
-		-- Pulled back rather than pushed out. Both windows carry a border whose
-		-- outer edge is transparent -- ours starts eleven pixels in, and the
-		-- auction house has padding of its own -- so butting the two frames
-		-- together at zero leaves a gap the width of both.
-		--
-		-- Fifteen, settled by looking. Twenty-seven closed the gap completely
-		-- and went too far: the auction house keeps its close button in that
-		-- corner and the panel started covering it.
-		panel:ClearAllPoints()
-		panel:SetPoint("TOPLEFT", AuctionHouseFrame, "TOPRIGHT", -15, 0)
-		panel:Show()
-
-		-- Back to your own spec, your last bracket and your own region every
-		-- time it opens, whatever was being looked at when it was closed.
-		local want = Defaults()
-		panel.bracket = want.bracket
-		panel.region = want.region
-
-		local specs = RefreshSpecs()
-
-		-- Matched by id rather than by position: our list is sorted by spec id
-		-- and the game's index is its own ordering.
-		local chosen = specs[1]
-		if want.specID then
-			for _, spec in ipairs(specs) do
-				if spec.id == want.specID then chosen = spec break end
-			end
-		end
-
-		if chosen then
-			ns.AuctionPvPShow(chosen)
-		else
-			-- Said out loud rather than shown as an empty row of nothing.
-			panel.note:SetText(L.AH_PVP_NO_SPECS)
-		end
+		OpenPanel()
 	end)
 
 	button:SetScript("OnEnter", function(self)
@@ -505,6 +733,16 @@ watcher:RegisterEvent("ADDON_LOADED")
 watcher:SetScript("OnEvent", function(_, event, name)
 	if event == "ADDON_LOADED" and name ~= "Blizzard_AuctionHouseUI" then return end
 	PlaceButton()
+
+	-- Open with the house, rather than waiting to be asked.
+	--
+	-- Only on the house actually opening: ADDON_LOADED fires when the auction
+	-- house UI is first pulled in, which can happen with no auctioneer in
+	-- sight, and a window appearing then would be a window appearing from
+	-- nowhere.
+	if event == "AUCTION_HOUSE_SHOW" and AuctionHouseFrame then
+		OpenPanel()
+	end
 end)
 
 -- Closed with the house it belongs to.

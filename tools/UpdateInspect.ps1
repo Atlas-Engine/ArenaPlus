@@ -64,7 +64,9 @@ $root       = Split-Path $PSScriptRoot -Parent
 # readable. Built once here: nine separate literals is nine chances for one
 # to keep pointing at the old place, and a pass that writes where nothing
 # reads fails silently.
-$data       = Join-Path $root "Data"
+# The data is its own addon now, a sibling of this one, so it can be
+# published without republishing the code.
+$data       = Join-Path (Split-Path $root -Parent) "ArenaPlus_Data"
 $ladderFile = Join-Path $data ("Leaderboard-" + $Region + ".lua")
 $outFile    = Join-Path $data ("Inspect-" + $Region + ".lua")
 $logFile    = Join-Path $PSScriptRoot "UpdateInspect.log"
@@ -905,7 +907,16 @@ $itemSetBody = (($setOfItem.Keys | Sort-Object { [int]$_ }) | ForEach-Object {
 $recordBody = ($records -join "`n")
 
 $out = @"
-local ADDON_NAME, ns = ...
+-- Shipped as its own addon so the ladder can be republished without reshipping
+-- the code: this file was half of every ArenaPlus release.
+--
+-- Two addons cannot see each other's namespace, so the tables go on a global
+-- and ArenaPlus copies them across as it loads. Same reason ArenaPlusAPI is a
+-- global -- see the note above it in ArenaPlus\Core.lua.
+--
+-- The local keeps its name so the generated body below needs no changes.
+ArenaPlusData = ArenaPlusData or {}
+local ns = ArenaPlusData
 
 -- Gear, enchants, gems, talents and glyphs for the top $PerSpec of every spec
 -- in every bracket, written by tools\UpdateInspect.ps1 from Blizzard's

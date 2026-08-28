@@ -1,5 +1,28 @@
 package-as: ArenaPlus
 
+# So installing ArenaPlus also installs the data.
+#
+# The packager forwards this to CurseForge, which shows it as a required
+# relation and has its app pull the data addon in alongside this one. It adds no
+# files to the download -- it is a statement about what else is needed, not an
+# embed.
+#
+# The value is the CurseForge project *slug*, not the folder name, so the
+# project has to actually be called this. If the slug ends up different, this
+# line is what has to change.
+#
+# Required rather than optional on purpose: without the data the ladder is
+# empty, which reads as a broken addon. Note this is a different thing from the
+# `## OptionalDeps` line in the .toc -- that one is about load order inside the
+# game, and is deliberately optional so a missing or disabled data addon
+# degrades to an empty ladder instead of refusing to load.
+#
+# Deliberately NOT an `externals` entry. That would copy the data into this
+# package at build time and put 2.4 MB back into every release, which is the
+# thing the split was for.
+required-dependencies:
+  - arenaplus-data
+
 ignore:
   # The data pipeline. It has to live in the repository, because that is what
   # the scheduled GitHub Action checks out and runs -- but it has no business
@@ -7,10 +30,12 @@ ignore:
   # a PowerShell script against the Battle.net API, and it is about 200 KB of
   # things they cannot use.
   #
-  # Note what is NOT ignored: Cutoffs-*, Leaderboard-*, Specs-* and Inspect-*
-  # at the addon root. Those are the pipeline's *output* and the addon is
-  # useless without them -- an addon cannot reach the network, so the shipped
-  # tables are the data.
+  # The pipeline's *output* no longer lives here at all: Cutoffs-*,
+  # Leaderboard-*, Specs-* and Inspect-* moved to the ArenaPlus_Data addon so
+  # the ladder can be republished without reshipping this. What stays in Data\
+  # is TalentGrid.lua and GlyphData.lua, which are generated but only when
+  # Blizzard changes a talent or a glyph -- they ship here, and must not be
+  # ignored.
   - tools
 
   # Repository furniture the game never reads.

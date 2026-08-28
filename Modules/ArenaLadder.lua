@@ -1,4 +1,4 @@
-local ADDON_NAME, ns = ...
+﻿local ADDON_NAME, ns = ...
 local L = ns.L
 
 -- The ladder for whichever bracket the Rated page is showing, down to the last
@@ -941,7 +941,9 @@ local function CreateWindow()
 	-- something hidden and so invisible, and clicking the button appeared to do
 	-- nothing at all.
 	local frame=CreateFrame("Frame","ArenaPlus_ArenaLadder",UIParent,"BackdropTemplate")
-	frame:SetScale(SCALE)
+	-- Never wider or taller than the screen it opens on. SCALE is what to
+	-- aim for, not what to insist on.
+	frame:SetScale(ns.FitScale and ns.FitScale(WIDTH,HEIGHT,SCALE) or SCALE)
 	window=frame
 	frame:Hide()
 	frame:SetSize(WIDTH,HEIGHT)
@@ -1373,7 +1375,31 @@ local function CreateWindow()
 	frame.pageLabel:SetTextColor(0.7,0.7,0.7)
 
 	frame.source=frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-	frame.source:SetPoint("BOTTOMLEFT",frame,"BOTTOMLEFT",16,12)
+	-- To the history, keeping the bracket.
+	--
+	-- The two windows already share one bracket, held in the core -- but both
+	-- of them clear it in OnHide, so closing this one to open the other throws
+	-- it away and the history opens on whatever was last played. Hence reading
+	-- it before the swap and putting it back after: the alternative is teaching
+	-- OnHide the difference between being closed and being replaced, which is a
+	-- thing neither window can see.
+	frame.swapButton=PageButton(L.LADDER_SWAP,96)
+	frame.swapButton:SetPoint("BOTTOMLEFT",frame,"BOTTOMLEFT",16,8)
+	frame.swapButton:SetScript("OnClick",function()
+		local bracket=ns.ViewBracket and ns.ViewBracket()
+
+		if ns.ToggleArenaHistory then ns.ToggleArenaHistory() end
+
+		if bracket and ns.SetViewBracket then
+			ns.SetViewBracket(bracket)
+			if ns.RefreshArenaHistory then ns.RefreshArenaHistory() end
+		end
+	end)
+
+	-- Beside the button now rather than in the corner it used to have to
+	-- itself. The stamp is short and grey; the button is the thing being
+	-- looked for.
+	frame.source:SetPoint("BOTTOMLEFT",frame.swapButton,"BOTTOMRIGHT",10,4)
 	-- Stopped short of the buttons at the other end, so a longer line is cut
 	-- rather than drawn over them.
 	frame.source:SetPoint("RIGHT",frame.mineButton,"LEFT",-10,0)

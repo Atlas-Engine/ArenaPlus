@@ -4,22 +4,18 @@
 ## Version: 1.0
 ## Notes: Rated arena and battleground tracking - match history with specs and crowd control, live title cutoffs and the ladder.
 ## SavedVariables: ArenaPlus_SavedVars
+# Loads ArenaPlus_Data first when it is installed. Optional rather than a hard
+# dependency: without it the addon still runs, with an empty ladder and no
+# cutoffs, which is a better failure than refusing to load at all.
+## OptionalDeps: ArenaPlus_Data
 
 # Core
 #
-# Data\ holds what the tools produce: the ladder, the cutoffs, the specs, the
-# gear, and the two tables harvested once from the client. None of it is
-# hand-written -- edit the scripts in tools\, not these.
+# The ladder, the cutoffs, the specs and the gear now live in ArenaPlus_Data,
+# which is republished on its own -- they were half of every release here. What
+# is left in Data\ is the two tables harvested once from the client, which only
+# change if Blizzard changes a talent or a glyph.
 Locales.lua
-Data\Cutoffs-us.lua
-Data\Cutoffs-eu.lua
-Data\Leaderboard-us.lua
-Data\Leaderboard-eu.lua
-Data\Specs-us.lua
-Data\Specs-eu.lua
-Data\Inspect-us.lua
-Data\Inspect-eu.lua
-# After the Inspect files, so its grid replaces the one they used to carry.
 Data\TalentGrid.lua
 Data\GlyphData.lua
 HardCC.lua

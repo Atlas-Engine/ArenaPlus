@@ -1,4 +1,4 @@
-local ADDON_NAME, ns = ...
+﻿local ADDON_NAME, ns = ...
 ns.L = {}
 local L = ns.L
 
@@ -121,6 +121,7 @@ L.MINIMAP_TIP_DRAG        = "Drag: move it around the minimap"
 -- Arena history
 ----------------------------------------------------------------
 L.HISTORY_TITLE           = "Arena history"
+L.HISTORY_SWAP            = "Leaderboard"
 L.HISTORY_ENABLE          = "Show recent matches beside the panel"
 L.HISTORY_DESC            = "The last ten matches of the selected bracket, against the side of the Rated page: rating and change, your comp against theirs, and whether it was a win."
 
@@ -227,6 +228,11 @@ L.INSPECT_NO_GLYPHS       = "No glyphs."
 -- No "with the auction house open" any more: the tab this sits on only exists
 -- there.
 L.INSPECT_AH_HINT         = "Click any gem, enchant or glyph to search the auction house for it."
+-- Searching goes through Auctionator. Blizzard's own browse box is gone on this
+-- client -- the modern auction house replaced it -- so without Auctionator
+-- there is nothing to type into and a click can only be explained, not obeyed.
+L.INSPECT_AH_HINT_NO_AUCTIONATOR = "Install Auctionator to search for these from here."
+L.INSPECT_AH_NEEDS_AUCTIONATOR = "%s -- searching the auction house needs Auctionator installed."
 L.INSPECT_AH_SEARCHED     = "Searching the auction house for %s."
 L.INSPECT_AH_SEARCHED_COUNT = "Searching the auction house for %d x %s."
 L.INSPECT_AH_CLOSED       = "%s -- open the auction house and click again to search for it."
@@ -324,6 +330,9 @@ L.LADDER_SUBTITLE         = "top %d"
 -- The button that goes to your own place, which the window used to do by
 -- itself every time it opened.
 L.LADDER_MINE             = "My rank"
+-- Each window names the other, so the pair reads as two views of one thing
+-- rather than two unrelated windows.
+L.LADDER_SWAP             = "History"
 L.LADDER_PAGE             = "page %d of %d"
 -- Tier colour, rank, rating. Said on the source line rather than in the list:
 -- the rows are a snapshot and stay one, and this is the live number.

@@ -38,6 +38,12 @@ A line in chat saying what the match did to your rating, where that puts you, yo
 ### 🧭 Getting around
 A gladiator helmet on the minimap: left-click for your history, right-click for the ladder. Or `/arena`.
 
+## About ArenaPlus Data
+
+The ladder itself lives in a companion addon, [ArenaPlus_Data](https://github.com/Atlas-Engine/ArenaPlus_Data), which your addon manager installs alongside this one. It is kept separate so the ladder can be refreshed without reshipping the addon — it was half of every release.
+
+You should not have to think about it. If it is ever missing or disabled, ArenaPlus still loads and runs; you just get an empty ladder and no cutoffs until it is back.
+
 ## For other addon authors
 
 ArenaPlus exposes `ArenaPlusAPI` — a small, stable global for looking a character up on the ladder by name, realm and region. [SocialPlus](https://github.com/Atlas-Engine/socialplus) uses it to put rated standings in the friends list. It is versioned, hands out copies rather than live rows, and is safe to call when ArenaPlus is absent.
@@ -46,7 +52,7 @@ ArenaPlus exposes `ArenaPlusAPI` — a small, stable global for looking a charac
 
 Blizzard's own Game Data API — the leaderboards, the reward cutoffs, and the character profiles behind gear and specs. Nothing is scraped from a third-party site.
 
-What they produce lives in `Data/` — the ladder, the cutoffs, the specs, the gear, plus two tables harvested once from the client. None of it is hand-written; edit the scripts, not the tables.
+What they produce lives in [ArenaPlus_Data](https://github.com/Atlas-Engine/ArenaPlus_Data) — the ladder, the cutoffs, the specs and the gear. What stays in `Data/` here is `TalentGrid.lua` and `GlyphData.lua`, harvested once from the client and only regenerated when Blizzard changes a talent or a glyph. None of it is hand-written; edit the scripts, not the tables.
 
 The scripts themselves live in `tools/` and are not part of the download. They need a Battle.net API client, which is free and self-service; `tools/blizzard-credentials.example.txt` explains how to get one. **A client secret is a password — it never belongs in this repository.**
 

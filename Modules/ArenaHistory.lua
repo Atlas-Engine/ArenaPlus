@@ -1,4 +1,4 @@
-local ADDON_NAME, ns = ...
+﻿local ADDON_NAME, ns = ...
 local L = ns.L
 
 -- Recent matches: a short list against the side of the PvP panel while the
@@ -2306,7 +2306,9 @@ local function CreateWindow()
 	-- a child of the panel is a child of the PvP frame, and opened from the
 	-- minimap with that closed it would be shown inside something hidden.
 	local frame=CreateFrame("Frame","ArenaPlus_ArenaHistoryFull",UIParent,"BackdropTemplate")
-	frame:SetScale(SCALE)
+	-- 850x460 at 1.15 wants 978x529, which does not fit a 1280x720 screen
+	-- or a high UI Scale. Scaled down only as far as it has to be.
+	frame:SetScale(ns.FitScale and ns.FitScale(850,460,SCALE) or SCALE)
 	window=frame
 	frame:Hide()
 	-- Wide enough for the columns an expanded match needs: the healing one
@@ -2389,6 +2391,24 @@ local function CreateWindow()
 	local close=CreateFrame("Button",nil,frame,"UIPanelCloseButton")
 	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0)
 
+	-- To the ladder, keeping the bracket. The mirror of the button on the other
+	-- window, and for the same reason: both windows clear the shared bracket as
+	-- they hide, so it is read before the swap and put back after.
+	frame.swapButton=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
+	frame.swapButton:SetSize(96,20)
+	frame.swapButton:SetText(L.HISTORY_SWAP)
+	frame.swapButton:SetPoint("BOTTOMLEFT",frame,"BOTTOMLEFT",16,12)
+	frame.swapButton:SetScript("OnClick",function()
+		local bracket=ns.ViewBracket and ns.ViewBracket()
+
+		if ns.ToggleLadder then ns.ToggleLadder() end
+
+		if bracket and ns.SetViewBracket then
+			ns.SetViewBracket(bracket)
+			if ns.RefreshLadder then ns.RefreshLadder() end
+		end
+	end)
+
 	frame.empty=frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
 	frame.empty:SetPoint("TOPLEFT",frame,"TOPLEFT",18,EMPTY_TOP)
 	frame.empty:SetTextColor(0.55,0.55,0.55)
@@ -2396,7 +2416,8 @@ local function CreateWindow()
 
 	local scroll=CreateFrame("ScrollFrame","ArenaPlus_ArenaHistoryScroll",frame,"UIPanelScrollFrameTemplate")
 	scroll:SetPoint("TOPLEFT",frame,"TOPLEFT",16,LIST_TOP)
-	scroll:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",-36,16)
+	-- Room at the foot for the swap button. The list gives up 28 of its 460.
+	scroll:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",-36,44)
 
 	local content=CreateFrame("Frame",nil,scroll)
 	content:SetSize(790,10)

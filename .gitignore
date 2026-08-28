@@ -42,18 +42,18 @@ desktop.ini
 
 # Deliberately NOT ignored, despite being generated:
 #
-#   Cutoffs.lua
-#   Leaderboard.lua
+#   Data\TalentGrid.lua
+#   Data\GlyphData.lua
 #
-# Both are written by tools\UpdateCutoffs.ps1 and tools\UpdateLeaderboard.ps1,
-# which looks like a reason to keep them out of the repository. It is the
-# opposite. Addons cannot reach the network, so these files *are* the data --
-# somebody installing from CurseForge has no scripts, no scheduled task and no
-# way to produce them. Ignore them and the addon ships with no cutoffs and an
-# empty ladder.
+# Both are harvested from the client, which looks like a reason to keep them
+# out of the repository. It is the opposite. Addons cannot reach the network,
+# so these files *are* the data -- somebody installing from CurseForge has no
+# scripts and no way to produce them.
 #
-# They are committed on purpose, and whatever ends up doing the release should
-# make sure the newest scrape is in the build.
+# They only change when Blizzard changes a talent or a glyph, which is why they
+# still ship here. The ladder, the cutoffs, the specs and the gear change every
+# few minutes and no longer live in this repository at all -- they are the
+# ArenaPlus_Data addon, released on its own.
 
 # Left over from the talent solver, which was deleted once the client turned
 # out to answer GetTalentInfoByID directly. Nothing reads it any more.
