@@ -148,10 +148,16 @@ class Dashboard : Form
     const string TaskInspectUS = "ArenaPlus Inspect US";
     const string TaskInspectEU = "ArenaPlus Inspect EU";
 
+    // The step that puts it all on GitHub, and the only one with no row here.
+    // Which is why four hours of it failing looked exactly like nothing being
+    // wrong: the ladder was current on disk, and this window only ever showed
+    // what was on disk.
+    const string TaskPublish = "ArenaPlus Publish";
+
     readonly string tools;
     readonly string root;
 
-    Label summary, quota, footer;
+    Label summary, quota, footer, publishNote;
     readonly List<TaskRow> rows = new List<TaskRow>();
 
     // One line per section: what that job spent last time, and what is left of
@@ -287,6 +293,88 @@ class Dashboard : Form
         return y + 34;
     }
 
+    // One row, because publishing has no regions -- it pushes whatever both
+    // passes have written.
+    int AddPublishSection(int y)
+    {
+        AddLabel("Publishing to GitHub", 16, y, 300, 20, true, false);
+        AddLabel("Copies what the passes wrote into the ArenaPlus_Data repository, commits, tags and " +
+                 "pushes it. Runs on its own clock, so what is on GitHub can be up to one interval " +
+                 "behind what is on disk. Keeps the newest ten tags and deletes the rest.",
+                 16, y + 22, 596, 32, false, true);
+        y += 58;
+
+        var row = new TaskRow();
+        row.Region = "";
+        row.Kind = "publish";
+        row.Task = TaskPublish;
+
+        row.Status = AddLabel("", 46, y + 2, 250, 20, false, false);
+        row.Every = AddEvery(302, y, EveryName);
+        row.Run = AddButton("Run now", 458, y, 92, row.Task);
+        row.Halt = AddStop(556, y, 60, row);
+
+        // Never shown -- this pass reports no progress -- but the tick loop
+        // expects every row to have one.
+        row.Bar = new ProgressBar();
+        row.Bar.Location = new Point(46, y + 22);
+        row.Bar.Size = new Size(570, 6);
+        row.Bar.Visible = false;
+        Controls.Add(row.Bar);
+
+        rows.Add(row);
+        y += 34;
+
+        publishNote = AddLabel("", 46, y, 570, 20, false, true);
+        return y + 34;
+    }
+
+    // What the publish log says happened last, and whether anything has been
+    // written since.
+    //
+    // That log is the only record there is: the task reports wscript's exit
+    // code, which is zero whatever PowerShell did inside it.
+    string PublishState()
+    {
+        string log = Path.Combine(tools, "Publish-Data.log");
+        if (!File.Exists(log)) return "nothing recorded yet";
+
+        string published = null, failed = null;
+        try
+        {
+            foreach (string line in File.ReadAllLines(log))
+            {
+                if (line.Contains("Published ")) { published = line; failed = null; }
+                else if (line.Contains("FAILED:")) { failed = line; }
+            }
+        }
+        catch { return "log unreadable"; }
+
+        if (failed != null) return "last run FAILED -- see Publish-Data.log";
+        if (published == null) return "nothing published yet";
+
+        DateTime when;
+        if (published.Length < 19 || !DateTime.TryParse(published.Substring(0, 19), out when))
+            return published;
+
+        Match v = Regex.Match(published, "Published ([0-9.]+)");
+        string tag = v.Success ? v.Groups[1].Value : "?";
+
+        // Anything written since that publish is waiting for the next one.
+        int waiting = 0;
+        try
+        {
+            foreach (string f in Directory.GetFiles(root, "*.lua"))
+                if (File.GetLastWriteTime(f) > when) waiting++;
+        }
+        catch { }
+
+        return waiting == 0
+            ? string.Format("GitHub has {0}, and nothing has changed since", tag)
+            : string.Format("GitHub has {0} -- {1} file(s) written since, waiting for the next run",
+                            tag, waiting);
+    }
+
     void BuildLayout()
     {
         // Which log each job writes what it spent into.
@@ -306,6 +394,8 @@ class Dashboard : Form
             "About 1,100 requests a region, and the only pass with no incremental mode: builds change, " +
             "so every run re-asks about everybody.",
             "inspect", TaskInspectUS, TaskInspectEU);
+
+        y = AddPublishSection(y);
 
         // Filled in from the tasks themselves, then wired up. Wiring after
         // filling, so setting the initial selection does not read as the user
@@ -951,8 +1041,26 @@ class Dashboard : Form
                 if (m.Success) read = m.Groups[1].Value;
             }
 
+            // Only the specs table.
+            //
+            // This file carries three: the spec slug list, LOOKS_BY_REGION --
+            // race and gender for the same characters -- and SPECS_BY_REGION.
+            // Counting "]=" across the whole file summed the looks with the
+            // specs, which is how this came to report 169% of the ladder as
+            // having a spec. It read zero before the path above was corrected,
+            // so the double count never had a chance to show.
             int known = 0;
-            if (File.Exists(specs)) known = Regex.Matches(SafeRead(specs), "\\]=").Count;
+            if (File.Exists(specs))
+            {
+                string body = SafeRead(specs);
+                int from = body.IndexOf("SPECS_BY_REGION[\"" + region + "\"]");
+                int open = from >= 0 ? body.IndexOf('{', from) : -1;
+                // The table's closing brace is the first one at the start of a
+                // line -- every entry inside it is indented.
+                int close = open >= 0 ? body.IndexOf("\n}", open) : -1;
+                if (close > open)
+                    known = Regex.Matches(body.Substring(open, close - open), "\\]=").Count;
+            }
 
             int withSpec = rows > 0 ? (int)Math.Round(100.0 * known / rows) : 0;
             parts.Add(string.Format("{0}: {1} places, {2} with a spec ({3}%)   read {4}",
@@ -1164,6 +1272,7 @@ class Dashboard : Form
 
 
         summary.Text = GetSummary();
+        if (publishNote != null) publishNote.Text = PublishState();
 
         ticks = (ticks + 1) % 10;
         if (ticks == 1)

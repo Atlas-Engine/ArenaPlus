@@ -123,6 +123,40 @@ try {
 
     Say ""
     Say "Published $version. CurseForge builds from the tag on its own."
+
+    # Keep the newest few tags and let the rest go.
+    #
+    # A tag here names a snapshot of a file that is rewritten every quarter of
+    # an hour, so its worth decays fast: the newest is the only one anybody
+    # would ever check out, and a year of them is thousands of refs standing
+    # for nothing. Deleting a tag does not touch the commit it pointed at --
+    # the history stays whole, only the names go.
+    #
+    # Matched on the timestamp shape rather than "every tag", so a hand-made
+    # tag of any other form is left alone.
+    #
+    # In its own try: the publish above has already succeeded and been pushed,
+    # and failing to tidy up afterwards is not a reason to report that as a
+    # failure.
+    try {
+        $keep = 10
+        $mine = @(git tag --list |
+            Where-Object { $_ -match '^\d{4}\.\d{2}\.\d{2}\.\d{4}$' } |
+            Sort-Object -Descending)
+
+        if ($mine.Count -gt $keep) {
+            $drop = @($mine | Select-Object -Skip $keep)
+
+            # One push carrying every deletion, rather than one push each.
+            $refs = $drop | ForEach-Object { ":refs/tags/$_" }
+            git push -q origin @refs
+            foreach ($tag in $drop) { git tag -d $tag | Out-Null }
+
+            Say ("Pruned {0} old tag(s); the newest {1} remain." -f $drop.Count, $keep)
+        }
+    } catch {
+        Say ("Could not prune old tags: " + $_.Exception.Message)
+    }
 } finally {
     Pop-Location
 }
