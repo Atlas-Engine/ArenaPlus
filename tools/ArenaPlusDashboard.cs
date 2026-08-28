@@ -195,7 +195,13 @@ class Dashboard : Form
     public Dashboard()
     {
         tools = Path.GetDirectoryName(Application.ExecutablePath);
-        root  = Path.GetDirectoryName(tools);
+
+        // Where the ladder and the specs are read from for the summary at the
+        // bottom. Not this addon: they moved out to ArenaPlus_Data, which is a
+        // sibling of it rather than anything underneath. Pointing here at the
+        // addon that holds the scripts is why the summary read nought places,
+        // nought with a spec, for every region.
+        root  = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(tools)), "ArenaPlus_Data");
 
         Text = "ArenaPlus data";
         ClientSize = new Size(640, 690);
