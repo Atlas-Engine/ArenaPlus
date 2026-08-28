@@ -29,7 +29,30 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-function Say($text) { Write-Host $text }
+# The scheduled run goes through RunHidden.vbs, which creates no console at all
+# -- so everything written to the host goes nowhere, and a failure looks exactly
+# like a success. The task reports wscript's exit code, which is 0 whatever
+# PowerShell did inside it.
+#
+# That is how four hours of publishes were lost in silence: the data passes kept
+# writing into the live folder, this never copied any of it, and nothing said
+# so. Same convention as the update passes -- a log beside the script.
+$logFile = Join-Path $PSScriptRoot "Publish-Data.log"
+
+function Say($text) {
+    Write-Host $text
+    Add-Content -Path $logFile -Value ("{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $text) -Encoding utf8
+}
+
+# Logs the throw before it dies, which is the whole point. Without this the
+# guards below fail into nothing.
+trap {
+    Say ("FAILED: " + $_.Exception.Message)
+    if ($_.InvocationInfo) { Say ("  " + $_.InvocationInfo.PositionMessage.Trim()) }
+    break
+}
+
+Say "--- run starting ---"
 
 if (-not (Test-Path $Repo))  { throw "No repository at $Repo" }
 if (-not (Test-Path $Live))  { throw "No generated data at $Live" }
@@ -57,14 +80,24 @@ Push-Location $Repo
 try {
     # Anything actually different, including a file the copy above skipped
     # because it was already in place but never committed.
+    # -WhatIf deliberately copies nothing, so git has nothing to notice. Asking
+    # git anyway is how -WhatIf came to answer "unchanged" however much had
+    # actually changed -- which makes the one switch meant for checking this
+    # script the one thing that cannot. The copy pass above is what knows.
     $dirty = git status --porcelain
-    if (-not $dirty) {
+    $changed = if ($WhatIf) { ($copied -gt 0) -or $dirty } else { $dirty }
+
+    if (-not $changed) {
         Say "Data unchanged -- nothing to publish."
         return
     }
 
-    Say "$copied file(s) refreshed:"
-    $dirty -split "`n" | Where-Object { $_ } | ForEach-Object { Say "   $_" }
+    if ($WhatIf) {
+        Say "$copied file(s) would be refreshed."
+    } else {
+        Say "$copied file(s) refreshed:"
+        $dirty -split "`n" | Where-Object { $_ } | ForEach-Object { Say "   $_" }
+    }
 
     # Sortable, unique, and readable as a timestamp at a glance. A data release
     # has no semantic version to bump -- there are no features in it.
