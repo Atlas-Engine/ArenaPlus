@@ -258,8 +258,10 @@ class Dashboard : Form
                    string taskUS, string taskEU)
     {
         AddLabel(heading, 16, y, 300, 20, true, false);
-        AddLabel(what, 16, y + 22, 596, 32, false, true);
-        y += 58;
+        // 46, not 32: every one of these descriptions runs to three lines, and
+        // two lines' worth of box cut the last one off in all of them.
+        AddLabel(what, 16, y + 22, 596, 46, false, true);
+        y += 72;
 
         foreach (string region in new[] { "US", "EU" })
         {
@@ -301,8 +303,8 @@ class Dashboard : Form
         AddLabel("Copies what the passes wrote into the ArenaPlus_Data repository, commits, tags and " +
                  "pushes it. Runs on its own clock, so what is on GitHub can be up to one interval " +
                  "behind what is on disk. Keeps the newest ten tags and deletes the rest.",
-                 16, y + 22, 596, 32, false, true);
-        y += 58;
+                 16, y + 22, 596, 46, false, true);
+        y += 72;
 
         var row = new TaskRow();
         row.Region = "";
@@ -357,7 +359,9 @@ class Dashboard : Form
         if (published.Length < 19 || !DateTime.TryParse(published.Substring(0, 19), out when))
             return published;
 
-        Match v = Regex.Match(published, "Published ([0-9.]+)");
+        // The tag's own shape. "[0-9.]+" also ate the full stop that ends the
+        // sentence after it, so the line read "GitHub has 2026.08.28.1747.,".
+        Match v = Regex.Match(published, @"Published (\d{4}\.\d{2}\.\d{2}\.\d{4})");
         string tag = v.Success ? v.Groups[1].Value : "?";
 
         // Anything written since that publish is waiting for the next one.
