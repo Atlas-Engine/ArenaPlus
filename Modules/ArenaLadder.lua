@@ -1560,6 +1560,19 @@ function ns.CloseLadder()
 	if window and window:IsShown() then window:Hide() end
 end
 
+-- Put back where it belongs when the panel arrives or leaves.
+--
+-- Anchor runs once, when the window opens. Opened from the minimap with no
+-- Rated page up there was nothing to sit beside, so it centred itself -- and
+-- opening the Rated page afterwards laid the panel straight over it.
+--
+-- IsShown rather than IsVisible on purpose: a window anchored to the panel is
+-- a child of it, so while the panel is hidden this one is invisible but still
+-- shown, and it is exactly the window that needs moving back to the middle.
+function ns.ReanchorLadder()
+	if window and window:IsShown() then Anchor(window) end
+end
+
 
 ns.RefreshLadder=Refresh
 

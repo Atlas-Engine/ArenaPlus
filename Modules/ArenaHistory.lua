@@ -2742,6 +2742,21 @@ end
 local SETTLE_SECONDS = 0.1
 local settleAt
 
+-- Both full windows anchor themselves once, at the moment they open: beside
+-- the panel where there is one, centred on the screen where there is not.
+-- Neither noticed the panel turning up afterwards, so opening the Rated page
+-- underneath an open window laid the panel over the top of it.
+--
+-- The other direction matters just as much, and is what makes this a pair
+-- rather than a single call on the way out. A window anchored to the panel is
+-- parented to it, and a child of a hidden frame is hidden -- so a window left
+-- attached when the page closes would vanish with it instead of returning to
+-- the middle of the screen.
+local function ReanchorWindows()
+	if window and window:IsShown() then AnchorFull(window) end
+	if ns.ReanchorLadder then ns.ReanchorLadder() end
+end
+
 local function UpdateVisibility()
 	local rated=ConquestQueueFrame and ConquestQueueFrame:IsVisible()
 	local wanted=(module.db.enabled and rated) and true or false
@@ -2750,6 +2765,9 @@ local function UpdateVisibility()
 		settleAt=nil
 		if panel then panel:Hide() end
 		if button then button:Hide() end
+		-- After the hide, so anything still attached reads the panel as gone
+		-- and goes back to the middle rather than hiding with it.
+		ReanchorWindows()
 		return
 	end
 
@@ -2772,6 +2790,10 @@ local function UpdateVisibility()
 
 	panel:Show()
 	if button then button:Show() end
+
+	-- After the show, so a window that opened while there was nothing to sit
+	-- beside now finds there is.
+	ReanchorWindows()
 end
 
 ----------------------------------------------------------------
