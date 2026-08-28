@@ -183,6 +183,10 @@ local BAND_HEIGHT = 32
 local LIST_TOP    = -(BAND_INSET+BAND_HEIGHT+8)
 local EMPTY_TOP   = LIST_TOP-2
 local BRACKET_X  = 250
+-- Wider than the ladder's, because "Leaderboard" is a longer word than
+-- "History". Both sit in the same place: the bracket row, left of 2v2.
+local SWAP_W     = 88
+local SWAP_GAP   = 6
 local rows={}
 local fullRows={}
 local selectedAt   -- the match expanded in the full window
@@ -201,6 +205,50 @@ local function Store()
 	local store=module.db.chars[key] or {}
 	module.db.chars[key]=store
 	return store
+end
+
+-- Everybody this account has actually watched play, and what they played.
+--
+-- GetArenaOpponentSpec answers for the character standing in front of you, so
+-- these cannot be guessed or stale. The shipped spec file can be both.
+--
+-- Every character on the account, not only the one logged in: an alt's matches
+-- are evidence about the same opponents.
+local observed
+
+function ns.ForgetObservedSpecs() observed=nil end
+
+function ns.ObservedSpecs()
+	if observed then return observed end
+
+	observed={}
+	local at={}
+
+	for _,store in pairs((module.db and module.db.chars) or {}) do
+		for _,list in pairs(store.matches or {}) do
+			for _,match in ipairs(list) do
+				local when=match.at or 0
+				for _,side in ipairs({ match.mine, match.theirs }) do
+					for _,player in ipairs(side or {}) do
+						local spec=tonumber(player.spec)
+						-- Character names cannot contain a hyphen, so the
+						-- first one separates the realm -- which can.
+						local name,realm=(player.n or ""):match("^([^-]+)-(.+)$")
+						local key=spec and name and ns.SpecKey and ns.SpecKey(name,realm)
+
+						-- The most recent sighting wins, so somebody who
+						-- respecced reads as what they are now.
+						if key and when>=(at[key] or -1) then
+							observed[key]=spec
+							at[key]=when
+						end
+					end
+				end
+			end
+		end
+	end
+
+	return observed
 end
 
 local function History(bracket)
@@ -2378,7 +2426,7 @@ local function CreateWindow()
 
 	-- On the right of this one: its heading already carries the record, the
 	-- count and today's games, and there is no room left after them.
-	frame.UpdateBrackets=ns.BuildBracketPicker(frame,"TOPLEFT",BRACKET_X,HEADER_TOP)
+	frame.UpdateBrackets=ns.BuildBracketPicker(frame,"TOPLEFT",BRACKET_X+SWAP_W+SWAP_GAP,HEADER_TOP)
 
 	-- Today's games, beside the season's. The stamp on each match is what
 	-- decides the day, so this needs nothing kept between sessions.
@@ -2395,9 +2443,9 @@ local function CreateWindow()
 	-- window, and for the same reason: both windows clear the shared bracket as
 	-- they hide, so it is read before the swap and put back after.
 	frame.swapButton=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
-	frame.swapButton:SetSize(96,20)
+	frame.swapButton:SetSize(SWAP_W,20)
 	frame.swapButton:SetText(L.HISTORY_SWAP)
-	frame.swapButton:SetPoint("BOTTOMLEFT",frame,"BOTTOMLEFT",16,12)
+	frame.swapButton:SetPoint("TOPLEFT",frame,"TOPLEFT",BRACKET_X,HEADER_TOP)
 	frame.swapButton:SetScript("OnClick",function()
 		local bracket=ns.ViewBracket and ns.ViewBracket()
 
@@ -2416,8 +2464,9 @@ local function CreateWindow()
 
 	local scroll=CreateFrame("ScrollFrame","ArenaPlus_ArenaHistoryScroll",frame,"UIPanelScrollFrameTemplate")
 	scroll:SetPoint("TOPLEFT",frame,"TOPLEFT",16,LIST_TOP)
-	-- Room at the foot for the swap button. The list gives up 28 of its 460.
-	scroll:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",-36,44)
+	-- The 28 the list gave up for the swap button, returned: that button is
+	-- in the bracket row now and the foot is empty again.
+	scroll:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",-36,16)
 
 	local content=CreateFrame("Frame",nil,scroll)
 	content:SetSize(790,10)
@@ -2978,6 +3027,8 @@ function module:OnEnable()
 		end
 
 		local list=History(info.bracket)
+		-- A new match is new evidence about who plays what.
+		if ns.ForgetObservedSpecs then ns.ForgetObservedSpecs() end
 		list[#list+1]={
 			at     = time(),
 			r      = info.rating,

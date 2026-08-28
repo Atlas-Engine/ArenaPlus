@@ -78,6 +78,11 @@ local DIVIDER_TOP  = COLUMNS_TOP-12                   -- the rule beneath them
 local LIST_TOP     = DIVIDER_TOP-6                    -- the scrolling list
 local EMPTY_TOP    = DIVIDER_TOP-12                   -- and "nothing to show"
 local BRACKET_X  = 250
+-- The swap button sits in the bracket row, left of 2v2, and the row starts
+-- after it. Up here with the thing it moves you between, rather than alone in
+-- the bottom corner where it read as a footnote.
+local SWAP_W     = 76
+local SWAP_GAP   = 6
 
 -- The eleven classes, in the order their icons are laid out.
 --
@@ -1050,7 +1055,7 @@ local function CreateWindow()
 	-- Only of use when this is standing on its own; the helper hides it while
 	-- the Rated page is up.
 	-- Clear of the heading and its place count at their widest.
-	frame.UpdateBrackets=ns.BuildBracketPicker(frame,"TOPLEFT",BRACKET_X,HEADER_TOP)
+	frame.UpdateBrackets=ns.BuildBracketPicker(frame,"TOPLEFT",BRACKET_X+SWAP_W+SWAP_GAP,HEADER_TOP)
 
 	local close=CreateFrame("Button",nil,frame,"UIPanelCloseButton")
 	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0)
@@ -1428,8 +1433,8 @@ local function CreateWindow()
 	-- it before the swap and putting it back after: the alternative is teaching
 	-- OnHide the difference between being closed and being replaced, which is a
 	-- thing neither window can see.
-	frame.swapButton=PageButton(L.LADDER_SWAP,96)
-	frame.swapButton:SetPoint("BOTTOMLEFT",frame,"BOTTOMLEFT",16,8)
+	frame.swapButton=PageButton(L.LADDER_SWAP,SWAP_W)
+	frame.swapButton:SetPoint("TOPLEFT",frame,"TOPLEFT",BRACKET_X,HEADER_TOP)
 	frame.swapButton:SetScript("OnClick",function()
 		local bracket=ns.ViewBracket and ns.ViewBracket()
 
@@ -1441,10 +1446,9 @@ local function CreateWindow()
 		end
 	end)
 
-	-- Beside the button now rather than in the corner it used to have to
-	-- itself. The stamp is short and grey; the button is the thing being
-	-- looked for.
-	frame.source:SetPoint("BOTTOMLEFT",frame.swapButton,"BOTTOMRIGHT",10,4)
+	-- The corner is its own again, the swap button having gone up to the
+	-- bracket row.
+	frame.source:SetPoint("BOTTOMLEFT",frame,"BOTTOMLEFT",16,12)
 	-- Stopped short of the buttons at the other end, so a longer line is cut
 	-- rather than drawn over them.
 	frame.source:SetPoint("RIGHT",frame.mineButton,"LEFT",-10,0)

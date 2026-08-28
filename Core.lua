@@ -1177,6 +1177,60 @@ local CLASS_SLUGS = {
 	"hunter","druid","mage","monk","rogue",
 }
 
+-- Name and realm reduced to something both sources can agree on.
+--
+-- Blizzard's realm slug is hyphenated -- "bloodsail-buccaneers" -- while the
+-- client's own name for the same realm is not. So "Gcmage-BloodsailBuccaneers"
+-- off a scoreboard and "Gcmage" on "bloodsail-buccaneers" off the ladder are
+-- one character and do not compare equal until the punctuation goes.
+--
+-- Lower-cased the way Lua lowers, which is A-Z and nothing else, because that
+-- is how every other key in this addon is built.
+function ns.SpecKey(name,realm)
+	if not name then return nil end
+	local function bare(text) return (tostring(text or ""):lower():gsub("[%-%s\']","")) end
+	return bare(name).."|"..bare(realm)
+end
+
+-- Spec ids back to their slugs, built once from the table that maps the other
+-- way. Only wanted when a sighting actually turns up, so it is filled in then.
+local SLUG_BY_SPEC
+
+-- What the shipped file records is the spec somebody logged out in. What we
+-- watched them play in an arena is the spec they play. Where both exist the
+-- sighting wins: it is first hand, and it cannot be stale in the way a logout
+-- reading can -- a resto druid who quested in balance is published as balance
+-- by Blizzard and by everyone reading Blizzard.
+--
+-- Only ever narrows. No sighting, no change, so this can make a row right and
+-- cannot make one wrong.
+--
+-- The sighting also has to name a spec of the class already on the row. Two
+-- characters can normalise to the same key across regions, and without that
+-- check one of them could turn a druid into a mage.
+local function ObservedOverride(entry,region)
+	if not (ns.ObservedSpecs and ns.SPEC_BY_SLUG and entry.class) then return end
+
+	local key=ns.SpecKey(entry.name,entry.realm)
+	local specs=key and ns.ObservedSpecs()
+	local seen=specs and specs[key]
+	if not seen then return end
+
+	if not SLUG_BY_SPEC then
+		SLUG_BY_SPEC={}
+		for slug,id in pairs(ns.SPEC_BY_SLUG) do SLUG_BY_SPEC[id]=slug end
+	end
+
+	local slug=SLUG_BY_SPEC[seen]
+	if not slug then return end
+
+	local prefix=entry.class.."-"
+	if slug:sub(1,#prefix)~=prefix then return end
+
+	entry.spec=slug:sub(#prefix+1)
+	entry.specSeen=true
+end
+
 -- Class and spec, filled onto a ladder row from the separate specs file.
 --
 -- They are not in the leaderboard the ladder comes from: Blizzard publishes
@@ -1219,6 +1273,8 @@ local function AttachSpec(entry,region)
 		if slug:sub(1,#class+1)==class.."-" then
 			entry.class=class
 			entry.spec=slug:sub(#class+2)
+			-- After the class is known, because the check depends on it.
+			ObservedOverride(entry,region)
 			return
 		end
 	end
