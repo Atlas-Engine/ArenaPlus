@@ -346,7 +346,7 @@ L.LADDER_SWAP             = "History"
 L.LADDER_PAGE             = "page %d of %d"
 -- Tier colour, rank, rating. Said on the source line rather than in the list:
 -- the rows are a snapshot and stay one, and this is the live number.
-L.LADDER_LIVE_SELF        = "   |cff9a9a9a--|r  you |cff%s#%d|r at |cff%s%d|r"
+L.LADDER_LIVE_SELF        = "   |cff9a9a9a--|r  you are |cff%s#%d|r |cff6a6a6a(|r|cff%s%d|r|cff6a6a6a)|r"
 L.LADDER_EMPTY            = "No ladder recorded for this bracket."
 -- The My alts view: your own characters, numbered among themselves rather than
 -- by where they sit on the ladder. An alt at 1400 has no ladder place at all,

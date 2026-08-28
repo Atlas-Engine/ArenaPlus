@@ -47,7 +47,17 @@ param(
     # Same coverage, spread out: every run re-asks the oldest slice, sized from
     # how long it has been since the last run, so the whole roster is refreshed
     # in this many days no matter what cadence it is called at.
-    [int]$RefreshDays = 7
+    #
+    # A day, not the week it was. Blizzard writes a character's profile when
+    # they log out, so active_spec is whatever they happened to be sitting in
+    # then -- a resto druid who logged out in balance is recorded as balance.
+    # That is a true answer to a question nobody asked, and at seven days it
+    # stuck around for a week. Daily is what the source can actually support.
+    #
+    # It is nearly free at this cadence: five and a half thousand characters
+    # over ninety-six runs is about sixty a run, against an hourly budget of
+    # thirty-six thousand that currently sees four and a half.
+    [int]$RefreshDays = 1
 )
 
 $ErrorActionPreference = "Stop"
