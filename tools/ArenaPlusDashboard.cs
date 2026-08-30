@@ -19,6 +19,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
@@ -158,6 +159,16 @@ class Dashboard : Form
     readonly string root;
 
     Label summary, quota, footer, publishNote;
+    Button pauseButton;
+    Label pauseNote;
+    TextBox versionBox;
+    Button publishButton;
+    Label addonNote;
+
+    // The tasks the pause button switched off, by name, and empty when nothing
+    // is paused. A list rather than a flag, for the reason set out on PauseAll.
+    readonly List<string> pausedTasks = new List<string>();
+
     readonly List<TaskRow> rows = new List<TaskRow>();
 
     // One line per section: what that job spent last time, and what is left of
@@ -379,6 +390,343 @@ class Dashboard : Form
                             tag, waiting);
     }
 
+    // ------------------------------------------------------------ pause
+
+    // Which tasks are switched off, kept beside the exe so closing the window
+    // does not lose them. The tasks themselves are off in Windows either way;
+    // this is only how the button knows what it is holding.
+    const string PausedSetting = "pausedTasks";
+
+    // Everything off at once, and back on exactly as it was.
+    //
+    // The pickers below can already do this one job at a time -- "never"
+    // switches a task off and leaves its interval underneath -- but doing that
+    // five times and then remembering what five things were set to is the part
+    // worth having a button for.
+    //
+    // It earns its place when the data is going somewhere public. A publish
+    // every thirty minutes is a CurseForge build every thirty minutes, and a
+    // project still in moderation does not want fifty of them arriving while
+    // somebody is looking at it.
+    int AddPauseRow(int y)
+    {
+        pauseButton = new Button();
+        pauseButton.Location = new Point(16, y);
+        pauseButton.Size = new Size(150, 28);
+        pauseButton.Click += delegate { TogglePause(); };
+        Controls.Add(pauseButton);
+
+        pauseNote = AddLabel("", 176, y + 6, 448, 20, false, true);
+
+        // Whatever was paused when this last closed is still paused -- the
+        // tasks are switched off in Windows, not in here -- so the button has
+        // to come back up saying so rather than offering to pause again.
+        foreach (string name in ReadSetting(PausedSetting).Split('|'))
+            if (name.Trim().Length > 0) pausedTasks.Add(name.Trim());
+
+        UpdatePauseButton();
+        return y + 40;
+    }
+
+    void UpdatePauseButton()
+    {
+        bool paused = (pausedTasks.Count > 0);
+        pauseButton.Text = paused ? "Resume everything" : "Pause everything";
+        pauseNote.Text = paused
+            ? string.Format("{0} job(s) switched off. Nothing runs on its own until you resume.",
+                            pausedTasks.Count)
+            : "Switches every job below off at once, keeping what each is set to for when you resume.";
+    }
+
+    void TogglePause()
+    {
+        try
+        {
+            if (pausedTasks.Count > 0) ResumeAll();
+            else PauseAll();
+        }
+        catch (Exception e)
+        {
+            MessageBox.Show("Could not change the schedule:" + Environment.NewLine +
+                            Environment.NewLine + e.Message,
+                            "ArenaPlus data", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        WriteSetting(PausedSetting, string.Join("|", pausedTasks.ToArray()));
+
+        // Re-read rather than set by hand: the pickers answer from the tasks
+        // themselves, so they fall to "never" while this holds and the forecast
+        // falls to nothing with them. One answer to "what is the schedule".
+        LoadSchedules();
+        UpdatePauseButton();
+        Recalculate();
+        UpdateEverything();
+    }
+
+    // Only what was actually running, and each one remembered by name.
+    //
+    // A plain "is paused" flag would have to switch everything back on to
+    // resume, which would start jobs their owner had deliberately set to
+    // "never" -- silently, and looking exactly like this button misbehaving.
+    // Recording the ones it switched off lets resume put back precisely those.
+    //
+    // A run already in flight is left alone. The passes rewrite whole .lua
+    // tables, and one stopped mid-write leaves a truncated table that the next
+    // publish would ship. This stops the next run, not the one happening. The
+    // per-row Stop button is still the way to end a run that is going wrong.
+    void PauseAll()
+    {
+        pausedTasks.Clear();
+
+        foreach (TaskRow row in rows)
+        {
+            try
+            {
+                dynamic task = RootFolder().GetTask(row.Task);
+
+                // Already off, so not this button's to switch back on.
+                if (!(bool)task.Enabled) continue;
+
+                task.Enabled = false;
+                pausedTasks.Add(row.Task);
+            }
+            catch { scheduler = null; }
+        }
+    }
+
+    void ResumeAll()
+    {
+        foreach (string name in pausedTasks.ToArray())
+        {
+            try { RootFolder().GetTask(name).Enabled = true; }
+            catch { scheduler = null; }
+        }
+        pausedTasks.Clear();
+    }
+
+    // ------------------------------------------------- releasing the addon
+
+    // Where releases are cut from, which is NOT the folder this exe is in.
+    //
+    // The window runs from the live AddOns copy, because that is where the
+    // scheduled tasks put it. The repository is in Dev. Publish-Data.ps1 names
+    // the same two places for the same reason.
+    const string AddonRepo = @"G:\My Drive\Dev\Atlas\ArenaPlus";
+
+    int AddAddonPublishSection(int y)
+    {
+        AddLabel("Releasing ArenaPlus", 16, y, 300, 20, true, false);
+        AddLabel("The addon itself, by hand, because a release of hand-written code deserves a commit " +
+                 "message somebody wrote. Commit first; this puts the version in the .toc, tags that " +
+                 "commit and pushes it. CurseForge builds from the tag.",
+                 16, y + 22, 596, 46, false, true);
+        y += 72;
+
+        AddLabel("Version", 46, y + 5, 56, 20, false, true);
+
+        versionBox = new TextBox();
+        versionBox.Location = new Point(106, y + 2);
+        versionBox.Size = new Size(80, 24);
+        Controls.Add(versionBox);
+
+        publishButton = new Button();
+        publishButton.Text = "Publish";
+        publishButton.Location = new Point(196, y);
+        publishButton.Size = new Size(92, 26);
+        publishButton.Click += delegate { PublishAddon(); };
+        Controls.Add(publishButton);
+
+        addonNote = AddLabel("", 296, y + 5, 320, 20, false, true);
+
+        // Asking git costs a process, so this is not on the one-second tick.
+        // The answer only changes when you commit -- which happens in another
+        // window, and coming back to this one is the moment it matters.
+        Activated += delegate { RefreshAddonPublish(); };
+        RefreshAddonPublish();
+
+        return y + 44;
+    }
+
+    // The next version, by the rule the tags already follow: a, b, c, and then
+    // the minor moves on and it starts at a again. 1.0b, 1.0c, 1.1a.
+    //
+    // Only ever a suggestion -- the box is editable, because the rule cannot
+    // know that a release is big enough to deserve the next minor early, and
+    // the socialplus tags show that being done.
+    static string NextVersion(string latest)
+    {
+        Match m = Regex.Match(latest ?? "", @"^(\d+)\.(\d+)([a-z])$");
+        if (!m.Success) return "";
+
+        int major = int.Parse(m.Groups[1].Value);
+        int minor = int.Parse(m.Groups[2].Value);
+        char letter = m.Groups[3].Value[0];
+
+        if (letter < 'c') return string.Format("{0}.{1}{2}", major, minor, (char)(letter + 1));
+        return string.Format("{0}.{1}a", major, minor + 1);
+    }
+
+    // Highest tag of the release shape, ordered as versions rather than as text
+    // -- "1.10a" sorts before "1.9a" alphabetically, and 1.10a is the later one.
+    string LatestTag()
+    {
+        string best = null;
+        int bestMajor = -1, bestMinor = -1;
+        char bestLetter = ' ';
+
+        foreach (string line in Git("tag --list").Split('\n'))
+        {
+            Match m = Regex.Match(line.Trim(), @"^(\d+)\.(\d+)([a-z])$");
+            if (!m.Success) continue;
+
+            int major = int.Parse(m.Groups[1].Value);
+            int minor = int.Parse(m.Groups[2].Value);
+            char letter = m.Groups[3].Value[0];
+
+            if (major > bestMajor
+                || (major == bestMajor && minor > bestMinor)
+                || (major == bestMajor && minor == bestMinor && letter > bestLetter))
+            {
+                bestMajor = major; bestMinor = minor; bestLetter = letter;
+                best = m.Groups[0].Value;
+            }
+        }
+        return best;
+    }
+
+    string Git(string args)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("git", args);
+            psi.WorkingDirectory = AddonRepo;
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+
+            using (Process p = Process.Start(psi))
+            {
+                string output = p.StandardOutput.ReadToEnd();
+                p.WaitForExit(10000);
+                return output;
+            }
+        }
+        catch { return ""; }
+    }
+
+    void RefreshAddonPublish()
+    {
+        if (versionBox == null) return;
+
+        bool dirty = Git("status --porcelain").Trim().Length > 0;
+        string latest = LatestTag();
+
+        // No tags yet, so the .toc is the only thing that has ever named a
+        // version. It says "1.0" where a tag would say "1.0a"; reading a
+        // missing letter as "a" is what makes the first suggestion 1.0b, which
+        // is the right one -- 1.0a is already on CurseForge, uploaded by hand.
+        if (latest == null)
+        {
+            Match m = Regex.Match(TocVersion(), @"^(\d+\.\d+)([a-z]?)$");
+            if (m.Success)
+                latest = m.Groups[1].Value + (m.Groups[2].Value.Length == 0 ? "a" : m.Groups[2].Value);
+        }
+
+        string next = NextVersion(latest);
+
+        // Only when it is untouched or still showing the last suggestion, so a
+        // version being typed is never overwritten by a refresh.
+        if (versionBox.Text.Trim().Length == 0 || versionBox.Text == versionBox.Tag as string)
+        {
+            versionBox.Text = next;
+            versionBox.Tag = next;
+        }
+
+        publishButton.Enabled = !dirty;
+        addonNote.Text = dirty
+            ? "uncommitted changes -- commit them first"
+            : (latest == null
+                ? "never tagged; the .toc says " + TocVersion()
+                : "latest tag " + latest);
+    }
+
+    string TocVersion()
+    {
+        try
+        {
+            foreach (string line in File.ReadAllLines(Path.Combine(AddonRepo, "ArenaPlus.toc")))
+                if (line.StartsWith("## Version:"))
+                    return line.Substring("## Version:".Length).Trim();
+        }
+        catch { }
+        return "";
+    }
+
+    void PublishAddon()
+    {
+        string version = versionBox.Text.Trim();
+        if (!Regex.IsMatch(version, @"^\d+\.\d+[a-z]$"))
+        {
+            MessageBox.Show("'" + version + "' is not a version of the form 1.0b.",
+                            "ArenaPlus data", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // Asked once, because pushing a tag is a build and a download for
+        // everybody -- and a tag CurseForge has already built from cannot be
+        // taken back quietly.
+        if (MessageBox.Show("Tag and push ArenaPlus " + version + "?" + Environment.NewLine +
+                            Environment.NewLine + "CurseForge will build a new file from it.",
+                            "ArenaPlus data", MessageBoxButtons.OKCancel, MessageBoxIcon.Question)
+            != DialogResult.OK) return;
+
+        string script = Path.Combine(tools, "Publish-Addon.ps1");
+        if (!File.Exists(script))
+        {
+            MessageBox.Show("Publish-Addon.ps1 is not beside this window.",
+                            "ArenaPlus data", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        publishButton.Enabled = false;
+        Cursor = Cursors.WaitCursor;
+
+        string output;
+        int code;
+        try
+        {
+            var psi = new ProcessStartInfo("powershell.exe",
+                string.Format("-ExecutionPolicy Bypass -NonInteractive -File \"{0}\" -Version {1}",
+                              script, version));
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+
+            using (Process p = Process.Start(psi))
+            {
+                output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
+                p.WaitForExit();
+                code = p.ExitCode;
+            }
+        }
+        catch (Exception e) { output = e.Message; code = -1; }
+        finally { Cursor = Cursors.Default; }
+
+        // The script's own words, whichever way it went: it says more about why
+        // it stopped than an exit code can, and it has already written the same
+        // thing to Publish-Addon.log.
+        MessageBox.Show(output.Trim().Length > 0 ? output.Trim() : "Nothing was reported.",
+                        code == 0 ? "Published" : "Not published",
+                        MessageBoxButtons.OK,
+                        code == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+
+        // Cleared so the next refresh suggests the version after this one.
+        versionBox.Text = "";
+        RefreshAddonPublish();
+    }
+
     void BuildLayout()
     {
         // Which log each job writes what it spent into.
@@ -386,6 +734,8 @@ class Dashboard : Form
         spendLog["inspect"] = new[] { "UpdateInspect.log" };
 
         int y = 14;
+
+        y = AddPauseRow(y);
 
         y = AddSection(y, "Ladder, cutoffs, class and spec",
             "Seven requests for the ladder itself, then class and spec for any new name plus a slice of " +
@@ -400,6 +750,7 @@ class Dashboard : Form
             "inspect", TaskInspectUS, TaskInspectEU);
 
         y = AddPublishSection(y);
+        y = AddAddonPublishSection(y);
 
         // Filled in from the tasks themselves, then wired up. Wiring after
         // filling, so setting the initial selection does not read as the user
