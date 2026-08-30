@@ -2,6 +2,10 @@
 
 **Rated PvP, with the numbers the game keeps to itself.** The ladder, live title cutoffs, a match history that remembers what actually happened, and an inspect window showing what the best of your spec is wearing — for MoP Classic.
 
+> Ships in two parts: this addon, and **[ArenaPlus_Data](https://github.com/Atlas-Engine/ArenaPlus_Data)**,
+> which carries the ladder. Your addon manager installs both — but set the data one to
+> **automatic updates**, or the standings go stale. [How, and why.](#keep-the-data-on-automatic-updates)
+
 ---
 
 ## The problem
@@ -43,6 +47,14 @@ A gladiator helmet on the minimap: left-click for your history, right-click for 
 The ladder itself lives in a companion addon, [ArenaPlus_Data](https://github.com/Atlas-Engine/ArenaPlus_Data), which your addon manager installs alongside this one. It is kept separate so the ladder can be refreshed without reshipping the addon — it was half of every release.
 
 You should not have to think about it. If it is ever missing or disabled, ArenaPlus still loads and runs; you just get an empty ladder and no cutoffs until it is back.
+
+### Keep the data on automatic updates
+
+**In the CurseForge app: right-click ArenaPlus_Data → Install Settings → Automatic.**
+
+The ladder is republished every half hour. Left on manual, ArenaPlus keeps working and says nothing — it just shows you standings and cutoffs from whenever you last updated, which is the one failure here that looks exactly like everything being fine.
+
+There is no reason to hold a release of it back. Every one is data and nothing else: no code changes, so there is nothing in an update that can break.
 
 ## For other addon authors
 
