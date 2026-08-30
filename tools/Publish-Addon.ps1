@@ -77,9 +77,15 @@ try {
 
     # The .toc's version is what the game shows in the AddOns list, so it should
     # say the same thing as the tag.
-    $toc = Get-Content $tocPath -Raw
-    if ($toc -notmatch '(?m)^## Version:') { throw "No '## Version:' line in $Toc" }
-    $toc = [regex]::Replace($toc, '(?m)^## Version:.*$', "## Version: $Version")
+    # $content, not $toc. PowerShell variable names are case-insensitive, so a
+    # local $toc IS the $Toc parameter -- holding the file's whole text where the
+    # file's name should be. It read as a cosmetic mistake in the -WhatIf line
+    # and was not one: the "git add -- $Toc" below would have been handed twelve
+    # kilobytes of .toc instead of a filename, and every real release failed
+    # there.
+    $content = Get-Content $tocPath -Raw
+    if ($content -notmatch '(?m)^## Version:') { throw "No '## Version:' line in $Toc" }
+    $content = [regex]::Replace($content, '(?m)^## Version:.*$', "## Version: $Version")
 
     if ($WhatIf) {
         Say "Would set $Toc to $Version, commit, tag and push. Nothing done (-WhatIf)."
@@ -89,7 +95,7 @@ try {
     # -NoNewline, and the encoding kept, so the only line that changes is the
     # version one. Rewriting the whole file's endings would put the entire .toc
     # in the diff of every release.
-    Set-Content -Path $tocPath -Value $toc -Encoding utf8 -NoNewline
+    Set-Content -Path $tocPath -Value $content -Encoding utf8 -NoNewline
 
     git add -- $Toc
     git commit -q -m "Version $Version"
