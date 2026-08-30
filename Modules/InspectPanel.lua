@@ -127,6 +127,52 @@ local PROFESSION_ICONS = {
 
 -- Blizzard's own paper doll order, so the panel reads the way the character
 -- sheet does rather than the order the API happened to answer in.
+-- The belt buckle, by name rather than by number.
+--
+-- Two wrong ids were written here before this. 55054 is the Cataclysm buckle,
+-- which resolves and names a real belt buckle of the wrong expansion. 82443 is
+-- Cerulean Spellthread, which resolves and names a leg enchant -- and printed
+-- "Cerulean Spellthread" beside somebody's belt, in the shopping list, looking
+-- exactly like a fact.
+--
+-- Both failed the same way: a guessed id turns into a confident name. So the
+-- name is the constant now and the id, if it is ever wanted, is looked up from
+-- it. Get the name wrong and nothing resolves at all, which is a mistake that
+-- shows itself.
+local BELT_BUCKLE_NAME = "Living Steel Belt Buckle"
+local BELT_BUCKLE      = 90046
+
+-- The item, and only if it really is the item.
+--
+-- The id buys the icon, the quality colour and the tooltip link, none of which
+-- a name alone can give. What it must not buy is the label: two ids have been
+-- wrong here already and each one turned straight into a confident wrong name
+-- on screen.
+--
+-- So the id is checked against the name before anything from it is used. An id
+-- that resolves to something else is treated as no id at all, which turns the
+-- next wrong guess into a missing icon rather than a lie.
+local function BuckleItem()
+	if not (GetItemInfo and BELT_BUCKLE) then return nil end
+
+	local name,link,quality=GetItemInfo(BELT_BUCKLE)
+
+	if not name then
+		if C_Item and C_Item.RequestLoadItemDataByID then
+			pcall(C_Item.RequestLoadItemDataByID,BELT_BUCKLE)
+		end
+		return nil
+	end
+
+	if name~=BELT_BUCKLE_NAME then return nil end
+
+	return name,link,quality,select(10,GetItemInfo(BELT_BUCKLE))
+end
+
+-- Declared here and written further down, because the paper doll draws long
+-- before the socket page is defined and both have to ask the same question.
+local HasBuckle
+
 local LEFT_SLOTS   = { "head", "neck", "shoulder", "back", "chest", "shirt", "tabard", "wrist" }
 local RIGHT_SLOTS  = { "hands", "waist", "legs", "feet", "finger_1", "finger_2", "trinket_1", "trinket_2" }
 local BOTTOM_SLOTS = { "main_hand", "off_hand" }
@@ -504,7 +550,7 @@ local function CreateSlot(parent,side)
 	return button
 end
 
-local function FillSlot(button,record,tinker)
+local function FillSlot(button,record,tinker,slotKey)
 	button.itemID=nil
 	button.enchant=nil
 	button.gemIDs=nil
@@ -541,6 +587,16 @@ local function FillSlot(button,record,tinker)
 		local text=ns.ENCHANT_TEXT and ns.ENCHANT_TEXT[tinker]
 		lines[#lines+1]=text or L.INSPECT_ENCHANT_UNKNOWN:format(tinker)
 	end
+
+	-- And the buckle, which is neither of those.
+	--
+	-- It sits beside the belt with the enchant and the tinker because that is
+	-- where somebody looks for "what has been done to this piece" -- and a
+	-- buckle is the most commonly done thing of the three.
+	if slotKey=="waist" and HasBuckle(record) then
+		lines[#lines+1]=BELT_BUCKLE_NAME
+	end
+
 	button.enchantText:SetText(table.concat(lines,"|n"))
 
 	-- GetItemInfoInstant reads the client's own database and answers at once.
@@ -1148,27 +1204,19 @@ local function AuctionHouseIsOpen()
 	return false
 end
 
--- The same gem under its other name.
+-- The gem that was worn, and only that gem.
 --
--- A jewelcrafter's perfect cut is a separate item with a separate name --
--- "Perfect Delicate Pandarian Garnet" beside "Delicate Pandarian Garnet" -- and
--- for somebody copying a build the two are the same purchase. Searching only
--- what the inspected player happened to be wearing shows half the shelf, and on
--- this ladder it is not a rare half: 11 of the 41 gems worn are perfect cuts.
+-- The plain cut used to be searched alongside the perfect one, on the reasoning
+-- that "Perfect Delicate Pandarian Garnet" and "Delicate Pandarian Garnet" are
+-- the same purchase to somebody copying a build.
 --
--- Only the perfect-to-plain direction. The plain name is a real item every
--- time, where "Perfect <rare gem>" is not -- perfect cuts exist only for the
--- uncommon gems -- so going the other way would send searches for items that
--- cannot exist.
+-- They are not. The perfect cut is +160 Agility and the plain is +120 -- a
+-- third less, on every socket, for a build being copied precisely because of
+-- what its owner reached with it. Putting the two side by side and calling the
+-- cheaper one an option is advice, and the wrong advice: the point of this
+-- panel is what the player at rank 19 is actually wearing.
 --
--- English clients only, honestly. The name comes from GetItemInfo and is
--- localised, so this matches nothing on a French or German client and the
--- search behaves exactly as it did before. That is a missing improvement rather
--- than a fault, which is why there is no table of translations here to keep in
--- step with Blizzard.
-local function PlainCut(name)
-	return name and name:match("^Perfect%s+(.+)$") or nil
-end
+-- So one term, and it is theirs.
 
 -- Whether there is anything here that can search.
 --
@@ -1196,8 +1244,6 @@ local function SearchAuctionHouse(name,howMany,loose)
 	if not (name and name~="") then return false end
 	if not AuctionHouseIsOpen() then return false end
 
-	local plain=PlainCut(name)
-
 	-- A quoted name is Auctionator's own syntax for an exact search, and it
 	-- refuses a term that arrives already wrapped in quotes -- so the name goes
 	-- in bare and isExact says what to do with it.
@@ -1210,17 +1256,7 @@ local function SearchAuctionHouse(name,howMany,loose)
 		-- would do anyway, and leaving the field empty keeps the search simple.
 		if howMany and howMany>1 then term.quantity=howMany end
 
-		-- Two terms rather than one when the cut has a plain twin. Auctionator
-		-- takes a list and puts each on its own line of the shopping list, so
-		-- the two prices sit next to each other and the cheaper one is obvious.
-		local terms={ term }
-		if plain then
-			local other={ searchString=plain, isExact=not loose }
-			if howMany and howMany>1 then other.quantity=howMany end
-			terms[#terms+1]=other
-		end
-
-		if pcall(api.MultiSearchAdvanced,AUCTIONATOR_ID,terms) then return true end
+		if pcall(api.MultiSearchAdvanced,AUCTIONATOR_ID,{ term }) then return true end
 	end
 
 	if loose and api and api.MultiSearch then
@@ -1228,9 +1264,7 @@ local function SearchAuctionHouse(name,howMany,loose)
 	end
 
 	if not loose and api and api.MultiSearchExact then
-		local both={ name }
-		if plain then both[#both+1]=plain end
-		if pcall(api.MultiSearchExact,AUCTIONATOR_ID,both) then return true end
+		if pcall(api.MultiSearchExact,AUCTIONATOR_ID,{ name }) then return true end
 	end
 
 	-- No Auctionator: the auction house's own browse tab, filled in and
@@ -1240,11 +1274,14 @@ local function SearchAuctionHouse(name,howMany,loose)
 	local box=_G.BrowseName
 	if not box then return false end
 
-	-- One box, so one term -- and the plain name is the better one. Blizzard's
-	-- browse matches on a substring, and "Delicate Pandarian Garnet" is a
-	-- substring of the perfect cut's own name, so typing the plain form finds
-	-- both while typing the perfect form finds only itself.
-	box:SetText(plain or name)
+	-- The name as worn, and nothing widened.
+	--
+	-- This used to type the plain form on purpose: Blizzard's browse matches on
+	-- a substring, so "Delicate Pandarian Garnet" finds the perfect cut as well
+	-- as itself. That was the same mistake as the twin search above wearing a
+	-- different hat -- a wider net that returns a weaker gem beside the right
+	-- one and leaves the choosing to somebody who came here to be told.
+	box:SetText(name)
 	box:SetFocus()
 	box:HighlightText(0,0)
 
@@ -1262,6 +1299,44 @@ end
 -- the name should be. Asking is therefore only half the job: the answer arrives
 -- later, as an event, and the list has to be built again when it does.
 local QUESTION="Interface/Icons/INV_Misc_QuestionMark"
+
+-- Whether a belt has had a buckle put on it.
+--
+-- The extra gem is the evidence. A belt carrying more gems than the item
+-- itself has sockets can only have been buckled -- Blizzard records the gem
+-- and says nothing whatever about the thing that made the socket, so there is
+-- nothing else to go on.
+--
+-- Silent where the client has never seen the belt. GetItemStats answers
+-- nothing then, and these are other people's belts, so almost none of them are
+-- cached -- which was the whole of why this never fired. Requesting the item
+-- is enough: both the paper doll and the socket page already repaint when item
+-- data arrives, which is the same reason the slot borders start grey.
+function HasBuckle(record)
+	if not (record and record[1] and GetItemStats) then return false end
+
+	local worn=0
+	for index=3,#record do
+		local gem=tonumber(record[index])
+		if gem and gem>0 then worn=worn+1 end
+	end
+	if worn<1 then return false end
+
+	local stats=GetItemStats("item:"..tostring(record[1]))
+	if not stats then
+		if C_Item and C_Item.RequestLoadItemDataByID then
+			pcall(C_Item.RequestLoadItemDataByID,record[1])
+		end
+		return false
+	end
+
+	local sockets=0
+	for key,value in pairs(stats) do
+		if key:find("EMPTY_SOCKET") then sockets=sockets+(value or 0) end
+	end
+
+	return worn>sockets
+end
 
 local function AskForItem(id)
 	if not id or id<=0 then return end
@@ -1340,6 +1415,22 @@ local function SocketTally(gear)
 	local gemOrder,gemCount={},{}
 	local enchants={}
 
+	-- The belt buckle, which is not an enchant and so was never counted.
+	--
+	-- Everything else on a piece of gear is either an enchant id or a gem id,
+	-- and a buckle is neither: it adds a socket. Blizzard records the gem that
+	-- goes in that socket and says nothing whatever about the thing that made
+	-- the socket exist -- so a belt with a buckle and a belt without look
+	-- identical apart from one extra gem, and the shopping list quietly left
+	-- out an item every geared player is wearing.
+	--
+	-- The extra gem is the evidence. A belt carrying more gems than the item
+	-- itself has sockets can only have been buckled.
+	--
+	-- Silent where the client has not cached the item: GetItemStats answers
+	-- nothing then, and guessing from nothing would put a buckle on every belt
+	-- until the cache caught up.
+
 	for _,slotKey in ipairs(EVERY_SLOT) do
 		local piece=gear and gear[slotKey]
 		if type(piece)=="table" then
@@ -1363,6 +1454,17 @@ local function SocketTally(gear)
 				if not IsProfessionOnly(slotKey,applied,shopName,effect) then
 					enchants[#enchants+1]={ slot=slotKey, id=enchant, item=tonumber(piece[1]) }
 				end
+			end
+
+			-- Carried as an ordinary enchant row from here on, because that is
+			-- what it is to somebody copying the build: a thing to buy and put
+			-- on the belt. It names its own item rather than being looked up
+			-- by enchant id, since it has no enchant id to be looked up by.
+			if slotKey=="waist" and HasBuckle(piece) then
+				enchants[#enchants+1]={
+					slot=slotKey, id=0, buckle=true,
+					item=tonumber(piece[1]),
+				}
 			end
 		end
 	end
@@ -1479,7 +1581,14 @@ local function FillSockets(gear,glyphs,class)
 			local effect=ns.ENCHANT_TEXT and ns.ENCHANT_TEXT[entry.id]
 
 			local name,link,quality,icon
-			if applied then
+			if entry.buckle then
+				-- Named outright. Everything else about it -- the icon, the
+				-- quality colour, the link for the tooltip -- is a bonus that
+				-- arrives if the client happens to know the item.
+				name,link,quality,icon=BuckleItem()
+				name=name or BELT_BUCKLE_NAME
+
+			elseif applied then
 				name,link,quality=GetItemInfo(applied)
 				icon=select(10,GetItemInfo(applied))
 				if not name then
@@ -1656,7 +1765,7 @@ local function FillSockets(gear,glyphs,class)
 				-- still on its way.
 				if frame and frame.pages and frame.pages.character then
 					for slotKey,button in pairs(frame.pages.character.slots) do
-						FillSlot(button,socketGear[slotKey],(socketTinkers or {})[slotKey])
+						FillSlot(button,socketGear[slotKey],(socketTinkers or {})[slotKey],slotKey)
 					end
 				end
 			end)
@@ -2270,7 +2379,7 @@ function ns.ShowInspect(entry,region,bracket)
 	local tinkers=data.k or {}
 	socketTinkers=tinkers
 	for slotKey,button in pairs(frame.pages.character.slots) do
-		FillSlot(button,gear[slotKey],tinkers[slotKey])
+		FillSlot(button,gear[slotKey],tinkers[slotKey],slotKey)
 	end
 
 	-- Which of the three in each tier they took.

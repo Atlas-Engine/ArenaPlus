@@ -3,6 +3,13 @@
 ## Author: David / Atlas-Engine
 ## Version: 1.0
 ## Notes: Rated arena and battleground tracking - match history with specs and crowd control, live title cutoffs and the ladder.
+# The GitHub repository CurseForge builds this from.
+#
+# The upload is not done by any workflow here and no API key is involved:
+# the project on CurseForge is linked to this repository, and it builds a file
+# the moment it sees a new tag. This line records that link where somebody
+# reading the addon can see it.
+## X-Curse-Repository-ID: https://github.com/Atlas-Engine/ArenaPlus
 ## SavedVariables: ArenaPlus_SavedVars
 # Loads ArenaPlus_Data first when it is installed. Optional rather than a hard
 # dependency: without it the addon still runs, with an empty ladder and no
