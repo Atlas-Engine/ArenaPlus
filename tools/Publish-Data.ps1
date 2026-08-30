@@ -119,71 +119,74 @@ try {
     git add -A
     git commit -q -m "Data $version"
     git tag $version
-    git push -q origin HEAD --tags
+
+    # Which old tags go, worked out before the push rather than after it.
+    #
+    # A tag here names a snapshot of a file rewritten every quarter of an hour,
+    # so its worth decays fast: the newest is the only one anybody would check
+    # out, and a year of them is thousands of refs standing for nothing.
+    # Deleting a tag does not touch the commit it pointed at -- the history
+    # stays whole, only the names go.
+    #
+    # Matched on the timestamp shape rather than "every tag", so a hand-made tag
+    # of any other form is left alone.
+    #
+    # Read from the REMOTE, not from "git tag --list". The local list is the one
+    # this script has been shortening for days, so once the two sides drifted
+    # apart every tag left on origin was invisible to the thing meant to remove
+    # it. Steady state hid it perfectly: one added per run and one removed kept
+    # the local count at ten and the log reading "the newest 10 remain" while 48
+    # piled up on GitHub.
+    $keep = 10
+    $remote = @(git ls-remote --tags origin |
+        ForEach-Object { ($_ -split "`t")[-1] } |
+        Where-Object { $_ -and $_ -notmatch '\^\{\}$' } |
+        ForEach-Object { $_ -replace '^refs/tags/', '' } |
+        Where-Object { $_ -match '^\d{4}\.\d{2}\.\d{2}\.\d{4}$' })
+
+    # What origin will hold once this run's tag lands, newest first. The new one
+    # is by definition the newest, so it is never in the drop set.
+    $after = @(@($remote) + $version | Sort-Object -Descending)
+    $drop  = @($after | Select-Object -Skip $keep)
+    $refs  = @($drop | ForEach-Object { ":refs/tags/$_" })
+
+    # ONE push, carrying the commit, the new tag and every deletion.
+    #
+    # This used to be two -- the tag went up, and the prune followed in a second
+    # push. Both are push events, and CurseForge packages the newest tag on
+    # every push it is told about, so each run published the same tag twice and
+    # every user downloaded it twice. It was invisible for as long as no webhook
+    # existed, which is exactly how long nobody noticed.
+    #
+    # Explicit refspecs rather than --tags: this pushes the one tag just made,
+    # not whatever else happens to be lying around locally.
+    git push -q origin HEAD "refs/tags/$version" @refs
+
+    # Checked rather than assumed. -q means a failure here says nothing at all,
+    # and saying nothing is how the prune bug lasted three days.
+    #
+    # All of it fails together now, which is the trade for publishing once: a
+    # refused deletion takes the release with it instead of leaving a tag up
+    # with the tidying undone. Acceptable because the deletions name tags
+    # ls-remote confirmed a moment earlier, and nothing else pushes to this
+    # repository.
+    if ($LASTEXITCODE -ne 0) {
+        throw ("git refused the push of $version" +
+               $(if ($drop.Count) { " and {0} tag deletion(s)" -f $drop.Count } else { "" }) + ".")
+    }
+
+    # Locally too, but only where it is still here: a tag origin still had may
+    # be long gone from this machine, and "git tag -d" on a name that is not
+    # here is an error rather than a no-op.
+    $local = @(git tag --list)
+    foreach ($tag in $drop) {
+        if ($local -contains $tag) { git tag -d $tag | Out-Null }
+    }
 
     Say ""
     Say "Published $version. CurseForge builds from the tag on its own."
-
-    # Keep the newest few tags and let the rest go.
-    #
-    # A tag here names a snapshot of a file that is rewritten every quarter of
-    # an hour, so its worth decays fast: the newest is the only one anybody
-    # would ever check out, and a year of them is thousands of refs standing
-    # for nothing. Deleting a tag does not touch the commit it pointed at --
-    # the history stays whole, only the names go.
-    #
-    # Matched on the timestamp shape rather than "every tag", so a hand-made
-    # tag of any other form is left alone.
-    #
-    # In its own try: the publish above has already succeeded and been pushed,
-    # and failing to tidy up afterwards is not a reason to report that as a
-    # failure.
-    try {
-        $keep = 10
-
-        # The REMOTE's tags, not this machine's.
-        #
-        # This asked "git tag --list" for three days, which is the local list --
-        # the very list this block has just finished shortening. Once the two
-        # sides drifted apart, every tag left behind on origin became invisible
-        # to the thing meant to remove it: it could only ever drop what it still
-        # knew about locally, and it had just deleted that.
-        #
-        # Steady state hid it completely. One tag added per run and one removed
-        # kept the local count at ten and the log reading "the newest 10 remain"
-        # while 48 of them piled up on GitHub unnoticed.
-        $remote = @(git ls-remote --tags origin |
-            ForEach-Object { ($_ -split "`t")[-1] } |
-            Where-Object { $_ -and $_ -notmatch '\^\{\}$' } |
-            ForEach-Object { $_ -replace '^refs/tags/', '' } |
-            Where-Object { $_ -match '^\d{4}\.\d{2}\.\d{2}\.\d{4}$' } |
-            Sort-Object -Descending)
-
-        if ($remote.Count -gt $keep) {
-            $drop = @($remote | Select-Object -Skip $keep)
-
-            # One push carrying every deletion, rather than one push each.
-            $refs = $drop | ForEach-Object { ":refs/tags/$_" }
-            git push -q origin @refs
-
-            # Checked rather than assumed. -q means a failure here says nothing
-            # at all, and saying nothing is how the old bug lasted three days.
-            if ($LASTEXITCODE -ne 0) {
-                throw ("git refused {0} tag deletion(s)." -f $drop.Count)
-            }
-
-            # Locally too, but only where it is still here: a tag origin still
-            # had may be long gone from this machine, and "git tag -d" on a name
-            # that is not here is an error rather than a no-op.
-            $local = @(git tag --list)
-            foreach ($tag in $drop) {
-                if ($local -contains $tag) { git tag -d $tag | Out-Null }
-            }
-
-            Say ("Pruned {0} old tag(s) from origin; the newest {1} remain." -f $drop.Count, $keep)
-        }
-    } catch {
-        Say ("Could not prune old tags: " + $_.Exception.Message)
+    if ($drop.Count) {
+        Say ("Pruned {0} old tag(s) from origin in the same push; the newest {1} remain." -f $drop.Count, $keep)
     }
 } finally {
     Pop-Location
