@@ -140,19 +140,47 @@ try {
     # failure.
     try {
         $keep = 10
-        $mine = @(git tag --list |
+
+        # The REMOTE's tags, not this machine's.
+        #
+        # This asked "git tag --list" for three days, which is the local list --
+        # the very list this block has just finished shortening. Once the two
+        # sides drifted apart, every tag left behind on origin became invisible
+        # to the thing meant to remove it: it could only ever drop what it still
+        # knew about locally, and it had just deleted that.
+        #
+        # Steady state hid it completely. One tag added per run and one removed
+        # kept the local count at ten and the log reading "the newest 10 remain"
+        # while 48 of them piled up on GitHub unnoticed.
+        $remote = @(git ls-remote --tags origin |
+            ForEach-Object { ($_ -split "`t")[-1] } |
+            Where-Object { $_ -and $_ -notmatch '\^\{\}$' } |
+            ForEach-Object { $_ -replace '^refs/tags/', '' } |
             Where-Object { $_ -match '^\d{4}\.\d{2}\.\d{2}\.\d{4}$' } |
             Sort-Object -Descending)
 
-        if ($mine.Count -gt $keep) {
-            $drop = @($mine | Select-Object -Skip $keep)
+        if ($remote.Count -gt $keep) {
+            $drop = @($remote | Select-Object -Skip $keep)
 
             # One push carrying every deletion, rather than one push each.
             $refs = $drop | ForEach-Object { ":refs/tags/$_" }
             git push -q origin @refs
-            foreach ($tag in $drop) { git tag -d $tag | Out-Null }
 
-            Say ("Pruned {0} old tag(s); the newest {1} remain." -f $drop.Count, $keep)
+            # Checked rather than assumed. -q means a failure here says nothing
+            # at all, and saying nothing is how the old bug lasted three days.
+            if ($LASTEXITCODE -ne 0) {
+                throw ("git refused {0} tag deletion(s)." -f $drop.Count)
+            }
+
+            # Locally too, but only where it is still here: a tag origin still
+            # had may be long gone from this machine, and "git tag -d" on a name
+            # that is not here is an error rather than a no-op.
+            $local = @(git tag --list)
+            foreach ($tag in $drop) {
+                if ($local -contains $tag) { git tag -d $tag | Out-Null }
+            }
+
+            Say ("Pruned {0} old tag(s) from origin; the newest {1} remain." -f $drop.Count, $keep)
         }
     } catch {
         Say ("Could not prune old tags: " + $_.Exception.Message)
