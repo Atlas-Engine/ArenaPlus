@@ -1,0 +1,78 @@
+name: Publish release
+
+# Fills the Releases panel when a tag is pushed.
+#
+# Presentation only. CurseForge builds from the tag itself, via the packaging
+# webhook, and never reads anything here -- so this failing costs a tidy-looking
+# repository page and nothing else.
+#
+# It runs on a tag rather than creating one, which is the opposite of
+# socialplus's workflow, and deliberately. There, the tag and the release are
+# made together because CurseForge would otherwise build before the notes it
+# reads exist. ArenaPlus has no manual-changelog in its .pkgmeta, so CurseForge
+# generates its own text and there is no window to lose: the tag can go up first
+# and the release can follow.
+#
+# Tags are pushed by tools/Publish-Addon.ps1, from the dashboard's Publish
+# button. Nothing here needs the GitHub CLI installed on the machine that does
+# that -- gh and a token are already on the runner, which is the whole reason
+# this is a workflow rather than another step in the script.
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The whole history, so the previous tag can be found.
+          fetch-depth: 0
+
+      - name: Build the notes from the commits since the previous tag
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+
+          # The nearest tag before this one, walking back through history rather
+          # than sorting names. Sorting is where this goes wrong: "1.10a" comes
+          # before "1.9a" as text and after it as a version, and both shapes are
+          # in use across these repositories.
+          PREV="$(git describe --tags --abbrev=0 "${VERSION}^" 2>/dev/null || true)"
+
+          if [ -n "${PREV}" ]; then
+            # The commit subjects. They are written to be read -- a line each
+            # saying what changed -- so they make better notes than a diff.
+            git log "${PREV}..${VERSION}" --format='- %s' > notes.md
+            printf '\nFull changes: %s/compare/%s...%s\n' \
+              "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" "${PREV}" "${VERSION}" >> notes.md
+          else
+            echo "First release." > notes.md
+          fi
+
+          # An empty body is rejected, and a tag on a commit already tagged
+          # would produce one.
+          [ -s notes.md ] || echo "No changes recorded." > notes.md
+
+          echo "--- notes ---"
+          cat notes.md
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+
+          # Idempotent: a re-run, or a tag deleted and pushed again, should not
+          # fail on a release that is already there.
+          if gh release view "${VERSION}" >/dev/null 2>&1; then
+            echo "Release ${VERSION} already exists."
+          else
+            gh release create "${VERSION}" --title "${VERSION}" --notes-file notes.md
+          fi

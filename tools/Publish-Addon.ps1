@@ -97,16 +97,6 @@ try {
     # in the diff of every release.
     Set-Content -Path $tocPath -Value $content -Encoding utf8 -NoNewline
 
-    # The tag that came before this one, for the release notes below. Read
-    # before the new tag exists so it cannot pick itself.
-    $previous = @(git tag --list |
-        Where-Object { $_ -match '^\d+\.\d+[a-z]$' } |
-        Sort-Object -Property `
-            @{ Expression = { [int]($_ -replace '^(\d+)\..*$', '$1') } }, `
-            @{ Expression = { [int]($_ -replace '^\d+\.(\d+)[a-z]$', '$1') } }, `
-            @{ Expression = { $_.Substring($_.Length - 1) } } -Descending |
-        Select-Object -First 1)
-
     git add -- $Toc
     git commit -q -m "Version $Version"
     git tag $Version
@@ -119,43 +109,10 @@ try {
     Say ""
     Say "Published $Version. CurseForge builds from the tag on its own."
 
-    # ---------------------------------------------------------- GitHub release
-    #
-    # Presentation, not plumbing. CurseForge builds from the tag and never looks
-    # at this -- it is what fills the Releases panel on the repository page for
-    # people reading the code rather than installing the addon.
-    #
-    # So it must never take the publish down with it. By the time this runs the
-    # tag is pushed and the build is already happening; failing here would
-    # report a release that did happen as one that did not.
-    #
-    # Needs the GitHub CLI, which is not required to publish. Without it the
-    # step says so and stops, and the tag stands on its own.
-    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-        Say "No GitHub CLI, so no Release was created -- the tag is pushed and CurseForge has it."
-        Say "  Install it with:  winget install --id GitHub.cli   then:  gh auth login"
-    } else {
-        try {
-            # The commit subjects since the last release. These are written to
-            # be read -- one line each saying what changed and why -- so they
-            # make better notes than anything generated from a diff.
-            if ($previous) {
-                $notes = (git log "$previous..$Version" --format="- %s") -join "`n"
-            } else {
-                $notes = "First release."
-            }
-            if (-not $notes) { $notes = "No changes recorded." }
-
-            gh release create $Version --title $Version --notes $notes 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "gh exited $LASTEXITCODE" }
-
-            Say ("Created the GitHub release for {0}{1}." -f $Version,
-                 $(if ($previous) { " (changes since $previous)" } else { "" }))
-        } catch {
-            Say ("Tag published, but the GitHub release failed: " + $_.Exception.Message)
-            Say "  Nothing to undo -- CurseForge builds from the tag, which is up."
-        }
-    }
+    # The Releases panel on GitHub is filled by .github/workflows/release.yml,
+    # which fires on the tag this just pushed. Nothing to do here, and nothing
+    # to install: gh and a token are already on the runner, which is exactly why
+    # that work is a workflow and not another step in this script.
 } finally {
     Pop-Location
 }
