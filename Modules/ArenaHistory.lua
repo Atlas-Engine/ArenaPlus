@@ -20,7 +20,22 @@ local module = ns.RegisterModule("history",{
 	defaults    = { enabled=true },
 })
 
-local KEEP_MAX     = 100  -- kept per bracket
+-- Kept per bracket.
+--
+-- Was 100, which is not a lot of arena: a fortnight of 2v2 filled it, and
+-- from then on every match recorded silently deleted the oldest one. That is
+-- how three games played on 2026-08-30 arrived and three from 08-16 left
+-- without anything being said -- the count stayed at 100 and looked stable.
+--
+-- 500 rather than no limit at all. A match stores every player's damage,
+-- healing, crowd control and death order, which measures at roughly 1.5 KB;
+-- uncapped, a heavy season across four brackets would put tens of megabytes
+-- into SavedVariables, and that file is read synchronously at load. 500 a
+-- bracket is five pages of the window and about 3 MB at worst.
+--
+-- Raise it if that turns out to be the wrong trade. What must not come back
+-- is a limit small enough to hit in normal play.
+local KEEP_MAX     = 500  -- kept per bracket
 local PANEL_ROWS   = 10   -- shown beside the PvP panel
 local ROW_HEIGHT   = 20
 local ICON_SIZE    = 16
