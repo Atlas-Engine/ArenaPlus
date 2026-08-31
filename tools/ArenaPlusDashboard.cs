@@ -257,6 +257,17 @@ class Dashboard : Form
         root  = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(tools)), "ArenaPlus_Data");
 
         Text = "ArenaPlus data";
+
+        // The gladiator helmet in the title bar and in Alt+Tab as well.
+        //
+        // WinForms does not take the executable's icon for its windows -- it
+        // draws its own default there regardless -- so setting /win32icon only
+        // reaches Explorer and the taskbar. Read back off the running exe, the
+        // same way the tray icon below does, so there is one icon to change and
+        // not three.
+        try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+        catch { Icon = SystemIcons.Application; }
+
         ClientSize = new Size(640, 690);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedSingle;
