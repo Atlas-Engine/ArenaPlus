@@ -1,1 +1,4 @@
-﻿- Fixes and improvements in Shared code, Match history, Ladder window.
+﻿- Opening bracket
+- Start on the bracket you last played
+- The Rated page opens with the bracket you played most recently already lit, instead of 10v10. Join Battle stays greyed out until you click a row yourself: the game only accepts a queue you chose by hand.
+- Pick a bracket
