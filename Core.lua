@@ -1356,16 +1356,27 @@ function ns.LadderEntry(bracket,name,region)
 	local person,realm=name:match("^([^%-]+)%-(.+)$")
 	person=person or name
 
+	-- A realm was given, so a miss is an answer: this character is not on this
+	-- bracket's ladder. It must not fall through to the bare name.
+	--
+	-- Falling through is what made Jaffaar-Pagle read as Jaffaar-Ra-den. The
+	-- index does guard a shared bare name -- it poisons the key to false when two
+	-- characters claim it -- but only where both are on the same bracket's
+	-- ladder. Where only one had reached a bracket the bare key was a valid
+	-- single entry, and asking for the other realm's character returned it,
+	-- rating, rank and all.
+	--
+	-- The realm formats do not need the fallback either: PlainName strips
+	-- punctuation from both halves, so a scoreboard's "BloodsailBuccaneers" and
+	-- the ladder's "bloodsail-buccaneers" already meet.
 	if realm then
-		local found=index[ns.PlainName(person).."-"..ns.PlainName(realm)]
-		if found then return found end
+		return index[ns.PlainName(person).."-"..ns.PlainName(realm)] or nil
 	end
 
-	-- Realm-less, for an opponent from your own.
-	local found=index[ns.PlainName(person)]
-	if found then return found end
-
-	return nil
+	-- No realm, which is how the game names somebody from your own. False rather
+	-- than nil means the name is shared on this ladder and cannot be resolved
+	-- without one, so "or nil" turns that refusal into a clean miss.
+	return index[ns.PlainName(person)] or nil
 end
 
 ----------------------------------------------------------------
