@@ -163,6 +163,7 @@ class Dashboard : Form
     Label pauseNote;
     TextBox versionBox;
     Button publishButton;
+    Button commitButton;
     Label addonNote;
 
     // The tasks the pause button switched off, by name, and empty when nothing
@@ -504,6 +505,68 @@ class Dashboard : Form
         pausedTasks.Clear();
     }
 
+    // A prompt with room to write in.
+    //
+    // Not a text box on the window itself: a commit message and a changelog are
+    // both several lines, and two multi-line boxes would take more of a 640
+    // pixel window than the jobs they sit under. A dialog also gives Cancel a
+    // meaning, which matters when the button behind it pushes to GitHub.
+    //
+    // Returns null when cancelled or left empty, which every caller treats as
+    // "do nothing" rather than as an empty message.
+    static string AskForText(string title, string prompt, string preset)
+    {
+        using (var box = new Form())
+        {
+            box.Text = title;
+            box.FormBorderStyle = FormBorderStyle.FixedDialog;
+            box.StartPosition = FormStartPosition.CenterParent;
+            box.MinimizeBox = false;
+            box.MaximizeBox = false;
+            box.ClientSize = new Size(520, 260);
+            box.Font = new Font("Segoe UI", 9F);
+
+            var label = new Label();
+            label.Text = prompt;
+            label.Location = new Point(12, 10);
+            label.Size = new Size(496, 34);
+            label.ForeColor = Color.DimGray;
+            box.Controls.Add(label);
+
+            var text = new TextBox();
+            text.Multiline = true;
+            text.ScrollBars = ScrollBars.Vertical;
+            text.AcceptsReturn = true;
+            text.Location = new Point(12, 48);
+            text.Size = new Size(496, 160);
+            text.Text = preset ?? "";
+            box.Controls.Add(text);
+
+            var ok = new Button();
+            ok.Text = "OK";
+            ok.DialogResult = DialogResult.OK;
+            ok.Location = new Point(336, 220);
+            ok.Size = new Size(84, 26);
+            box.Controls.Add(ok);
+
+            var cancel = new Button();
+            cancel.Text = "Cancel";
+            cancel.DialogResult = DialogResult.Cancel;
+            cancel.Location = new Point(424, 220);
+            cancel.Size = new Size(84, 26);
+            box.Controls.Add(cancel);
+
+            // Enter inside a multiline box types a newline rather than
+            // accepting, so OK is not the AcceptButton. Escape still cancels.
+            box.CancelButton = cancel;
+
+            if (box.ShowDialog() != DialogResult.OK) return null;
+
+            string typed = text.Text.Trim();
+            return typed.Length == 0 ? null : typed;
+        }
+    }
+
     // ------------------------------------------------- releasing the addon
 
     // Where releases are cut from, which is NOT the folder this exe is in.
@@ -536,7 +599,14 @@ class Dashboard : Form
         publishButton.Click += delegate { PublishAddon(); };
         Controls.Add(publishButton);
 
-        addonNote = AddLabel("", 296, y + 5, 320, 20, false, true);
+        commitButton = new Button();
+        commitButton.Text = "Commit";
+        commitButton.Location = new Point(296, y);
+        commitButton.Size = new Size(92, 26);
+        commitButton.Click += delegate { CommitChanges(); };
+        Controls.Add(commitButton);
+
+        addonNote = AddLabel("", 396, y + 5, 220, 20, false, true);
 
         // Asking git costs a process, so this is not on the one-second tick.
         // The answer only changes when you commit -- which happens in another
@@ -615,6 +685,107 @@ class Dashboard : Form
         catch { return ""; }
     }
 
+    // git, with its exit code and everything it said.
+    //
+    // The read-only Git above swallows failures because a status that cannot be
+    // read is not worth a dialog. Anything that writes has to be able to say
+    // what went wrong.
+    int GitRun(string args, out string output)
+    {
+        output = "";
+        try
+        {
+            var psi = new ProcessStartInfo("git", args);
+            psi.WorkingDirectory = AddonRepo;
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+
+            using (Process p = Process.Start(psi))
+            {
+                output = (p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd()).Trim();
+                p.WaitForExit(60000);
+                return p.ExitCode;
+            }
+        }
+        catch (Exception e) { output = e.Message; return -1; }
+    }
+
+    // Commit everything outstanding, with a message you wrote.
+    //
+    // Everything, deliberately: this window has no way to show a diff, and a
+    // partial commit chosen from a list nobody can see is how a change ends up
+    // described by a message about a different one.
+    //
+    // It commits and pushes together. A commit that stays here helps nobody --
+    // the release path builds from what is on GitHub -- and leaving the two as
+    // separate buttons would only invite the tag to go up without the code.
+    void CommitChanges()
+    {
+        string status;
+        if (GitRun("status --porcelain", out status) != 0 || status.Length == 0)
+        {
+            MessageBox.Show("Nothing to commit.", "ArenaPlus data",
+                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+            RefreshAddonPublish();
+            return;
+        }
+
+        string message = AskForText("Commit",
+            "What changed, and why. The first line is the subject; leave a blank line "
+            + "after it.\r\n\r\nAbout to commit and push:\r\n" + status,
+            "");
+        if (message == null) return;
+
+        commitButton.Enabled = false;
+        Cursor = Cursors.WaitCursor;
+        try
+        {
+            string output;
+            if (GitRun("add -A", out output) != 0)
+            {
+                MessageBox.Show("git add failed:\r\n\r\n" + output, "Not committed",
+                                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // Through a file rather than -m, so a multi-line message survives
+            // and nothing has to be escaped for a command line.
+            string temp = Path.Combine(Path.GetTempPath(), "arenaplus-commit.txt");
+            File.WriteAllText(temp, message);
+
+            int code = GitRun("commit -q -F \"" + temp + "\"", out output);
+            try { File.Delete(temp); } catch { }
+
+            if (code != 0)
+            {
+                MessageBox.Show("git commit failed:\r\n\r\n" + output, "Not committed",
+                                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (GitRun("push -q origin HEAD", out output) != 0)
+            {
+                MessageBox.Show("Committed, but the push failed:\r\n\r\n" + output
+                                + "\r\n\r\nThe commit is here; push it by hand.",
+                                "Committed, not pushed",
+                                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string shown;
+            GitRun("log --oneline -1", out shown);
+            MessageBox.Show("Committed and pushed:\r\n\r\n" + shown, "Committed",
+                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        finally
+        {
+            Cursor = Cursors.Default;
+            RefreshAddonPublish();
+        }
+    }
+
     void RefreshAddonPublish()
     {
         if (versionBox == null) return;
@@ -643,7 +814,11 @@ class Dashboard : Form
             versionBox.Tag = next;
         }
 
+        // Opposites: you commit when there is something to commit, and you
+        // release when there is not.
         publishButton.Enabled = !dirty;
+        if (commitButton != null) commitButton.Enabled = dirty;
+
         addonNote.Text = dirty
             ? "uncommitted changes -- commit them first"
             : (latest == null
@@ -673,13 +848,46 @@ class Dashboard : Form
             return;
         }
 
+        // What players will read, and the only thing they will read.
+        //
+        // It goes into CHANGELOG-RELEASE.md, which .pkgmeta points CurseForge at
+        // and the release workflow copies into the GitHub release, so both say
+        // the same thing. Without it CurseForge writes its own from the commits
+        // between tags -- reasoning, measured numbers and Co-Authored-By
+        // trailers, none of it written for a player.
+        //
+        // Cancelling here cancels the release. There is no accidental path to
+        // publishing without notes.
+        string changelog = AskForText("Changelog for " + version,
+            "One line per change, in the player's words. This is what CurseForge "
+            + "and the GitHub release will show, and all they will show.",
+            "");
+        if (changelog == null) return;
+
         // Asked once, because pushing a tag is a build and a download for
         // everybody -- and a tag CurseForge has already built from cannot be
         // taken back quietly.
         if (MessageBox.Show("Tag and push ArenaPlus " + version + "?" + Environment.NewLine +
-                            Environment.NewLine + "CurseForge will build a new file from it.",
+                            Environment.NewLine + "CurseForge will build a new file from it."
+                            + Environment.NewLine + Environment.NewLine + changelog,
                             "ArenaPlus data", MessageBoxButtons.OKCancel, MessageBoxIcon.Question)
             != DialogResult.OK) return;
+
+        // Handed over as a file, not as an argument. Passing it on the command
+        // line was tried and measured: a newline written as a backtick-n arrived
+        // literally so the whole changelog became one bullet, and a quotation
+        // mark in the text split the argument, so three lines of notes reached
+        // the script as the single line [- Fixed the "same]. A file has no
+        // escaping to get wrong.
+        string changelogFile = Path.Combine(Path.GetTempPath(), "arenaplus-changelog.txt");
+        try { File.WriteAllText(changelogFile, changelog); }
+        catch (Exception e)
+        {
+            MessageBox.Show("Could not write the changelog:" + Environment.NewLine
+                            + Environment.NewLine + e.Message,
+                            "ArenaPlus data", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
 
         string script = Path.Combine(tools, "Publish-Addon.ps1");
         if (!File.Exists(script))
@@ -697,8 +905,9 @@ class Dashboard : Form
         try
         {
             var psi = new ProcessStartInfo("powershell.exe",
-                string.Format("-ExecutionPolicy Bypass -NonInteractive -File \"{0}\" -Version {1}",
-                              script, version));
+                string.Format("-ExecutionPolicy Bypass -NonInteractive -File \"{0}\" "
+                              + "-Version {1} -ChangelogFile \"{2}\"",
+                              script, version, changelogFile));
             psi.UseShellExecute = false;
             psi.CreateNoWindow = true;
             psi.RedirectStandardOutput = true;
@@ -712,7 +921,11 @@ class Dashboard : Form
             }
         }
         catch (Exception e) { output = e.Message; code = -1; }
-        finally { Cursor = Cursors.Default; }
+        finally
+        {
+            Cursor = Cursors.Default;
+            try { File.Delete(changelogFile); } catch { }
+        }
 
         // The script's own words, whichever way it went: it says more about why
         // it stopped than an exit code can, and it has already written the same
