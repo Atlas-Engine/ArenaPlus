@@ -197,11 +197,20 @@ local BAND_INSET  = 12
 local BAND_HEIGHT = 32
 local LIST_TOP    = -(BAND_INSET+BAND_HEIGHT+8)
 local EMPTY_TOP   = LIST_TOP-2
-local BRACKET_X  = 250
+-- Not the ladder's number any more, and deliberately so.
+--
+-- What has to match between the two windows is where the *brackets* sit, since
+-- those are the buttons you look for when you swap. The ladder leads its row
+-- with two buttons and this one with a single wider one, so the two rows can
+-- only start in the same place at the cost of the brackets landing 10 apart.
+-- 260 here and 208 there put 2v2 at 352 in both.
+local BRACKET_X  = 260
+
 -- Wider than the ladder's, because "Leaderboard" is a longer word than
--- "History". Both sit in the same place: the bracket row, left of 2v2.
+-- "History".
 local SWAP_W     = 88
-local SWAP_GAP   = 6
+-- The same gap the brackets use, so the row is evenly spaced end to end.
+local SWAP_GAP   = 4
 local rows={}
 local fullRows={}
 local selectedAt   -- the match expanded in the full window

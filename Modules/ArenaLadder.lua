@@ -77,12 +77,26 @@ local COLUMNS_TOP  = -(BAND_INSET+BAND_HEIGHT)        -- the column headings
 local DIVIDER_TOP  = COLUMNS_TOP-12                   -- the rule beneath them
 local LIST_TOP     = DIVIDER_TOP-6                    -- the scrolling list
 local EMPTY_TOP    = DIVIDER_TOP-12                   -- and "nothing to show"
-local BRACKET_X  = 250
--- The swap button sits in the bracket row, left of 2v2, and the row starts
--- after it. Up here with the thing it moves you between, rather than alone in
--- the bottom corner where it read as a footnote.
+-- Where the button row begins, and it begins late on purpose.
+--
+-- The heading beside it is "10v10 <flag>  top 5006 players" at its longest, and
+-- that runs to about 195 -- so the row starting at 250 was never the constraint
+-- it looked like: the first button sat at 250 only until Home was put in front
+-- of History and pulled the row back to 182, under the end of the subtitle.
+--
+-- 208 is as far right as the row can go. Past it the last bracket meets the
+-- region flags, which are anchored off the search box at the other end.
+local BRACKET_X  = 208
+
+-- History and Home lead the row, in that order: the button that changes window
+-- before the one that only changes what you are looking at within it.
 local SWAP_W     = 76
-local SWAP_GAP   = 6
+local HOME_W     = 60
+
+-- One gap for the whole row, brackets included. It was 8 between Home and
+-- History, 6 before 2v2 and 2 between the brackets, which made Home read as
+-- something bolted on rather than as the first of six.
+local ROW_GAP    = 4
 
 -- The eleven classes, in the order their icons are laid out.
 --
@@ -1192,7 +1206,10 @@ local function CreateWindow()
 	-- Only of use when this is standing on its own; the helper hides it while
 	-- the Rated page is up.
 	-- Clear of the heading and its place count at their widest.
-	frame.UpdateBrackets=ns.BuildBracketPicker(frame,"TOPLEFT",BRACKET_X+SWAP_W+SWAP_GAP,HEADER_TOP)
+	-- After History and Home. Written as the sum rather than as a number so the
+	-- row cannot come apart when one of the two buttons is resized.
+	frame.UpdateBrackets=ns.BuildBracketPicker(frame,"TOPLEFT",
+		BRACKET_X+SWAP_W+ROW_GAP+HOME_W+ROW_GAP,HEADER_TOP)
 
 	local close=CreateFrame("Button",nil,frame,"UIPanelCloseButton")
 	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0)
@@ -1596,26 +1613,31 @@ local function CreateWindow()
 	frame.swapButton=PageButton(L.LADDER_SWAP,SWAP_W)
 	frame.swapButton:SetPoint("TOPLEFT",frame,"TOPLEFT",BRACKET_X,HEADER_TOP)
 
-	-- Home, beside History rather than down among the page buttons.
+	-- Home, in the bracket row rather than down among the page buttons.
 	--
 	-- It was a "Top" button there first and read as another page control, which
 	-- is the one thing it is not: "<<" moves you within whatever you are looking
 	-- at, and this changes what you are looking at -- clearing the search, the
 	-- spec filter and the alts list on the way.
 	--
-	-- An icon because the row it sits in is names and brackets, and a fourth
-	-- word would crowd them. The tooltip carries the meaning.
-	-- A word, not a picture.
-	--
-	-- Three icons were tried and none worked: the innkeeper tracking texture
-	-- reads as a person, an up arrow reads as a page control, and the garrison
-	-- building did not resolve on this client at all. A blank button is worse
-	-- than a plain one, and none of them said "and it clears your filters"
-	-- anyway -- which is half of what this does.
-	--
-	-- The tooltip carries the detail the word cannot.
-	frame.homeButton=PageButton(L.LADDER_HOME,60)
-	frame.homeButton:SetPoint("RIGHT",frame.swapButton,"LEFT",-8,0)
+	-- A word, not a picture. Three icons were tried and none worked: the
+	-- innkeeper tracking texture reads as a person, an up arrow reads as a page
+	-- control, and the garrison building did not resolve on this client at all.
+	-- None of them said "and it clears your filters" anyway, which is half of
+	-- what this does, so the tooltip carries the detail either way.
+	frame.homeButton=PageButton(L.LADDER_HOME,HOME_W)
+	-- After History, not before it. In front, it was the first thing in the row
+	-- and the first thing over the heading; behind, the row grows rightwards
+	-- from one fixed point and the heading has the whole left of the band.
+	frame.homeButton:SetPoint("LEFT",frame.swapButton,"RIGHT",ROW_GAP,0)
+
+	-- And the heading stops where the row starts, whatever it says. Anchoring
+	-- only its left edge is what let "top 5006 players" run under a button:
+	-- given both edges and no wrapping it is cut short instead, which is a
+	-- reading of the number rather than a loss of it.
+	frame.subtitle:SetPoint("RIGHT",frame.swapButton,"LEFT",-10,0)
+	frame.subtitle:SetWordWrap(false)
+	frame.subtitle:SetJustifyH("LEFT")
 
 	frame.homeButton:SetScript("OnEnter",function(self)
 		GameTooltip:SetOwner(self,"ANCHOR_RIGHT")

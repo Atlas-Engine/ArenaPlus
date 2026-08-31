@@ -706,8 +706,12 @@ end
 -- behind it moved every time the picker was used, which is the one thing a row
 -- of buttons must never do.
 -- One button per bracket, and the gap between them.
+-- The gap is the one both windows use between every button in the header row,
+-- not a spacing private to the brackets. At 2 the four sat tight against each
+-- other while the buttons in front of them stood 6 and 8 apart, and the row
+-- read as three groups that happened to be on the same line.
 local BRACKET_BUTTON_W   = 46
-local BRACKET_BUTTON_GAP = 2
+local BRACKET_BUTTON_GAP = 4
 
 -- How wide the row comes out.
 --
