@@ -111,6 +111,10 @@ local PAGE_SIZE = 150
 local window
 local page = 1
 local pageChosen = false  -- true once the buttons have been used
+-- Asked for by anything that means "show me this from the top", and
+-- honoured by the next Refresh -- which is the first moment the list has
+-- the height the new scroll range has to be measured against.
+local wantTop = false
 local jumpToSelf = false  -- set by the My rank button, cleared once obeyed
 local shownBracket        -- which bracket the page number belongs to
 local showingAlts = false -- the My alts view, rather than the ladder
@@ -118,6 +122,12 @@ local specFilter -- the spec id being shown alone, or nil for all of them
 local rows={}    -- the pool, one per visible line rather than one per place
 local shown      -- the list the pool is drawing from, and which row is lit
 local query=""   -- what is typed in the search box
+-- Which of the matching rows to land on, counted from one.
+--
+-- A name is not unique on a ladder that spans realms: there is a Jaffaar
+-- on Ra-den and a Jaffaar on Pagle, and searching found the first and gave
+-- no way to reach the second. Enter steps this on, and it wraps.
+local searchNth = 1
 
 ----------------------------------------------------------------
 -- Reading the data
@@ -753,10 +763,28 @@ local function Refresh()
 
 	-- Found in the whole ladder before it is cut into pages, so a search can
 	-- reach somebody who is not on the page you happen to be looking at.
-	local hit
+	-- The row the search is pointing at, and how many it could have pointed at.
+	--
+	-- Every match is collected rather than stopping at the first, because the
+	-- first is not always the one wanted: same name, different realm. searchNth
+	-- picks among them and Enter moves it on.
+	local hit,matchCount
 	if query~="" then
+		local matches
 		for index,entry in ipairs(full) do
-			if Searched(entry) then hit=index break end
+			if Searched(entry) then
+				matches=matches or {}
+				matches[#matches+1]=index
+			end
+		end
+
+		if matches then
+			matchCount=#matches
+			-- Wrapped, so Enter on the last match comes back round to the first
+			-- rather than stopping at an end nothing announces. Taken modulo the
+			-- count on every pass, so a counter left high by a longer search still
+			-- lands somewhere real when the query narrows.
+			hit=matches[((searchNth-1)%matchCount)+1]
 		end
 	end
 
@@ -921,6 +949,43 @@ local function Refresh()
 	-- content keeps its full height even though only a screenful exists.
 	window.content:SetHeight(math.max(1,#list*ROW_HEIGHT))
 
+	-- Back to the top, the scroll bar included.
+	--
+	-- Every caller above already did SetVerticalScroll(0), and every one of them
+	-- was quietly undone. The scroll frame moves at once, so the rows redraw at
+	-- the top and it looks right; the bar only hears about it from
+	-- OnScrollRangeChanged a frame later, still holding its old value, and puts
+	-- the list straight back. Turning from page 2 to page 1 left the ladder
+	-- showing #132 under a header reading "page 1 of 5".
+	--
+	-- It also has to happen here rather than at the callers, because the list
+	-- only takes the new page's height on the line above -- a range set before
+	-- that is the old page's.
+	--
+	-- Not when something asked to be centred: My rank resets the scroll and then
+	-- wants Refresh to find your row, and returning here would strand it at the
+	-- top of the ladder instead.
+	if wantTop and not centre then
+		wantTop=false
+
+		window.scroll:UpdateScrollChildRect()
+		local range=window.scroll:GetVerticalScrollRange() or 0
+
+		local bar=window.scroll.ScrollBar
+		if not bar then
+			local barName=window.scroll:GetName()
+			bar=barName and _G[barName.."ScrollBar"] or nil
+		end
+
+		if bar then
+			bar:SetMinMaxValues(0,range)
+			bar:SetValue(0)
+		end
+
+		window.scroll:SetVerticalScroll(0)
+		return Layout()
+	end
+
 	-- Opened on your own place, and at the top where you have none.
 	--
 	-- Finding yourself is the first thing anybody does with a leaderboard, and
@@ -1082,11 +1147,29 @@ local function CreateWindow()
 			end
 
 			query=(self:GetText() or ""):lower()
+			-- A changed query is a new search, so it starts at the first match
+			-- again rather than carrying the last one's position into it.
+			searchNth=1
 			-- Searching means "take me there", which outranks the page you
 			-- happened to be on.
 			pageChosen=false
 			Refresh()
 		end)
+		-- Enter steps to the next row of the same name.
+		--
+		-- Focus is kept rather than cleared, which is the opposite of what a
+		-- search box usually does with Enter: here the key is the control, and
+		-- letting go of the box after one press would make the second one do
+		-- nothing.
+		search:SetScript("OnEnterPressed",function()
+			if query=="" then return end
+			searchNth=searchNth+1
+			-- The next match may be on another page, and this is a request to be
+			-- taken to it.
+			pageChosen=false
+			Refresh()
+		end)
+
 		search:SetScript("OnEscapePressed",function(self) self:SetText("") self:ClearFocus() end)
 
 		frame.search=search
@@ -1178,6 +1261,7 @@ local function CreateWindow()
 			-- different ladder, and holding the scroll there lands on a
 			-- stranger with no sign of why.
 			if frame.scroll then frame.scroll:SetVerticalScroll(0) end
+			wantTop=true
 			Refresh()
 		end)
 
@@ -1253,6 +1337,7 @@ local function CreateWindow()
 				-- A different set of rows means the old scroll position points
 				-- at nobody.
 				if window and window.scroll then window.scroll:SetVerticalScroll(0) end
+				wantTop=true
 				Refresh()
 			end)
 
@@ -1349,6 +1434,7 @@ local function CreateWindow()
 		query=""
 		if frame.search then frame.search:SetText("") end
 		if frame.scroll then frame.scroll:SetVerticalScroll(0) end
+		wantTop=true
 		Refresh()
 	end
 
@@ -1379,6 +1465,7 @@ local function CreateWindow()
 		query=""
 		if frame.search then frame.search:SetText("") end
 		if frame.scroll then frame.scroll:SetVerticalScroll(0) end
+		wantTop=true
 		page=1
 		pageChosen=false
 		Refresh()
@@ -1397,6 +1484,7 @@ local function CreateWindow()
 		query=""
 		if frame.search then frame.search:SetText("") end
 		if frame.scroll then frame.scroll:SetVerticalScroll(0) end
+		wantTop=true
 		-- Outranks a page chosen by hand: this is the one button whose whole
 		-- job is to move the page.
 		pageChosen=false
@@ -1475,6 +1563,7 @@ local function CreateWindow()
 
 		specFilter=nil
 		if self.scroll then self.scroll:SetVerticalScroll(0) end
+		wantTop=true
 		if ns.ClearViewBracket then ns.ClearViewBracket() end
 	end)
 	return frame
