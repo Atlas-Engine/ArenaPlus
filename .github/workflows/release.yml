@@ -45,14 +45,31 @@ jobs:
           # in use across these repositories.
           PREV="$(git describe --tags --abbrev=0 "${VERSION}^" 2>/dev/null || true)"
 
-          if [ -n "${PREV}" ]; then
-            # The commit subjects. They are written to be read -- a line each
-            # saying what changed -- so they make better notes than a diff.
+          # CHANGELOG-RELEASE.md holds exactly this version's entry. It is
+          # written by Publish-Addon.ps1 and committed with the tag, and it is
+          # the same file .pkgmeta points CurseForge at -- so the project page
+          # and the GitHub release say the same thing rather than two different
+          # things assembled two different ways.
+          #
+          # Commit subjects were the first source here and were the wrong one:
+          # they are written for whoever maintains this, not for a player.
+          # "Keep ## Interface on the first line of the .toc" is true, and
+          # useless as a release note.
+          if [ -s CHANGELOG-RELEASE.md ]; then
+            cp CHANGELOG-RELEASE.md notes.md
+          elif [ -n "${PREV}" ]; then
             git log "${PREV}..${VERSION}" --format='- %s' > notes.md
-            printf '\nFull changes: %s/compare/%s...%s\n' \
-              "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" "${PREV}" "${VERSION}" >> notes.md
           else
             echo "First release." > notes.md
+          fi
+
+          # echo rather than printf: this file has been through enough
+          # backslash-mangling for one day, and a compare link needs none.
+          if [ -n "${PREV}" ]; then
+            {
+              echo ""
+              echo "Full changes: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${PREV}...${VERSION}"
+            } >> notes.md
           fi
 
           # An empty body is rejected, and a tag on a commit already tagged

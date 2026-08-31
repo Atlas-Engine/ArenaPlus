@@ -24,6 +24,18 @@ param(
     [string]$Toc     = "ArenaPlus.toc",
     [Parameter(Mandatory = $true)]
     [string]$Version,
+
+    # What changed, in the player's terms, one line per point. Written into
+    # CHANGELOG.md under this version and into CHANGELOG-RELEASE.md on its own,
+    # which is the file CurseForge and the GitHub release both read.
+    #
+    # Taken as a FILE rather than a string. Passing it as an argument was tried
+    # and measured: a newline written as a backtick-n arrives literally, so the
+    # whole changelog became one bullet, and a quotation mark in the text tore
+    # the argument in half -- three lines of notes arrived as the single line
+    # [- Fixed the "same]. A file has no escaping to get wrong.
+    [string]$ChangelogFile = "",
+
     [switch]$WhatIf
 )
 
@@ -88,7 +100,11 @@ try {
     $content = [regex]::Replace($content, '(?m)^## Version:.*$', "## Version: $Version")
 
     if ($WhatIf) {
-        Say "Would set $Toc to $Version, commit, tag and push. Nothing done (-WhatIf)."
+        Say "Would set $Toc to $Version, write the changelog, commit, tag and push."
+        Say "Nothing done (-WhatIf). The entry would read:"
+        if ($ChangelogFile -and (Test-Path $ChangelogFile)) {
+            foreach ($line in (Get-Content $ChangelogFile)) { if ($line.Trim()) { Say ("   " + $line) } }
+        }
         return
     }
 
@@ -97,7 +113,39 @@ try {
     # in the diff of every release.
     Set-Content -Path $tocPath -Value $content -Encoding utf8 -NoNewline
 
-    git add -- $Toc
+    # ------------------------------------------------------- the changelog
+    #
+    # Two files, because they answer different questions. CHANGELOG.md is the
+    # history and grows; CHANGELOG-RELEASE.md holds only what is being released
+    # now, and is what .pkgmeta points CurseForge at. Writing the whole history
+    # there would put every past version on the project page at every release.
+    #
+    # Bullets are left as typed apart from being given a "- " where they have
+    # none, so a line written as prose still reads as a list item.
+    $Changelog = ""
+    if ($ChangelogFile -and (Test-Path $ChangelogFile)) {
+        $Changelog = Get-Content $ChangelogFile -Raw
+    }
+
+    $entry = ($Changelog -split "`r?`n" |
+              ForEach-Object { $_.TrimEnd() } |
+              Where-Object { $_ -ne "" } |
+              ForEach-Object { if ($_ -match '^\s*[-*]') { $_ } else { "- $_" } }) -join "`n"
+
+    if (-not $entry) { $entry = "- Maintenance release." }
+
+    $releasePath = Join-Path $Repo "CHANGELOG-RELEASE.md"
+    $historyPath = Join-Path $Repo "CHANGELOG.md"
+
+    Set-Content -Path $releasePath -Value $entry -Encoding utf8
+
+    # Prepended, so the newest version is first and nothing already written is
+    # touched. A missing file starts one rather than failing the release.
+    $history = if (Test-Path $historyPath) { Get-Content $historyPath -Raw } else { "# Changelog`n" }
+    $history = "# Changelog`n`n## $Version`n`n$entry`n`n" + ($history -replace '^# Changelog\s*', '')
+    Set-Content -Path $historyPath -Value $history -Encoding utf8
+
+    git add -- $Toc CHANGELOG.md CHANGELOG-RELEASE.md
     git commit -q -m "Version $Version"
     git tag $Version
 

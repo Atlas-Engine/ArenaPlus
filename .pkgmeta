@@ -23,6 +23,28 @@ package-as: ArenaPlus
 required-dependencies:
   - arenaplus-data
 
+# Use CHANGELOG-RELEASE.md as the changelog rather than letting CurseForge
+# write one.
+#
+# Without this it builds the text itself from the commits between tags, which
+# is how the project page came to show full commit bodies -- reasoning, measured
+# numbers, Co-Authored-By trailers and all -- to anybody clicking Changelog.
+# Nothing there is written for a player.
+#
+# markup-type matters too: without it the notes are shown unrendered, so
+# Markdown syntax appears literally.
+#
+# The file holds ONLY the version being released, and Publish-Addon.ps1
+# rewrites it on every publish. Pointing this at CHANGELOG.md instead would put
+# the entire history on the page each time.
+#
+# It must therefore stay OUT of the ignore list below: the packager has to be
+# able to read it. CHANGELOG.md is ignored, because that one is for the
+# repository rather than the download.
+manual-changelog:
+  filename: CHANGELOG-RELEASE.md
+  markup-type: markdown
+
 ignore:
   # The data pipeline. It has to live in the repository, because that is what
   # the scheduled GitHub Action checks out and runs -- but it has no business
@@ -40,6 +62,7 @@ ignore:
 
   # Repository furniture the game never reads.
   - README.md
+  - CHANGELOG.md
   - LICENSE
   - .git
   - .gitignore
