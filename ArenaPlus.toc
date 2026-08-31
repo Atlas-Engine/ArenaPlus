@@ -1,4 +1,5 @@
-﻿# 50504 is the newest of these and the one the client is on. There is no
+﻿## Interface: 50500, 50502, 50503, 50504
+# 50504 is the newest of these and the one the client is on. There is no
 # 50505: it was listed here for three days, and CurseForge -- unable to
 # match it to any WoW version -- published the addon as supporting 3.80.2,
 # which is a real interface number (38002) belonging to a different
@@ -8,7 +9,6 @@
 # Checked against what is installed rather than reasoned about: every
 # third-party addon in the AddOns folder -- AtlasLoot, Auctionator,
 # Bagnon, Bartender4 -- tops out at 50504, and not one names 50505.
-## Interface: 50500, 50502, 50503, 50504
 ## Title: ArenaPlus
 ## Author: David / Atlas-Engine
 ## Version: 1.0b
