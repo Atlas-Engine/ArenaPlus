@@ -46,6 +46,12 @@ L.PVP_BRACKET_GONE        = "The page cannot be opened on a chosen bracket: high
 ----------------------------------------------------------------
 -- Rated page
 ----------------------------------------------------------------
+L.PREPICK_TITLE           = "Opening bracket"
+L.PREPICK_ENABLE          = "Start on the bracket you last played"
+L.PREPICK_DESC            = "The Rated page opens with the bracket you played most recently already lit, instead of 10v10. Join Battle stays greyed out until you click a row yourself: the game only accepts a queue you chose by hand."
+L.PREPICK_TIP_TITLE       = "Pick a bracket"
+L.PREPICK_TIP             = "%s is marked as where you played last. Click it, or any other row, to queue -- the game only accepts a bracket you chose by hand."
+
 L.RATED_TITLE             = "Rated page"
 L.RATED_ENABLE            = "Show rank and record"
 L.RATED_DESC              = "The Best column becomes your ladder position, coloured by the current title cutoffs, and Wins becomes your season record."

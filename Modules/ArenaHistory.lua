@@ -283,6 +283,33 @@ local function History(bracket)
 	return list
 end
 
+-- The bracket this character played most recently, or nil having played none.
+--
+-- This character's own record rather than the account's: which bracket to open
+-- on is a question about the character in front of you, and an alt that has
+-- only ever played 2v2 should not be shown 3v3 because the main was there last
+-- night.
+--
+-- The newest match in each list decides, since the lists are kept in the order
+-- they were recorded. A tie cannot really happen -- two matches ending in the
+-- same second in different brackets -- but the comparison is written so the
+-- lower bracket wins rather than left to the order pairs() happens to walk.
+function ns.LastPlayedBracket()
+	local best,newest
+
+	for bracket=1,4 do
+		local list=History(bracket)
+		local last=list[#list]
+		local at=last and tonumber(last.at)
+
+		if at and (not newest or at>newest) then
+			best,newest=bracket,at
+		end
+	end
+
+	return best
+end
+
 -- The season record is the authority on how many matches exist. Holding more
 -- than that means the character was deleted and restored -- the rating and the
 -- record start again, and the older rows describe a life that no longer counts.
@@ -1066,6 +1093,14 @@ end
 -- too: a ladder place is looked up per bracket, and the rows are drawn well
 -- before any of that.
 local function SelectedBracket()
+	-- What the page is *showing* as selected, which is not always what Blizzard
+	-- has selected. The panel can open with a bracket lit that nothing has been
+	-- chosen on yet -- see the pre-selection in PvPDefaultPage -- and the lists
+	-- follow the light rather than the record behind it. Once a row is clicked
+	-- the two agree again and this stops answering.
+	local pending=ns.PendingBracket and ns.PendingBracket()
+	if pending then return pending end
+
 	local frame=ConquestQueueFrame
 	local button=frame and frame.selectedButton
 	return (button and button.id) or 1

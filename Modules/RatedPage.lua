@@ -52,6 +52,17 @@ local function Ours(row)
 	if set then return set end
 
 	set={}
+
+	-- What their labels said before ours went over them.
+	--
+	-- Kept because switching the tweak off has to put the words back, and there
+	-- is no asking the page later what it used to say. The alternative -- call
+	-- their update and let it rewrite its own labels -- means calling one of
+	-- their functions from in here, which is the one thing this addon will not
+	-- do to this panel.
+	if row.BestLabel then set.bestLabel=row.BestLabel:GetText() end
+	if row.WinsLabel then set.winsLabel=row.WinsLabel:GetText() end
+
 	if row.BestRating and row.BestLabel then
 		row.BestRating:Hide()
 		set.rank=row:CreateFontString(nil,"OVERLAY",VALUE_FONT)
@@ -141,10 +152,11 @@ local function UpdateRow(row,bracket)
 		end
 	end
 
+	-- Before the labels are touched, so it can record what they said first.
+	local set=Ours(row)
+
 	if row.BestLabel then row.BestLabel:SetText(L.RATED_RANK_LABEL) end
 	if row.WinsLabel then row.WinsLabel:SetText(L.RATED_WINS_LABEL) end
-
-	local set=Ours(row)
 
 	if ranking and ranking>0 then
 		-- Coloured by the rating that earned the place, not by the place
@@ -239,4 +251,49 @@ function module:OnEnable()
 	-- Ask early so the numbers are already in hand the first time the panel is
 	-- opened, rather than arriving just after it is drawn.
 	if RequestRatedInfo then RequestRatedInfo() end
+end
+
+-- Off means off now, rather than the next time the panel is opened.
+--
+-- Everything this module does is a substitution: their string hidden, ours
+-- drawn in its place. So undoing it is putting both halves back, and there is
+-- nothing here that a redraw would have done anyway -- which is why closing and
+-- reopening the panel was the only way to see the change before this existed.
+--
+-- Only rows that have been drawn at least once are in `ours`, and a row that
+-- has never been drawn has nothing of ours on it to put away.
+function module:OnToggle(enabled)
+	local frame=ConquestQueueFrame
+	if not frame then return end
+
+	for _,row in ipairs(ROWS) do
+		local widget=frame[row.key]
+		local set=widget and ours[widget]
+
+		if set then
+			if set.rank then set.rank:SetShown(enabled) end
+			if set.record then set.record:SetShown(enabled) end
+
+			-- Theirs come back out from under ours.
+			if widget.BestRating then widget.BestRating:SetShown(not enabled) end
+			if widget.Wins then widget.Wins:SetShown(not enabled) end
+
+			if not enabled then
+				-- The glow is ours too, and a title colour left burning behind
+				-- a Blizzard number would be the odd thing left on screen.
+				SetGlow(widget,set.rank,nil)
+
+				if widget.BestLabel and set.bestLabel then
+					widget.BestLabel:SetText(set.bestLabel)
+				end
+				if widget.WinsLabel and set.winsLabel then
+					widget.WinsLabel:SetText(set.winsLabel)
+				end
+			end
+		end
+	end
+
+	-- Switched back on, the numbers are redrawn rather than left as they were
+	-- whenever the page was last looked at.
+	if enabled then UpdateAll() end
 end
