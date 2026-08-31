@@ -1,5 +1,1 @@
-﻿- Home
-- Back to the top of the ladder, with no search, spec filter or alts list
-- Ctrl+C to copy
-- Right-click to copy the name
-- name, or name-realm
+﻿- Fixes and improvements in Shared code, Match history, Ladder window.

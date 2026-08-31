@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 1.1c
+
+- Fixes and improvements in Shared code, Match history, Ladder window.
+
 ## 1.1b
 
 - Home
@@ -13,6 +17,7 @@
 - Fixed characters with the same name on different realms showing each other's rank and rating.
 - Press Enter in the ladder search to step between characters sharing a name.
 - Changing page in the ladder now returns to the top of the list.
+
 
 
 
