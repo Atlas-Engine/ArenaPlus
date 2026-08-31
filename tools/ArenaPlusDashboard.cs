@@ -1,4 +1,4 @@
-// A small window explaining what the two scheduled tasks do, when they next
+﻿// A small window explaining what the two scheduled tasks do, when they next
 // run, and letting either be run on the spot.
 //
 // It exists because the pipeline is invisible. Two scheduled tasks fire hidden
@@ -1189,8 +1189,53 @@ class Dashboard : Form
         return ((dynamic)scheduler).GetFolder("\\");
     }
 
+    // The next scheduled run, pushed out to a whole interval from now.
+    //
+    // Running by hand used to leave the timer where it was, so pressing Run now
+    // two minutes before a scheduled start got you two runs two minutes apart --
+    // one because you asked and one because the clock came round anyway. That is
+    // the opposite of what the button is for. It is worse than merely wasteful
+    // on the publish row, where a second run means a second tag and a second
+    // CurseForge build of data that has barely moved.
+    //
+    // Windows counts a repetition from its trigger's StartBoundary, so moving
+    // that to this moment restarts the cycle. The definition goes back exactly
+    // as it came apart from the boundary, so the interval is untouched and a
+    // task that is switched off stays switched off -- which matters, because
+    // Pause everything works by disabling and this must not quietly undo it.
+    void RestartSchedule(string name)
+    {
+        dynamic folder = RootFolder();
+        dynamic definition = folder.GetTask(name).Definition;
+        dynamic triggers = definition.Triggers;
+
+        // Nothing to move. The gear tasks began life with no trigger at all,
+        // runnable by this button and by nothing else.
+        if ((int)triggers.Count == 0) return;
+
+        string now = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
+        for (int i = 1; i <= (int)triggers.Count; i++) triggers.Item(i).StartBoundary = now;
+
+        // 6 is TASK_CREATE_OR_UPDATE. The principal is passed back as it came so
+        // the task keeps running as whoever owns it rather than being quietly
+        // re-registered as somebody else.
+        folder.RegisterTaskDefinition(name, definition, 6, null, null,
+                                      definition.Principal.LogonType, null);
+    }
+
     void RunTask(string name)
     {
+        // Before the run, so the clock has already moved by the time the job
+        // starts. In its own try, and swallowed: failing to reschedule is not a
+        // reason to refuse the run somebody just asked for -- the worst case is
+        // the old behaviour, which is what this replaces rather than repairs.
+        try { RestartSchedule(name); }
+        catch
+        {
+            scheduler = null;
+            try { RestartSchedule(name); } catch { }
+        }
+
         try { RootFolder().GetTask(name).Run(null); }
         catch { scheduler = null; RootFolder().GetTask(name).Run(null); }
     }
