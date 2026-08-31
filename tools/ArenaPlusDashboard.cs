@@ -199,6 +199,7 @@ class Dashboard : Form
     Button publishButton;
     Button commitButton;
     Label addonNote;
+    readonly ToolTip tips = new ToolTip();
 
     // The tasks the pause button switched off, by name, and empty when nothing
     // is paused. A list rather than a flag, for the reason set out on PauseAll.
@@ -564,13 +565,28 @@ class Dashboard : Form
             box.StartPosition = FormStartPosition.CenterParent;
             box.MinimizeBox = false;
             box.MaximizeBox = false;
-            box.ClientSize = new Size(520, 260);
             box.Font = new Font("Segoe UI", 9F);
+
+            // Measured, not assumed.
+            //
+            // The prompt was given a fixed 34 pixels, which is fine for one
+            // sentence and wrong for the commit prompt -- that one carries the
+            // list of files about to go, so it ran to a dozen lines, was clipped
+            // to two, and the text box was drawn over the rest of it.
+            //
+            // Capped, because a hundred outstanding files should make the list
+            // scroll rather than make the dialog taller than the screen.
+            const int WIDTH = 496;
+            Size measured = TextRenderer.MeasureText(prompt, box.Font,
+                                                     new Size(WIDTH, 0),
+                                                     TextFormatFlags.WordBreak);
+            int promptHeight = Math.Max(20, Math.Min(measured.Height + 6, 190));
 
             var label = new Label();
             label.Text = prompt;
             label.Location = new Point(12, 10);
-            label.Size = new Size(496, 34);
+            label.Size = new Size(WIDTH, promptHeight);
+            label.AutoEllipsis = true;
             label.ForeColor = FADED;
             box.Controls.Add(label);
 
@@ -578,24 +594,29 @@ class Dashboard : Form
             text.Multiline = true;
             text.ScrollBars = ScrollBars.Vertical;
             text.AcceptsReturn = true;
-            text.Location = new Point(12, 48);
-            text.Size = new Size(496, 160);
+            text.Location = new Point(12, label.Bottom + 8);
+            text.Size = new Size(WIDTH, 160);
             text.Text = preset ?? "";
             box.Controls.Add(text);
+
+            int buttons = text.Bottom + 12;
 
             var ok = new Button();
             ok.Text = "OK";
             ok.DialogResult = DialogResult.OK;
-            ok.Location = new Point(336, 220);
+            ok.Location = new Point(336, buttons);
             ok.Size = new Size(84, 26);
             box.Controls.Add(ok);
 
             var cancel = new Button();
             cancel.Text = "Cancel";
             cancel.DialogResult = DialogResult.Cancel;
-            cancel.Location = new Point(424, 220);
+            cancel.Location = new Point(424, buttons);
             cancel.Size = new Size(84, 26);
             box.Controls.Add(cancel);
+
+            // Last, so it fits whatever the prompt turned out to need.
+            box.ClientSize = new Size(520, buttons + 38);
 
             // Enter inside a multiline box types a newline rather than
             // accepting, so OK is not the AcceptButton. Escape still cancels.
@@ -759,6 +780,294 @@ class Dashboard : Form
         catch (Exception e) { output = e.Message; return -1; }
     }
 
+    // What changed, as lines the commit will drop.
+    //
+    // Not a summary. This window has no way to know *why* anything changed, and
+    // that is the half worth writing -- so it fills in the half a machine can
+    // actually know: which files, how much, and which functions appeared or
+    // went. Facts to write against, not a message to accept.
+    //
+    // Every line starts with "#", and the commit is made with --cleanup=strip,
+    // which is git's own convention for exactly this: the notes disappear unless
+    // you move something out of them.
+    // C# keywords that match the method shape above and are not methods.
+    static readonly string[] NotMethods =
+    {
+        "if", "for", "foreach", "while", "switch", "catch", "lock", "using",
+        "return", "throw", "do", "else", "get", "set", "yield", "when", "fixed",
+    };
+
+    // What a file is, in the words somebody writing release notes would use.
+    //
+    // The paths are accurate and useless for the job the box is for: nobody
+    // describes a release as "Modules/ArenaLadder.lua". Anything unlisted keeps
+    // its path, which is the honest fallback -- a wrong friendly name would be
+    // worse than a filename.
+    //
+    // "not shipped" matters most. tools/ is in .pkgmeta's ignore list, so those
+    // changes reach nobody, and a release note about them is noise.
+    static string Plainly(string path)
+    {
+        if (path.EndsWith("Modules/ArenaLadder.lua"))  return "Ladder window";
+        if (path.EndsWith("Modules/ArenaHistory.lua")) return "Match history";
+        if (path.EndsWith("Modules/InspectPanel.lua")) return "Inspect panel";
+        if (path.EndsWith("Modules/LFGStanding.lua"))  return "Group finder";
+        if (path.EndsWith("Modules/MinimapButton.lua"))return "Minimap button";
+        if (path.EndsWith("Modules/UnitTooltip.lua"))  return "Unit tooltip";
+        if (path.EndsWith("Modules/AuctionPvP.lua"))   return "Auction house";
+        if (path.EndsWith("Modules/ArenaMMR.lua"))     return "Rating estimate";
+        if (path.EndsWith("Modules/RatedPage.lua"))    return "Rated page";
+        if (path.EndsWith("Modules/PvPDefaultPage.lua")) return "PvP page";
+        if (path.EndsWith("Locales.lua"))              return "Wording";
+        if (path.EndsWith("Core.lua"))                 return "Shared code";
+        if (path.StartsWith("tools/"))                 return "Dashboard (not shipped)";
+        if (path.StartsWith(".github/"))               return "Release workflow (not shipped)";
+        if (path.EndsWith(".pkgmeta"))                 return "Packaging (not shipped)";
+        if (path.EndsWith(".toc"))                     return "Addon manifest";
+        return path;
+    }
+
+    // How a declaration looks in the language this file is written in.
+    //
+    // Shared by the added/removed scan and by the hunk headers, so both agree on
+    // what counts as a name.
+    static string NameIn(string file)
+    {
+        if (file.EndsWith(".lua"))
+            return @"^\s*(?:local\s+)?function\s+([A-Za-z_][\w.:]*)";
+
+        if (file.EndsWith(".ps1"))
+            return @"^\s*function\s+([A-Za-z_][\w\-]*)";
+
+        if (file.EndsWith(".cs"))
+            // Anchored to four spaces, which is where a member sits in a class
+            // body here while statements inside a method are indented further.
+            // Without the anchor, "if (" indexes as a method called if.
+            return @"^    (?:(?:public|private|internal|protected|static|override|"
+                 + @"virtual|sealed|async|new|readonly)\s+)*"
+                 + @"(?:[A-Za-z_][\w<>\[\],.?]*\s+)?([A-Za-z_]\w*)\s*\(";
+
+        return null;
+    }
+
+    string Scaffold()
+    {
+        string numstat, status;
+        GitRun("diff --numstat HEAD", out numstat);
+        GitRun("status --porcelain", out status);
+
+        // Files with their sizes kept, so the list can be ordered by how much
+        // actually changed. Sorted by filename it read alphabetically, which put
+        // whichever file starts with C at the top and the real work at the
+        // bottom.
+        var paths = new List<string>();
+        var churn = new List<int>();
+
+        foreach (string line in numstat.Split('\n'))
+        {
+            string[] parts = line.Trim().Split('\t');
+            if (parts.Length < 3) continue;
+
+            int plusN, minusN;
+            if (!int.TryParse(parts[0], out plusN)) plusN = 0;
+            if (!int.TryParse(parts[1], out minusN)) minusN = 0;
+
+            paths.Add(string.Format("{0,-24} +{1,-5} -{2,-5} {3}",
+                                    Plainly(parts[2]), parts[0], parts[1], parts[2]));
+            churn.Add(plusN + minusN);
+        }
+
+        // Biggest first. Insertion sort: this list is never long.
+        for (int i = 1; i < paths.Count; i++)
+        {
+            for (int j = i; j > 0 && churn[j] > churn[j - 1]; j--)
+            {
+                int c = churn[j]; churn[j] = churn[j - 1]; churn[j - 1] = c;
+                string p = paths[j]; paths[j] = paths[j - 1]; paths[j - 1] = p;
+            }
+        }
+
+        foreach (string line in status.Split('\n'))
+        {
+            string t = line.Trim();
+            if (t.StartsWith("??"))
+            {
+                paths.Add(t.Substring(2).Trim() + "   (new file)");
+                churn.Add(0);
+            }
+        }
+
+        if (paths.Count == 0) return "";
+
+        var lines = new List<string>();
+
+        // What appeared or went, by the shape of the language it appeared in.
+        //
+        // One Lua pattern for everything was the first version, and it meant a
+        // commit touching only the dashboard listed its files and said nothing
+        // whatever about them -- which is the case this window exists for.
+        //
+        // A rename shows as both a removal and an addition. That is honest: it
+        // is both, and the callers may need to know.
+        string diff;
+        GitRun("diff -U0 HEAD", out diff);
+
+        var added = new List<string>();
+        var gone = new List<string>();
+        var strings = new List<string>();
+
+        var touched = new List<string>();
+
+        string file = "";
+        foreach (string line in diff.Split('\n'))
+        {
+            // Which file the following hunks belong to.
+            if (line.StartsWith("+++ b/")) { file = line.Substring(6).Trim(); continue; }
+
+            // What the change sits inside, which the added/removed lists cannot
+            // say: rewriting the body of a function changes neither its
+            // declaration nor its name, so it appeared in neither and the most
+            // common kind of edit went unmentioned.
+            //
+            // Git puts the enclosing declaration after the second "@@" of every
+            // hunk header, found by its own heuristic and with no configuration
+            // needed for Lua. Reading it back is cheaper and more reliable than
+            // walking the file for the nearest declaration ourselves.
+            if (line.StartsWith("@@"))
+            {
+                int close = line.IndexOf("@@", 2);
+                if (close < 0) continue;
+
+                string context = line.Substring(close + 2).Trim();
+                if (context.Length == 0) continue;
+
+                Match head = Regex.Match(context, NameIn(file) ?? "(?!)");
+                if (head.Success && !touched.Contains(head.Groups[1].Value))
+                    touched.Add(head.Groups[1].Value);
+                continue;
+            }
+
+            bool plus = line.StartsWith("+") && !line.StartsWith("+++");
+            bool minus = line.StartsWith("-") && !line.StartsWith("---");
+            if (!plus && !minus) continue;
+
+            string body = line.Substring(1);
+            var into = plus ? added : gone;
+
+            // Locale keys first: they are assignments, not declarations, and
+            // they are the user-facing text -- a changed one is usually what a
+            // release note is actually about.
+            if (file.EndsWith("Locales.lua"))
+            {
+                // The value, not the key. L.LADDER_HOME says nothing; "Home" is
+                // the actual new words a player will read, and is as close to a
+                // written release note as anything here gets automatically.
+                Match loc = Regex.Match(body, "^\\s*L\\.[A-Z0-9_]+\\s*=\\s*\"(.*)\"");
+                if (loc.Success)
+                {
+                    string said = loc.Groups[1].Value;
+                    if (said.Length > 96) said = said.Substring(0, 93) + "...";
+                    said = "\"" + said + "\"";
+
+                    if (plus && said.Length > 2 && !strings.Contains(said))
+                        strings.Add(said);
+                    continue;
+                }
+            }
+
+            string pattern = NameIn(file);
+            if (pattern == null) continue;
+
+            Match m = Regex.Match(body, pattern);
+            if (!m.Success) continue;
+
+            string name = m.Groups[1].Value;
+
+            // Words that satisfy the C# shape and are not methods.
+            if (file.EndsWith(".cs") && Array.IndexOf(NotMethods, name) >= 0) continue;
+
+            if (!into.Contains(name)) into.Add(name);
+        }
+
+        // Only what is not already named as added or removed, so a new function
+        // is not also listed as one that was touched.
+        var changed = new List<string>();
+        foreach (string name in touched)
+            if (!added.Contains(name) && !gone.Contains(name)) changed.Add(name);
+
+        // The wording first, because it is the only part of a diff written for
+        // a player. Everything else here describes the code; these are the
+        // actual sentences that will appear on somebody's screen, and they are
+        // the closest a program gets to writing a release note.
+        if (strings.Count > 0)
+        {
+            lines.Add("New or changed wording:");
+            foreach (string said in strings) lines.Add("  " + said);
+            lines.Add("");
+        }
+
+        foreach (string p in paths) lines.Add(p);
+
+        var code = new List<string>();
+        if (added.Count > 0) code.Add("new " + string.Join(", ", added.ToArray()));
+        if (gone.Count > 0) code.Add("gone " + string.Join(", ", gone.ToArray()));
+        if (changed.Count > 0) code.Add("changed " + string.Join(", ", changed.ToArray()));
+
+        if (code.Count > 0)
+        {
+            lines.Add("");
+            lines.Add("Code: " + string.Join("; ", code.ToArray()));
+        }
+
+        // The subject quotes the new wording rather than naming files.
+        //
+        // Naming the areas -- "Shared code, Wording, Match history and Ladder
+        // window" -- is accurate and says nothing: every commit here touches
+        // some files. The new strings are specific to this change and are
+        // already in the player's language, so quoting them is both the most
+        // concrete thing available and the least invented.
+        //
+        // Where a change adds no wording at all, the largest area is the
+        // fallback. It is vague, but it is honest about there being nothing
+        // better to say.
+        // Short labels first, then anything else.
+        //
+        // A subject wants the words that name a feature -- "Home", "Ctrl+C to
+        // copy" -- not a format template like "top %d players" or a tooltip
+        // that runs to a full sentence. Both still appear in the body; this is
+        // only about what leads.
+        var headline = new List<string>();
+        foreach (string said in strings)
+            if (said.Length <= 34 && said.IndexOf('%') < 0) headline.Add(said);
+        foreach (string said in strings)
+            if (!headline.Contains(said)) headline.Add(said);
+
+        string subject = "";
+        foreach (string said in headline)
+        {
+            string next = (subject.Length == 0) ? said : subject + ", " + said;
+            if (next.Length > 62) { if (subject.Length > 0) subject += ", ..."; break; }
+            subject = next;
+        }
+
+        if (subject.Length == 0)
+        {
+            foreach (string p in paths)
+            {
+                int gap = p.IndexOf("  ");
+                string area = (gap > 0 ? p.Substring(0, gap) : p).Trim();
+                if (area.EndsWith("(not shipped)") || area.Length == 0) continue;
+                subject = area;
+                break;
+            }
+        }
+
+        if (subject.Length == 0) subject = "Tooling and packaging";
+        if (subject.Length > 68) subject = subject.Substring(0, 65) + "...";
+
+        return subject + "\r\n\r\n" + string.Join("\r\n", lines.ToArray());
+    }
+
     // Commit everything outstanding, with a message you wrote.
     //
     // Everything, deliberately: this window has no way to show a diff, and a
@@ -780,10 +1089,34 @@ class Dashboard : Form
         }
 
         string message = AskForText("Commit",
-            "What changed, and why. The first line is the subject; leave a blank line "
-            + "after it.\r\n\r\nAbout to commit and push:\r\n" + status,
-            "");
+            "Written for you from the diff. Edit it or leave it as it is -- "
+            + "the first line is the subject.",
+            Scaffold());
         if (message == null) return;
+
+        // Everything typed, minus the notes -- which is what git will be left
+        // with, because the commit runs --cleanup=strip.
+        //
+        // Checked here rather than letting git refuse it. Pressing OK on the
+        // scaffold alone is an easy thing to do, and "Aborting commit due to
+        // empty commit message" explains neither what happened nor that the
+        // hash-marked lines were never going to count.
+        //
+        // Before "git add -A", so a message that is not going to work does not
+        // leave everything staged behind it.
+        string written = "";
+        foreach (string part in message.Split('\n'))
+        {
+            string t = part.Trim();
+            if (t.Length > 0) written += t;
+        }
+
+        if (written.Length == 0)
+        {
+            MessageBox.Show("The message is empty.",
+                            "No message", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
 
         commitButton.Enabled = false;
         Cursor = Cursors.WaitCursor;
@@ -802,7 +1135,10 @@ class Dashboard : Form
             string temp = Path.Combine(Path.GetTempPath(), "arenaplus-commit.txt");
             File.WriteAllText(temp, message);
 
-            int code = GitRun("commit -q -F \"" + temp + "\"", out output);
+            // whitespace, not strip: the message is written by Scaffold and has
+            // no comment lines to drop. strip would also eat a line that
+            // happened to begin with a hash.
+            int code = GitRun("commit -q --cleanup=whitespace -F \"" + temp + "\"", out output);
             try { File.Delete(temp); } catch { }
 
             if (code != 0)
@@ -837,7 +1173,8 @@ class Dashboard : Form
     {
         if (versionBox == null) return;
 
-        bool dirty = Git("status --porcelain").Trim().Length > 0;
+        string status = Git("status --porcelain").Trim();
+        bool dirty = status.Length > 0;
         string latest = LatestTag();
 
         // No tags yet, so the .toc is the only thing that has ever named a
@@ -866,11 +1203,51 @@ class Dashboard : Form
         publishButton.Enabled = !dirty;
         if (commitButton != null) commitButton.Enabled = dirty;
 
+        // Which files, not just that there are some.
+        //
+        // "uncommitted changes" told you the button was disabled and nothing
+        // about why, so the only way to find out was to open a terminal -- which
+        // is the thing this row exists to avoid. The names go on the row and the
+        // whole list, status letters included, goes in the tooltip.
         addonNote.Text = dirty
-            ? "uncommitted changes -- commit them first"
+            ? Outstanding(status)
             : (latest == null
                 ? "never tagged; the .toc says " + TocVersion()
                 : "latest tag " + latest);
+
+        tips.SetToolTip(addonNote, dirty ? status : "");
+        tips.SetToolTip(commitButton, dirty ? status : "");
+    }
+
+    // "Core.lua, Locales.lua +2" from git's porcelain output.
+    //
+    // Names only, and the leaf rather than the path: "Modules/ArenaLadder.lua"
+    // is mostly Modules/ and the row has about two hundred pixels. The full
+    // list with its status letters is a hover away.
+    static string Outstanding(string status)
+    {
+        var names = new List<string>();
+        foreach (string line in status.Split('\n'))
+        {
+            string trimmed = line.Trim();
+            if (trimmed.Length < 4) continue;
+
+            // Porcelain is two status characters, a space, then the path.
+            string path = trimmed.Substring(2).Trim();
+
+            // A rename reads "old -> new"; the new name is the useful half.
+            int arrow = path.IndexOf(" -> ");
+            if (arrow >= 0) path = path.Substring(arrow + 4);
+
+            int cut = path.LastIndexOfAny(new[] { '/', '\\' });
+            names.Add(cut >= 0 ? path.Substring(cut + 1) : path);
+        }
+
+        if (names.Count == 0) return "uncommitted changes";
+        if (names.Count == 1) return names[0] + " to commit";
+        if (names.Count == 2) return names[0] + ", " + names[1];
+
+        return string.Format("{0}, {1} +{2}", names[0], names[1], names.Count - 2);
     }
 
     string TocVersion()

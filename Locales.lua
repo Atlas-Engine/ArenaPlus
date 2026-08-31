@@ -336,10 +336,27 @@ L.LADDER_BUTTON_TOOLTIP   = "This bracket's ladder, read from Blizzard's API."
 -- The bracket alone. "2v2 ladder" against "Rated BG ladder" is a heading that
 -- changes width with the bracket, which shifted everything anchored after it.
 L.LADDER_TITLE            = "%s"
-L.LADDER_SUBTITLE         = "top %d"
+-- "top 5006 players", not "top 5006". The bare number read as a rank or a
+-- rating rather than as how many people are on the ladder.
+L.LADDER_SUBTITLE         = "top %d players"
 -- The button that goes to your own place, which the window used to do by
 -- itself every time it opened.
 L.LADDER_MINE             = "My rank"
+
+-- The home button, on hover. It is an icon, so the tooltip is the only
+-- place it can say what it does.
+L.LADDER_HOME             = "Home"
+
+-- On hover, since the word alone does not say what it clears.
+L.LADDER_HOME_TIP         = "Back to the top of the ladder, with no search, spec filter or alts list"
+
+-- The right-click copy box. The name is already selected when it opens, so
+-- this only has to say what to press.
+L.LADDER_COPY             = "Ctrl+C to copy"
+
+-- On hovering a name, in both windows. The right button is the only way to
+-- find this, and nothing else on the row says so.
+L.COPY_HINT               = "Right-click to copy the name"
 -- Each window names the other, so the pair reads as two views of one thing
 -- rather than two unrelated windows.
 L.LADDER_SWAP             = "History"
@@ -361,7 +378,9 @@ L.LADDER_NO_ALTS          = "None of your characters has a rating in this bracke
 L.LADDER_PLAYED           = "|cffb3b3b3%d games|r"
 -- Blank on purpose: the box is plainly a search box, and the prompt read as
 -- text somebody had left in it.
-L.LADDER_SEARCH           = ""
+-- The search box, empty. It says the shape rather than the obvious: that a
+-- name works is not worth a hint, that a realm can be added is.
+L.LADDER_SEARCH           = "name, or name-realm"
 L.LADDER_HIDDEN           = "  |cff808080(hidden)|r"
 L.LADDER_COL_RANK         = "#"
 L.LADDER_COL_NAME         = "Name"

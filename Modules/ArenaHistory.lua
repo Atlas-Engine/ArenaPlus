@@ -1361,6 +1361,43 @@ local function DetailLine(detail,index)
 	line.nameWidth=COL_KD-COL_NAME-8-DELTA_WIDTH-RANK_WIDTH-12
 	line.name    = column(COL_NAME,line.nameWidth)
 
+	-- Right-clicking the name offers it to be copied.
+	--
+	-- Its own button over the name column, the same way the rank below has one:
+	-- a FontString cannot be clicked, and mouse-enabling the whole line would
+	-- swallow clicks meant for anything else on it.
+	--
+	-- Lit on hover, the same as the rank beside it.
+	--
+	-- It was left unlit at first, reasoning that a left click does nothing here
+	-- so a glow would promise something it does not do. That had it backwards:
+	-- the name does respond, to the right button, and nothing else on the row
+	-- says so. Without the glow the only way to find it is to be told.
+	line.nameHit=CreateFrame("Button",nil,line)
+	line.nameHit:SetPoint("LEFT",line,"LEFT",COL_NAME,0)
+	line.nameHit:SetSize(line.nameWidth,DETAIL_ROW)
+	line.nameHit:RegisterForClicks("RightButtonUp")
+
+	local nameGlow=line.nameHit:CreateTexture(nil,"HIGHLIGHT")
+	nameGlow:SetAllPoints()
+	nameGlow:SetColorTexture(1,1,1,0.10)
+	line.nameHit:SetHighlightTexture(nameGlow)
+	line.nameHit:SetScript("OnEnter",function(self)
+		if not self.copyName then return end
+		GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
+		-- Six arguments: SetText is (text, r, g, b, alpha, wrap), so a bare
+		-- `true` in fifth place lands in alpha and throws.
+		GameTooltip:SetText(L.COPY_HINT,1,1,1,1,true)
+		GameTooltip:Show()
+	end)
+	line.nameHit:SetScript("OnLeave",function() GameTooltip:Hide() end)
+
+	line.nameHit:SetScript("OnClick",function(self)
+		-- Anchored to the window, not to this line's parent: that is the detail
+		-- area inside the window, so the box would still land on top of it.
+		if ns.CopyName then ns.CopyName(self.copyName,window or panel) end
+	end)
+
 	-- The ladder place is a button, not just text: clicking it opens the ladder
 	-- on this bracket with the name already searched for, which is what anybody
 	-- reading a rank wants next.
@@ -1666,6 +1703,10 @@ local function ShowDetail(row,match)
 			-- Only somebody who is on it can be found on it.
 			line.rankHit.ladderName=ladder and player.n or nil
 			line.rankHit.ladderBracket=bracket
+
+			-- What the row is about, for the copy box. The recorded name
+			-- carries its realm already.
+			line.nameHit.copyName=player.n
 			line.rankHit:EnableMouse(ladder~=nil)
 
 			-- What the match cost or paid that player.
@@ -2377,7 +2418,10 @@ local function CreateWindow()
 	-- Wide enough for the columns an expanded match needs: the healing one
 	-- ends around 500 in from the block's left edge.
 	frame:SetSize(850,460)
-	frame:SetPoint("TOPLEFT",panel,"TOPRIGHT",2,0)
+	-- Placed by AnchorFull every time it opens, not here. This used to dock to
+	-- the panel at creation, which meant the window was parented to a frame that
+	-- can be hidden before anything had decided where it should go.
+	ns.PlaceFullWindow(frame)
 	frame:SetFrameStrata("DIALOG")
 	frame:SetToplevel(true)
 	frame:EnableMouse(true)
@@ -2506,16 +2550,15 @@ end
 
 -- Beside the panel where there is one, centred on the screen where there is not.
 local function AnchorFull(frame)
-	frame:ClearAllPoints()
-
-	if panel and panel:IsVisible() then
-		frame:SetParent(panel)
-		frame:SetPoint("TOPLEFT",panel,"TOPRIGHT",2,0)
-		return true
-	end
-
-	frame:SetParent(UIParent)
-	frame:SetPoint("CENTER",UIParent,"CENTER",0,0)
+	-- The same spot the ladder uses, through the same helper.
+	--
+	-- These two are alternatives -- opening one closes the other -- so they
+	-- belong in one place rather than two, and putting them there through a
+	-- shared function is what keeps them agreeing.
+	--
+	-- It docked to the panel before, which moved it whenever the Rated page came
+	-- or went, and required parenting to a frame that could be hidden.
+	ns.PlaceFullWindow(frame)
 	return false
 end
 

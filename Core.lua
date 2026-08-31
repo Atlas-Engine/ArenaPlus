@@ -1491,6 +1491,111 @@ function ArenaPlusAPI.GetSpecIcon(entry)
 	return nil
 end
 
+-- Offer a name to be copied.
+--
+-- An addon cannot write to the clipboard, so the nearest thing is a box with
+-- the text already selected and focused, which Ctrl+C then takes.
+--
+-- Here rather than in either window because both want it: the ladder and the
+-- match history are the two places a name is worth taking away, and a second
+-- copy of this would be a second place to fix the key handling below.
+--
+-- `beside` is optional. Given one, the box sits above it instead of in the
+-- middle of the screen, which is where the window asking for it already is.
+function ns.CopyName(text,beside)
+	if not (text and text~="" and StaticPopup_Show) then return end
+
+	if not StaticPopupDialogs["ARENAPLUS_COPY_NAME"] then
+		StaticPopupDialogs["ARENAPLUS_COPY_NAME"]={
+			text=ns.L.LADDER_COPY,
+			button1=OKAY,
+			hasEditBox=1,
+			-- High, so this does not take a slot Blizzard's own dialogs want.
+			preferredIndex=8,
+			timeout=0,
+			whileDead=1,
+			hideOnEscape=1,
+
+			OnShow=function(self,data)
+				local box=self.editBox or self.EditBox
+				if not box then return end
+
+				box:SetMaxLetters(100)
+				box:SetText((data and data.name) or "")
+				box:HighlightText()
+				box:SetFocus()
+
+				-- Closed on the way up, not the way down. The client copies on
+				-- key down, so hiding the dialog any earlier takes the box away
+				-- before the copy has happened.
+				if not box.arenaPlusCopyHooked then
+					box.arenaPlusCopyHooked=true
+					box:HookScript("OnKeyUp",function(edit,key)
+						if key=="C" and IsControlKeyDown() then
+							edit:GetParent():Hide()
+						end
+					end)
+				end
+			end,
+
+			EditBoxOnEnterPressed=function(self) self:GetParent():Hide() end,
+			EditBoxOnEscapePressed=function(self) self:GetParent():Hide() end,
+		}
+	end
+
+	local dialog=StaticPopup_Show("ARENAPLUS_COPY_NAME",nil,nil,{ name=text })
+
+	-- Moved after Show, because the popup manager places it as part of showing
+	-- it and anything set before is overwritten.
+	if dialog and beside then
+		dialog:ClearAllPoints()
+		dialog:SetPoint("BOTTOM",beside,"TOP",0,8)
+		-- A window sitting high enough leaves "above it" off the screen, and a
+		-- dialog nobody can reach is worse than one in the wrong place.
+		dialog:SetClampedToScreen(true)
+	end
+
+	return dialog
+end
+
+-- Where both full windows sit, and the only place either of them is put.
+--
+-- One helper so the ladder and the history land in exactly the same spot. They
+-- are alternatives and never shown together, so opening the second should not
+-- send you looking for it somewhere new.
+--
+-- Right of centre rather than on it. The history panel docks to PVEFrame's
+-- right edge, and on a smaller screen that assembly reaches close to the
+-- middle; 200 clears it there and still reads as the middle on a wide one.
+--
+-- Never parented to the panel, and never moved afterwards. Parenting was what
+-- made these jump whenever the Rated page opened or closed: a child of a hidden
+-- frame is hidden, so a docked window had to be re-homed when the panel went
+-- away, and re-homing is what moved it.
+ns.WINDOW_OFFSET_X = 200
+
+function ns.PlaceFullWindow(frame)
+	if not frame then return end
+
+	-- Centred normally, and out of the way when the Rated page is up.
+	--
+	-- The panel hangs off PVEFrame on the left, so with it open the middle of
+	-- the screen is the wrong place to be; without it, the middle is exactly
+	-- where a window somebody opened from the minimap belongs.
+	--
+	-- This is a step of a couple of hundred units, not the old jump from beside
+	-- the panel to the middle -- and nothing is re-parented, so a window never
+	-- hides with the page it moved for.
+	local panel=ns.HistoryPanel and ns.HistoryPanel()
+	local shifted=(panel and panel:IsVisible()) and true or false
+
+	frame:ClearAllPoints()
+	frame:SetParent(UIParent)
+	frame:SetPoint("CENTER",UIParent,"CENTER",shifted and ns.WINDOW_OFFSET_X or 0,0)
+
+	return shifted
+end
+
 -- The colour a place is worth, as a "ff8000" style hex.
 --
 -- Offered because a consumer cannot work it out: a title is a rating measured

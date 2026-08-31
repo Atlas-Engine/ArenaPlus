@@ -128,6 +128,10 @@ local query=""   -- what is typed in the search box
 -- on Ra-den and a Jaffaar on Pagle, and searching found the first and gave
 -- no way to reach the second. Enter steps this on, and it wraps.
 local searchNth = 1
+-- The realm the next search should land on, where something asked for a
+-- particular character rather than a name. One-shot: cleared by the refresh
+-- that honours it, so Enter cycles freely afterwards.
+local wantRealm
 
 ----------------------------------------------------------------
 -- Reading the data
@@ -282,7 +286,31 @@ end
 -- hundreds of rows at once, which is the opposite of finding somebody.
 local function Searched(entry)
 	if query=="" then return false end
-	return ((entry.name or ""):lower()):find(query,1,true)~=nil
+
+	-- A hyphen makes it name-and-realm: "bistwo-pagle" is one character, not
+	-- everybody called Bistwo. Character names cannot contain a hyphen, so the
+	-- first one is always the separator, and what follows may contain more of
+	-- its own -- Ra-den, arugal-au -- which is why the realm half is taken
+	-- whole rather than split again.
+	--
+	-- This narrows and never widens. A realm typed on its own has no hyphen, so
+	-- it is read as a name and matches nobody, which keeps the behaviour the
+	-- name-only rule was written for: "pagle" must not list everyone on Pagle.
+	--
+	-- Assigned straight from the match. Putting a guard in front of it with an
+	-- `and` would collapse the two captures into one, which is exactly how the
+	-- realm went missing in ShowLadderFor.
+	local person,realm=query:match("^([^%-]+)%-(.+)$")
+
+	if not person then
+		return ((entry.name or ""):lower()):find(query,1,true)~=nil
+	end
+
+	if not ((entry.name or ""):lower()):find(person,1,true) then return false end
+
+	-- Punctuation off both sides before they are compared, so a typed "ra-den"
+	-- and the ladder's "raden" meet.
+	return ns.PlainName(entry.realm or ""):find(ns.PlainName(realm),1,true)~=nil
 end
 
 -- Whether a row is you, so it can be picked out of four hundred.
@@ -556,7 +584,21 @@ local function CreateRow(parent)
 	-- guessing and refusing to open.
 	row:EnableMouse(true)
 	row:SetScript("OnMouseUp",function(self,button)
-		if button~="LeftButton" or not self.entry then return end
+		if not self.entry then return end
+
+		-- Right-clicking offers the name to copy. Name and realm together,
+		-- because the name alone is what makes two people one: there is a
+		-- Jaffaar on Ra-den and a Jaffaar on Pagle.
+		if button=="RightButton" then
+			local who=self.entry.name or ""
+			if self.entry.realm and self.entry.realm~="" then
+				who=who.."-"..self.entry.realm
+			end
+			if ns.CopyName then ns.CopyName(who,window) end
+			return
+		end
+
+		if button~="LeftButton" then return end
 		-- The bracket too, so the panel can colour a rating against the right
 		-- cutoffs: 2200 is not the same achievement in 2v2 as in rated
 		-- battlegrounds.
@@ -572,9 +614,18 @@ local function CreateRow(parent)
 			self.highlight:SetColorTexture(1,1,1,0.08)
 			self.highlight:Show()
 		end
+
+		-- What the right button does, since the left one's job -- opening the
+		-- inspect panel -- is the obvious one and this is not.
+		if self.entry then
+			GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
+			GameTooltip:SetText(L.COPY_HINT,1,1,1,1,true)
+			GameTooltip:Show()
+		end
 	end)
 
 	row:SetScript("OnLeave",function(self)
+		GameTooltip:Hide()
 		if self.hover then
 			self.hover=nil
 			self.highlight:Hide()
@@ -780,11 +831,32 @@ local function Refresh()
 
 		if matches then
 			matchCount=#matches
+
+			-- A realm was asked for, so land on that character rather than on
+			-- whichever of the name-alikes happens to come first.
+			--
+			-- This is what sent a click on Bistwo-Pagle's rank to a Bistwo on
+			-- another realm: the rank link searches the bare name, because the
+			-- ladder matches on names and "Bistwo-Pagle" would match nothing,
+			-- and the bare name found the wrong one.
+			local pick
+			if wantRealm then
+				for position,index in ipairs(matches) do
+					if ns.PlainName(full[index].realm or "")==wantRealm then
+						pick=position
+						break
+					end
+				end
+				-- One-shot either way. Not on the ladder at all is an answer,
+				-- and holding it would bend every later search too.
+				wantRealm=nil
+			end
+
 			-- Wrapped, so Enter on the last match comes back round to the first
 			-- rather than stopping at an end nothing announces. Taken modulo the
 			-- count on every pass, so a counter left high by a longer search still
 			-- lands somewhere real when the query narrows.
-			hit=matches[((searchNth-1)%matchCount)+1]
+			hit=matches[pick or (((searchNth-1)%matchCount)+1)]
 		end
 	end
 
@@ -1523,6 +1595,49 @@ local function CreateWindow()
 	-- thing neither window can see.
 	frame.swapButton=PageButton(L.LADDER_SWAP,SWAP_W)
 	frame.swapButton:SetPoint("TOPLEFT",frame,"TOPLEFT",BRACKET_X,HEADER_TOP)
+
+	-- Home, beside History rather than down among the page buttons.
+	--
+	-- It was a "Top" button there first and read as another page control, which
+	-- is the one thing it is not: "<<" moves you within whatever you are looking
+	-- at, and this changes what you are looking at -- clearing the search, the
+	-- spec filter and the alts list on the way.
+	--
+	-- An icon because the row it sits in is names and brackets, and a fourth
+	-- word would crowd them. The tooltip carries the meaning.
+	-- A word, not a picture.
+	--
+	-- Three icons were tried and none worked: the innkeeper tracking texture
+	-- reads as a person, an up arrow reads as a page control, and the garrison
+	-- building did not resolve on this client at all. A blank button is worse
+	-- than a plain one, and none of them said "and it clears your filters"
+	-- anyway -- which is half of what this does.
+	--
+	-- The tooltip carries the detail the word cannot.
+	frame.homeButton=PageButton(L.LADDER_HOME,60)
+	frame.homeButton:SetPoint("RIGHT",frame.swapButton,"LEFT",-8,0)
+
+	frame.homeButton:SetScript("OnEnter",function(self)
+		GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
+		GameTooltip:SetText(L.LADDER_HOME_TIP,1,1,1,1,true)
+		GameTooltip:Show()
+	end)
+	frame.homeButton:SetScript("OnLeave",function() GameTooltip:Hide() end)
+
+	frame.homeButton:SetScript("OnClick",function()
+		showingAlts=false
+		specFilter=nil
+
+		query=""
+		if frame.search then frame.search:SetText("") end
+		wantTop=true
+
+		-- Chosen by hand, so nothing else moves the page afterwards -- and page
+		-- one is the page this button means.
+		page=1
+		pageChosen=true
+		Refresh()
+	end)
 	frame.swapButton:SetScript("OnClick",function()
 		local bracket=ns.ViewBracket and ns.ViewBracket()
 
@@ -1577,18 +1692,17 @@ end
 -- place. Opened from the minimap there is no panel to sit beside, and hanging
 -- it off a hidden frame is how it managed to open into nowhere.
 local function Anchor(frame)
-	local panel=ns.HistoryPanel and ns.HistoryPanel()
-
-	frame:ClearAllPoints()
-
-	if panel and panel:IsVisible() then
-		frame:SetParent(panel)
-		frame:SetPoint("TOPLEFT",panel,"TOPRIGHT",2,0)
-		return true
-	end
-
-	frame:SetParent(UIParent)
-	frame:SetPoint("CENTER",UIParent,"CENTER",0,0)
+	-- One fixed spot, shared with the history window through the core.
+	--
+	-- This used to dock to the history panel while the Rated page was up and
+	-- return to the middle when it closed, so the window moved out from under
+	-- you every time that page opened or shut. It also had to: docking meant
+	-- parenting, and a child of a hidden frame is hidden.
+	--
+	-- Nothing to avoid now either. The panel hangs off PVEFrame on the left, and
+	-- this sits right of centre, so the two never meet whether the page is open
+	-- or not.
+	ns.PlaceFullWindow(frame)
 	return false
 end
 
@@ -1637,7 +1751,20 @@ function ns.ShowLadderFor(bracket,name)
 	Anchor(frame)
 	frame:Show()
 
-	local bare=name and (name:match("^([^%-]+)") or name)
+	-- The name is searched without its realm, because the ladder matches on
+	-- names -- but the realm is remembered so the refresh can pick the right
+	-- one of several people called the same thing.
+	-- Split in an if, not with an and.
+	--
+	-- "local bare,realm = name and name:match(...)" reads fine and is wrong:
+	-- the and collapses the multiple return to one value, so realm was always
+	-- nil and the realm was never remembered at all. Written once already in
+	-- _brain/WOW-API.md, and written again here anyway.
+	local bare,realm
+	if name then bare,realm=name:match("^([^%-]+)%-(.+)$") end
+	bare=bare or (name and (name:match("^([^%-]+)") or name))
+	wantRealm=realm and ns.PlainName(realm) or nil
+
 	if frame.search and bare and bare~="" then
 		frame.search:SetText(bare)
 	else
