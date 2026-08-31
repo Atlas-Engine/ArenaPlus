@@ -73,6 +73,25 @@ end
 -- Drawing it
 ----------------------------------------------------------------
 
+-- The leader's spec, on our own header.
+--
+-- It sat on the client's "Leader:" line first, which put it beside the name --
+-- the same place SocialPlus draws one in the friends list. Beside a name in a
+-- list of names it reads as an attribute of the person; here, on a tooltip that
+-- has just said who the leader is, it read as clutter on somebody else's line.
+--
+-- On the header it captions the block instead: this is their standing, and this
+-- is what they play. It also stops the code reaching into Blizzard's lines to
+-- find a name, which was the fragile part -- the finder draws a different
+-- number of them depending on the activity, whether the group is rated and
+-- whether it has a comment.
+--
+-- The icon comes from ArenaPlusAPI.GetSpecIcon rather than from
+-- GetSpecializationInfoByID, because this client answers some specs with art
+-- from a later version of the game and that function already knows which ones.
+-- Asking the API directly draws a protection paladin as something else, quietly.
+local ICON = "|T%s:14:14:0:0:64:64:5:59:5:59|t"
+
 local function Append(tooltip,resultID)
 	calls=calls+1
 
@@ -92,7 +111,15 @@ local function Append(tooltip,resultID)
 	-- No name on these lines. The client's own "Leader:" line sits directly
 	-- above them, and repeating the name would only push the numbers right.
 	tooltip:AddLine(" ")
-	tooltip:AddLine(L.UNITTIP_HEADER,1,0.82,0)
+
+	-- Any bracket's row will do: they are the same character, so they carry the
+	-- same spec. Where the ladder has no spec for them the header is drawn plain
+	-- rather than with a gap where an icon would have been.
+	local icon=ArenaPlusAPI and ArenaPlusAPI.GetSpecIcon
+		and ArenaPlusAPI.GetSpecIcon(found[1] and found[1].entry)
+
+	tooltip:AddLine(icon and (L.UNITTIP_HEADER.."  "..ICON:format(icon))
+		or L.UNITTIP_HEADER,1,0.82,0)
 
 	for _,row in ipairs(found) do
 		-- The same tier colour the ladder, the cutoffs and the player tooltip
