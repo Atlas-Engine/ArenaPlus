@@ -850,6 +850,72 @@ class Dashboard : Form
         return null;
     }
 
+    // A first draft of the release notes, from what changed since the last tag.
+    //
+    // Different from Scaffold in three ways that matter, all of them because a
+    // player is reading this rather than whoever wrote it:
+    //
+    //   - the range is the last tag to HEAD, not the working tree. A release is
+    //     everything since the last one, not everything not yet committed.
+    //   - anything .pkgmeta ignores is left out entirely. The dashboard and the
+    //     workflow never reach a download, so a note about them is a lie by
+    //     implication.
+    //   - no function names, no file table, no line counts. None of it means
+    //     anything to somebody installing an addon.
+    //
+    // What is left is the wording, which is the one part of a diff already
+    // written in the player's language.
+    string DraftNotes()
+    {
+        string previous = LatestTag();
+        if (previous == null) return "";
+
+        string diff;
+        if (GitRun("diff -U0 " + previous + "..HEAD", out diff) != 0) return "";
+
+        var said = new List<string>();
+        var areas = new List<string>();
+
+        string file = "";
+        foreach (string line in diff.Split('\n'))
+        {
+            if (line.StartsWith("+++ b/"))
+            {
+                file = line.Substring(6).Trim();
+
+                string area = Plainly(file);
+                if (!area.EndsWith("(not shipped)") && !areas.Contains(area))
+                    areas.Add(area);
+                continue;
+            }
+
+            if (!line.StartsWith("+") || line.StartsWith("+++")) continue;
+            if (!file.EndsWith("Locales.lua")) continue;
+
+            Match m = Regex.Match(line.Substring(1), "^\\s*L\\.[A-Z0-9_]+\\s*=\\s*\"(.*)\"");
+            if (!m.Success) continue;
+
+            string words = m.Groups[1].Value.Trim();
+            if (words.Length == 0) continue;
+
+            // Format templates read badly as a bullet on their own, and the
+            // number they carry is the point rather than the sentence.
+            if (words.IndexOf('%') >= 0) continue;
+
+            if (!said.Contains(words)) said.Add(words);
+        }
+
+        var notes = new List<string>();
+        foreach (string words in said) notes.Add(words);
+
+        // Where nothing new was said, name where the work was. Vague, and the
+        // honest amount of vague: there is no wording to quote.
+        if (notes.Count == 0 && areas.Count > 0)
+            notes.Add("Fixes and improvements in " + string.Join(", ", areas.ToArray()) + ".");
+
+        return string.Join("\r\n", notes.ToArray());
+    }
+
     string Scaffold()
     {
         string numstat, status;
@@ -1283,9 +1349,9 @@ class Dashboard : Form
         // Cancelling here cancels the release. There is no accidental path to
         // publishing without notes.
         string changelog = AskForText("Changelog for " + version,
-            "One line per change, in the player's words. This is what CurseForge "
-            + "and the GitHub release will show, and all they will show.",
-            "");
+            "Drafted from what changed since the last release, leaving out anything "
+            + "players never receive. Edit it or leave it -- one line per change.",
+            DraftNotes());
         if (changelog == null) return;
 
         // Asked once, because pushing a tag is a build and a download for
