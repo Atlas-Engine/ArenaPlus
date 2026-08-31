@@ -132,6 +132,40 @@ class Dashboard : Form
     // that is worth seeing once rather than worrying about repeatedly.
     const int HourlyCap = 36000;
 
+    // Dark, and defined in one place.
+    //
+    // WinForms has no dark mode: every control paints itself from system
+    // colours unless told otherwise, so this is a palette plus the Darken pass
+    // below that walks the tree and applies it. Anything added later is styled
+    // by being a child of this window rather than by remembering to.
+    //
+    // PANEL is a step lighter than BACK so buttons and boxes read as surfaces
+    // on the window rather than holes in it, and EDGE draws their borders --
+    // without one, a flat dark button on a dark window has no shape at all.
+    static readonly Color BACK  = Color.FromArgb(32, 32, 32);
+    static readonly Color PANEL = Color.FromArgb(48, 48, 51);
+    static readonly Color TEXT  = Color.FromArgb(228, 228, 228);
+    // Measured against the window ground rather than eyeballed: 150,150,152 came
+    // out at 5.52:1, which clears the minimum and is still tiring to read a
+    // paragraph of. This is 7.85:1.
+    //
+    // Very slightly blue, so it sits with the accent instead of reading as an
+    // unconsidered grey.
+    static readonly Color FADED = Color.FromArgb(176, 180, 190);
+    static readonly Color EDGE  = Color.FromArgb(72, 72, 76);
+
+    // Blue for the headings, and for the one button that publishes.
+    //
+    // Used where it means something rather than for decoration: the headings
+    // because they are the only thing that divides a tall window into parts,
+    // and Publish because it is the single control here that reaches other
+    // people. Everything else stays grey so those two are worth looking at.
+    static readonly Color ACCENT = Color.FromArgb(96, 165, 250);
+
+    // Held, not broken. Amber reads as "on purpose" where red would read as an
+    // error, and Pause is a state somebody chose.
+    static readonly Color HELD = Color.FromArgb(232, 172, 84);
+
     // One task per job per region, so either region can be run on its own and
     // given its own cadence -- Blizzard rebuilds the two ladders on different
     // clocks anyway, measured an hour apart.
@@ -227,7 +261,8 @@ class Dashboard : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         Font = new Font("Segoe UI", 9F);
-        BackColor = SystemColors.Window;
+        BackColor = BACK;
+        ForeColor = TEXT;
 
         BuildLayout();
         BuildTray();
@@ -260,7 +295,8 @@ class Dashboard : Form
         l.Location = new Point(x, y);
         l.Size = new Size(w, h);
         if (bold) l.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-        if (grey) l.ForeColor = Color.DimGray;
+        // Bold means a section heading here, and nothing else uses it.
+        l.ForeColor = grey ? FADED : (bold ? ACCENT : TEXT);
         Controls.Add(l);
         return l;
     }
@@ -433,6 +469,11 @@ class Dashboard : Form
     {
         bool paused = (pausedTasks.Count > 0);
         pauseButton.Text = paused ? "Resume everything" : "Pause everything";
+
+        // Amber while it holds, so a window left paused says so from across the
+        // room rather than only in the sentence beside the button.
+        pauseButton.ForeColor = paused ? HELD : TEXT;
+        pauseNote.ForeColor = paused ? HELD : FADED;
         pauseNote.Text = paused
             ? string.Format("{0} job(s) switched off. Nothing runs on its own until you resume.",
                             pausedTasks.Count)
@@ -530,7 +571,7 @@ class Dashboard : Form
             label.Text = prompt;
             label.Location = new Point(12, 10);
             label.Size = new Size(496, 34);
-            label.ForeColor = Color.DimGray;
+            label.ForeColor = FADED;
             box.Controls.Add(label);
 
             var text = new TextBox();
@@ -558,7 +599,10 @@ class Dashboard : Form
 
             // Enter inside a multiline box types a newline rather than
             // accepting, so OK is not the AcceptButton. Escape still cancels.
+            box.BackColor = BACK;
+            box.ForeColor = TEXT;
             box.CancelButton = cancel;
+            Darken(box);
 
             if (box.ShowDialog() != DialogResult.OK) return null;
 
@@ -594,6 +638,9 @@ class Dashboard : Form
 
         publishButton = new Button();
         publishButton.Text = "Publish";
+        // Marked out after Darken has been over it: this is the one button on
+        // the window that reaches anybody else.
+        publishButton.ForeColor = ACCENT;
         publishButton.Location = new Point(196, y);
         publishButton.Size = new Size(92, 26);
         publishButton.Click += delegate { PublishAddon(); };
@@ -940,6 +987,85 @@ class Dashboard : Form
         RefreshAddonPublish();
     }
 
+    // Paint a control and everything under it.
+    //
+    // By type rather than by name, so it reaches controls that did not exist
+    // when it was written -- and so the two dialogs get it by passing their own
+    // form in rather than by repeating any of this.
+    //
+    // Buttons and combo boxes need FlatStyle before their colours mean
+    // anything: with the system renderer they paint themselves from the theme
+    // and ignore BackColor entirely, which is why a first attempt at this can
+    // look like it did nothing.
+    static void Darken(Control root)
+    {
+        foreach (Control c in root.Controls)
+        {
+            var button = c as Button;
+            if (button != null)
+            {
+                button.FlatStyle = FlatStyle.Flat;
+                button.BackColor = PANEL;
+                // Only where nothing has already spoken for it. Publish is
+                // accented and Pause changes with its state, and a blanket
+                // repaint here would quietly flatten both.
+                if (button.ForeColor == SystemColors.ControlText) button.ForeColor = TEXT;
+                button.FlatAppearance.BorderColor = EDGE;
+                button.FlatAppearance.MouseOverBackColor = Color.FromArgb(64, 64, 68);
+                button.FlatAppearance.MouseDownBackColor = Color.FromArgb(80, 80, 84);
+                continue;
+            }
+
+            var combo = c as ComboBox;
+            if (combo != null)
+            {
+                combo.FlatStyle = FlatStyle.Flat;
+                combo.BackColor = PANEL;
+                combo.ForeColor = TEXT;
+                continue;
+            }
+
+            var text = c as TextBox;
+            if (text != null)
+            {
+                text.BorderStyle = BorderStyle.FixedSingle;
+                text.BackColor = PANEL;
+                text.ForeColor = TEXT;
+                continue;
+            }
+
+            var check = c as CheckBox;
+            if (check != null)
+            {
+                // Left for Windows to draw, unlike everything else here.
+                //
+                // FlatStyle.Flat paints the box in BackColor and the tick in
+                // ForeColor, so on a dark ground it became a dark tick in a dark
+                // square -- ticked and invisible, which is worse than either
+                // state being obvious. The system box is lighter than the window
+                // around it, but it is unambiguous, and a control whose whole
+                // job is to show one of two states has to show it.
+                check.FlatStyle = FlatStyle.System;
+                check.ForeColor = FADED;
+                check.BackColor = BACK;
+                continue;
+            }
+
+            var bar = c as ProgressBar;
+            if (bar != null)
+            {
+                bar.BackColor = PANEL;
+                continue;
+            }
+
+            // Labels keep whatever colour they were given: the budget line is
+            // red or green on purpose and must not be flattened to grey.
+            if (c is Label) continue;
+
+            if (c.HasChildren) Darken(c);
+        }
+    }
+
     void BuildLayout()
     {
         // Which log each job writes what it spent into.
@@ -989,7 +1115,7 @@ class Dashboard : Form
         trayOption.Text = "Minimise to the notification area";
         trayOption.Location = new Point(16, y);
         trayOption.Size = new Size(280, 22);
-        trayOption.ForeColor = Color.DimGray;
+        trayOption.ForeColor = FADED;
         trayOption.Checked = ReadSetting("minimizeToTray") == "true";
         trayOption.CheckedChanged += delegate
         {
@@ -1002,6 +1128,9 @@ class Dashboard : Form
         footer = AddLabel("", 16, y + 26, 600, 20, false, true);
 
         ClientSize = new Size(640, y + 56);
+
+        // Last, so it reaches everything the sections above added.
+        Darken(this);
     }
 
     Button AddButton(string text, int x, int y, int w, string taskName)
@@ -1931,9 +2060,11 @@ class Dashboard : Form
         // Green while the schedule fits, red when it does not. The figure it
         // colours is a forecast from the last run of each job, so a one-off
         // catch-up pass makes it read high until the next ordinary run.
+        // Lifted for a dark ground: the old 180/40/40 and 40/130/60 were chosen
+        // against white and disappear into it.
         quota.ForeColor = forecast > HourlyCap
-            ? Color.FromArgb(180, 40, 40)
-            : Color.FromArgb(40, 130, 60);
+            ? Color.FromArgb(235, 110, 110)
+            : Color.FromArgb(120, 205, 140);
 
         footer.Text = "refreshed " + DateTime.Now.ToString("HH:mm:ss");
 
