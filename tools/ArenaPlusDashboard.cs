@@ -1154,10 +1154,38 @@ class Dashboard : Form
     // It commits and pushes together. A commit that stays here helps nobody --
     // the release path builds from what is on GitHub -- and leaving the two as
     // separate buttons would only invite the tag to go up without the code.
+    // Whether a commit would actually record anything.
+    //
+    // Asked of the diff rather than of "git status", which is what both callers
+    // used to ask and what put an empty message box on screen. This repo lives
+    // on a Google Drive letter, and git there regularly reports a file as
+    // modified when its bytes are identical to HEAD: the index keeps a stat that
+    // Drive has changed underneath it, and neither status nor update-index
+    // clears it. Status said Core.lua was modified; the diff said nothing had
+    // changed; Scaffold, which writes the message from the diff, had nothing to
+    // write. Both were right, and the pair of them was useless.
+    //
+    // One question, asked of the same source the message comes from: if there is
+    // nothing to describe, there is nothing to commit.
+    bool HasChanges()
+    {
+        string numstat, status;
+
+        // Against HEAD, so staged and unstaged both count.
+        GitRun("diff --numstat HEAD", out numstat);
+        if (numstat.Trim().Length > 0) return true;
+
+        // Untracked files have no diff against HEAD and still need committing.
+        GitRun("status --porcelain", out status);
+        foreach (string line in status.Split('\n'))
+            if (line.Trim().StartsWith("??")) return true;
+
+        return false;
+    }
+
     void CommitChanges()
     {
-        string status;
-        if (GitRun("status --porcelain", out status) != 0 || status.Length == 0)
+        if (!HasChanges())
         {
             MessageBox.Show("Nothing to commit.", "ArenaPlus data",
                             MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1250,8 +1278,15 @@ class Dashboard : Form
     {
         if (versionBox == null) return;
 
-        string status = Git("status --porcelain").Trim();
-        bool dirty = status.Length > 0;
+        // The same question the Commit button asks, so the two cannot disagree
+        // about whether there is anything here.
+        bool dirty = HasChanges();
+
+        // Only read for the names once there is known to be something. Asked
+        // first, it lists the phantom modifications this drive invents and the
+        // row names files that a commit would not touch.
+        string status = dirty ? Git("status --porcelain").Trim() : "";
+
         string latest = LatestTag();
 
         // No tags yet, so the .toc is the only thing that has ever named a
