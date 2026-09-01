@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 1.2b
+
+- Fixes and improvements in Auction house.
+
 ## 1.2a
 
 - Opening bracket
@@ -24,6 +28,7 @@
 - Fixed characters with the same name on different realms showing each other's rank and rating.
 - Press Enter in the ladder search to step between characters sharing a name.
 - Changing page in the ladder now returns to the top of the list.
+
 
 
 
