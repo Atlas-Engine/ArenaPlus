@@ -732,17 +732,17 @@ watcher:RegisterEvent("AUCTION_HOUSE_SHOW")
 watcher:RegisterEvent("ADDON_LOADED")
 watcher:SetScript("OnEvent", function(_, event, name)
 	if event == "ADDON_LOADED" and name ~= "Blizzard_AuctionHouseUI" then return end
-	PlaceButton()
-
-	-- Open with the house, rather than waiting to be asked.
+	-- The button, and only the button.
 	--
-	-- Only on the house actually opening: ADDON_LOADED fires when the auction
-	-- house UI is first pulled in, which can happen with no auctioneer in
-	-- sight, and a window appearing then would be a window appearing from
-	-- nowhere.
-	if event == "AUCTION_HOUSE_SHOW" and AuctionHouseFrame then
-		OpenPanel()
-	end
+	-- This used to open the panel with the house as well, on the reasoning
+	-- that somebody at an auctioneer probably wants it. Usually they do not:
+	-- most trips to the auction house are about something else entirely, and a
+	-- panel that opens itself over the search box every time is in the way far
+	-- more often than it is wanted.
+	--
+	-- The button is the whole answer. It sits there saying what it does, and
+	-- one click is a smaller price than closing a window on every visit.
+	PlaceButton()
 end)
 
 -- Closed with the house it belongs to.
