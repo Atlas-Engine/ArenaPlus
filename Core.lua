@@ -668,7 +668,7 @@ end
 --
 -- Not saved. Looking at the other region is a minute's curiosity, and a window
 -- that opened on somebody else's ladder tomorrow would read as a fault.
-local viewRegion, viewBracket, chosenBracket
+local viewRegion, viewBracket, chosenBracket, viewVersion
 
 -- Which bracket the windows are showing.
 --
@@ -831,7 +831,62 @@ function ns.SetViewRegion(region)
 	viewRegion=region
 end
 
+-- Which game's ladder is being read.
+--
+-- "mop" is the Classic progression realms this client is running on;
+-- "tbc" is the Anniversary ones, a separate game with a separate ladder
+-- that happens to be reachable from here because both ship in the data
+-- addon. Defaults to this client's own game, so the window opens on the
+-- ladder the player is actually playing.
+function ns.ViewVersion()
+	viewVersion=viewVersion or "mop"
+	return viewVersion
+end
+
+function ns.SetViewVersion(version)
+	viewVersion=version
+end
+
+-- What was actually CHOSEN, which may be nothing.
+--
+-- ViewRegion and ViewVersion above answer with a default when no choice has
+-- been made, so saving and restoring those would turn "never picked" into a
+-- standing selection -- and a window that then stopped following the player
+-- around. These two hand back the raw value, nil and all, for the one caller
+-- that has to put things back exactly as they were: the swap to History,
+-- which goes through a hide that clears them.
+function ns.ViewRegionChoice()  return viewRegion  end
+function ns.ViewVersionChoice() return viewVersion end
+
+-- The key the shipped tables are stored under.
+--
+-- One string carries both axes -- "eu" and "tbc-eu" -- which is what lets
+-- every reader downstream go on taking a single region argument and
+-- indexing BY_REGION with it, unchanged. Same convention the scraper writes
+-- and the dashboard labels its rows by.
+function ns.RegionKey(region,version)
+	region=region or ns.ViewRegion()
+	version=version or ns.ViewVersion()
+	if version=="mop" then return region end
+	return version.."-"..region
+end
+
+function ns.ViewRegionKey()
+	return ns.RegionKey(ns.ViewRegion(),ns.ViewVersion())
+end
+
+-- Whether a ladder actually shipped for that game and region, so a picker
+-- can leave out a choice that would only ever show an empty window.
+function ns.HasVersionData(version,region)
+	local key=ns.RegionKey(region or ns.ViewRegion(),version)
+	return (ns.LEADERBOARD_BY_REGION and ns.LEADERBOARD_BY_REGION[key])~=nil
+end
+
+-- Your own ladder means your region AND your game: an Anniversary ladder is
+-- somebody else's however well the region matches, and the live rating this
+-- gates is read from the client you are sitting in.
 function ns.ViewingOwnRegion()
+	if ns.ViewVersion()~="mop" then return false end
 	return ns.ViewRegion()==(ns.PlayerRegion() or "us")
 end
 
@@ -866,7 +921,20 @@ local function ChooseRegion()
 		if type(byRegion)~="table" then return fallback end
 		if mine and byRegion[mine] then return byRegion[mine] end
 
-		for _,data in pairs(byRegion) do return data end
+		-- Only a key for the game this client is running.
+		--
+		-- The data addon ships one key per region per game -- "eu" for the
+		-- Classic progression this addon runs on, "tbc-eu" for the Anniversary
+		-- ladder. A player whose own region never shipped falls through to
+		-- here, and pairs() has no order, so without this test a Korean player
+		-- could be handed the TBC ladder and shown it as their own.
+		--
+		-- The unqualified keys are this client's. A version-qualified one is
+		-- only ever reached by asking for it by name, through ViewLeaderboard
+		-- or the API -- which is what a lookup for a friend on another game does.
+		for key,data in pairs(byRegion) do
+			if not key:find("-",1,true) then return data end
+		end
 		return fallback
 	end
 
@@ -1398,7 +1466,11 @@ end
 -- by anything, and a tooltip that errors because a PvP addon is missing is a
 -- worse failure than one that simply says nothing.
 ArenaPlusAPI = {
-	version = 1,
+	-- 2 added the optional `version` argument to the lookups below, plus
+	-- VersionFromProjectID and RegionKey. Everything from 1 still answers the
+	-- same way when it is left out, so a consumer written against 1 needs no
+	-- change -- but one that wants the Anniversary ladder can test for 2.
+	version = 2,
 
 	-- 1 to 4, matching GetPersonalRatedInfo.
 	BRACKETS = { "2v2", "3v3", "5v5", "Rated BG" },
@@ -1426,9 +1498,9 @@ end
 -- One bracket. `name` may carry a realm ("Somebody-Ra-den") or not.
 -- `region` is optional: "us", "eu" and so on, defaulting to the player's own.
 -- A friend on another region is on another ladder, and we ship both.
-function ArenaPlusAPI.GetLadderBracket(bracket,name,region)
+function ArenaPlusAPI.GetLadderBracket(bracket,name,region,version)
 	if type(bracket)~="number" or bracket<1 or bracket>4 then return nil end
-	return CopyEntry(ns.LadderEntry(bracket,name,region))
+	return CopyEntry(ns.LadderEntry(bracket,name,ArenaPlusAPI.RegionKey(region,version)))
 end
 
 -- GetCurrentRegion's numbering, which is also what a Battle.net game account
@@ -1438,11 +1510,46 @@ function ArenaPlusAPI.RegionFromID(id)
 	return names[tonumber(id) or 0]
 end
 
+-- Which shipped ladder a Battle.net game account belongs to.
+--
+-- A consumer knows a friend's wowProjectID and nothing else about which
+-- game they are sitting in; this turns that into the word the lookups take.
+--
+-- Anything not named here has no ladder in this addon -- retail, Classic
+-- Era, a project id from a client newer than this one -- and nil is the
+-- honest answer. Guessing would hand back a rating belonging to a different
+-- character of the same name in a different game entirely.
+--
+-- Guarded against each constant being absent: a client family that has
+-- never heard of one of these leaves it nil, and nil==nil would then match
+-- every friend whose project id was also nil.
+function ArenaPlusAPI.VersionFromProjectID(projectID)
+	if not projectID then return nil end
+	if WOW_PROJECT_MISTS_CLASSIC and projectID==WOW_PROJECT_MISTS_CLASSIC then
+		return "mop"
+	end
+	if WOW_PROJECT_BURNING_CRUSADE_CLASSIC and projectID==WOW_PROJECT_BURNING_CRUSADE_CLASSIC then
+		return "tbc"
+	end
+	return nil
+end
+
+-- The key a ladder is stored under: "eu" for the Classic progression this
+-- addon runs on, "tbc-eu" for the Anniversary one. Published because a
+-- consumer holding a region and a version should not have to know how the
+-- two are spelled together.
+function ArenaPlusAPI.RegionKey(region,version)
+	if not region then return nil end
+	if not version or version=="mop" then return region end
+	return version.."-"..region
+end
+
 -- Whether a region was scraped at all. Only the two files ship, so a friend on
 -- Korea or Taiwan can be answered honestly rather than as "not on the ladder".
-function ArenaPlusAPI.HasRegion(region)
+function ArenaPlusAPI.HasRegion(region,version)
 	if not region then return false end
-	return (ns.LEADERBOARD_BY_REGION and ns.LEADERBOARD_BY_REGION[region])~=nil
+	local key=ArenaPlusAPI.RegionKey(region,version)
+	return (ns.LEADERBOARD_BY_REGION and ns.LEADERBOARD_BY_REGION[key])~=nil
 end
 
 -- Every bracket the player appears in, keyed by bracket number.
@@ -1450,12 +1557,19 @@ end
 -- Nil rather than an empty table when they appear in none, so a caller can
 -- skip the whole section with one test. Most players are in none: the ladder
 -- stops at the Rival cutoff, which is a small share of everyone playing.
-function ArenaPlusAPI.GetLadder(name,region)
+function ArenaPlusAPI.GetLadder(name,region,version)
 	if not (name and name~="") then return nil end
+
+	-- Composed once rather than per bracket: four brackets is four identical
+	-- string joins otherwise, on a path a tooltip runs per friend per hover.
+	local key=ArenaPlusAPI.RegionKey(region,version)
 
 	local found,any=nil,false
 	for bracket=1,4 do
-		local entry=CopyEntry(ns.LadderEntry(bracket,name,region))
+		-- Bracket 4 is rated battlegrounds, which TBC does not have. Nothing
+		-- special is needed for that: its ladder was never written, so the
+		-- lookup misses and the bracket is simply absent from the result.
+		local entry=CopyEntry(ns.LadderEntry(bracket,name,key))
 		if entry then
 			found=found or {}
 			found[bracket]=entry
@@ -1683,6 +1797,47 @@ ns.SlashCommands["inherit"]=function()
 
 	InheritFromQoLPlus(ArenaPlus_SavedVars,true)
 	ns.Print(L.INHERIT_AGAIN)
+end
+
+-- Reported "cannot close the ladder or history panel while in combat" with no
+-- error and no sound -- which rules out a protected-function refusal (that
+-- prints in red) and points at the click never reaching the button at all,
+-- most likely something else sitting on top of it. Neither window's own code
+-- has a single combat check in it, so this exists to find out from inside the
+-- moment it happens rather than guess at it from outside.
+--
+-- The decisive line is the direct Hide() near the bottom: CloseLadder and
+-- CloseArenaHistory are both plain, unprotected calls on an ordinary frame, so
+-- calling them here should succeed regardless of combat. If it does and the
+-- window still will not close for a real click or Escape, the cause is outside
+-- ArenaPlus -- something else covering the button. If it does NOT, that is a
+-- different and much stranger problem worth a second look.
+ns.SlashCommands["closecheck"]=function()
+	ns.Print("In combat: %s",(InCombatLockdown and InCombatLockdown()) and "yes" or "no")
+
+	local function Check(label,getWindow,closeIt)
+		local win=getWindow and getWindow()
+		if not win then
+			ns.Print("%s: not created yet (never opened this session).",label)
+			return
+		end
+
+		ns.Print("%s: shown=%s mouse=%s strata=%s level=%d",
+			label,
+			tostring(win:IsShown()),
+			tostring(win:IsMouseEnabled()),
+			tostring(win:GetFrameStrata()),
+			win:GetFrameLevel() or -1)
+
+		if not win:IsShown() then return end
+
+		local ok=pcall(closeIt)
+		ns.Print("  called the close function directly: %s, now shown=%s",
+			ok and "no error" or "ERRORED",tostring(win:IsShown()))
+	end
+
+	Check("Ladder",ns.LadderWindow,ns.CloseLadder)
+	Check("History",ns.HistoryWindow,ns.CloseArenaHistory)
 end
 
 SlashCmdList["ARENAPLUS"]=function(input)

@@ -26,6 +26,12 @@
 
 param(
     [string]$Region = "us",
+
+    # "mop" or "tbc" -- see the same parameter on UpdateFromBlizzard.ps1.
+    # TBC has no glyphs, and its talents arrive in a different shape; both are
+    # handled where the response is read rather than by a second script.
+    [ValidateSet("mop","tbc")]
+    [string]$Version = "mop",
     # How many of each spec, in each bracket.
     #
     # Was "the top 100 of each bracket", which sounds like the same thing and is
@@ -58,6 +64,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+$apiRegion = $Region
+if ($Version -ne "mop") { $Region = $Version + "-" + $Region }
 
 $root       = Split-Path $PSScriptRoot -Parent
 # Everything the passes write lives under Data\, so the addon root stays
@@ -117,8 +126,9 @@ $token = (Invoke-RestMethod -Method Post -Uri "https://oauth.battle.net/token" `
 if (-not $token) { Write-Log "No access token."; return }
 
 $headers   = @{ Authorization = "Bearer $token" }
-$profileNs = "profile-classic-$Region"
-$apiRoot   = "https://$Region.api.blizzard.com"
+$profileNs = if ($Version -eq "tbc") { "profile-classicann-$apiRegion" }
+             else                    { "profile-classic-$apiRegion" }
+$apiRoot   = "https://$apiRegion.api.blizzard.com"
 
 # ---------------------------------------------------------------- who
 
@@ -577,6 +587,47 @@ foreach ($key in $wanted.Keys) {
     $talents = New-Object System.Collections.Generic.List[string]
     $glyphs  = New-Object System.Collections.Generic.List[string]
 
+    # How far each talent tree was taken -- the "17/0/44" a TBC build is read
+    # by. Empty on MoP, which has no trees.
+    $trees = New-Object System.Collections.Generic.List[string]
+
+    if ($Version -eq "tbc") {
+        # A different shape entirely: TBC has no top-level "specializations" and
+        # no "active_specialization" -- the trees hang inside each entry of
+        # "specialization_groups". The MoP path below finds nothing here and
+        # says so with an empty list rather than an error, which is exactly how
+        # the MoP path itself first shipped reporting zero talents for everyone.
+        $tbcGroup = $sp.specialization_groups | Where-Object { $_.is_active } | Select-Object -First 1
+        if (-not $tbcGroup) { $tbcGroup = $sp.specialization_groups | Select-Object -First 1 }
+
+        if ($tbcGroup) {
+            # Deepest tree first, so whatever reads this can take the spec off
+            # the front without sorting again. A tree with no points spent is
+            # omitted by the API, so the list is not always three long and
+            # position cannot stand in for the name.
+            foreach ($tree in ($tbcGroup.specializations | Sort-Object { [int]$_.spent_points } -Descending)) {
+                if (-not $tree.specialization_name) { continue }
+                # Escaped inline: this script has no Escape-Lua (that lives in
+                # UpdateFromBlizzard.ps1), and a tree name is a fixed Blizzard
+                # string -- "Feral Combat", "Beast Mastery" -- with no quote in
+                # any of them. Escaped anyway rather than trusted.
+                $treeName = [string]$tree.specialization_name
+                $treeName = $treeName -replace '\\', '\\'
+                $treeName = $treeName -replace '"', '\"'
+                $null = $trees.Add('"' + $treeName + '",' + [int]$tree.spent_points)
+
+                # The spell id is the one for the rank actually taken -- rank 5
+                # of Master of Deception is its own spell -- so the client can
+                # resolve name and rank locally through GetSpellInfo, and no
+                # talent names have to ship. Same storage as MoP for that reason.
+                foreach ($t in $tree.talents) {
+                    $id = $t.spell_tooltip.spell.id
+                    if ($id) { $null = $talents.Add([string]$id) }
+                }
+            }
+        }
+    }
+
     $activeId = $sp.active_specialization.id
     $mine = $sp.specializations | Where-Object { $_.specialization.id -eq $activeId } | Select-Object -First 1
     if (-not $mine) { $mine = $sp.specializations | Select-Object -First 1 }
@@ -617,7 +668,11 @@ foreach ($key in $wanted.Keys) {
     #
     # What is always true is that two talents of the same tier can never be
     # taken together. That is what the grouping at the end uses.
-    if ($klass) {
+    # MoP only. The harvest below reconstructs a 6x3 tier grid by watching which
+    # talents are never taken together, which describes nothing in TBC -- and
+    # $sp.specializations does not exist there anyway, so this would quietly do
+    # nothing. Said out loud rather than left to that accident.
+    if ($klass -and $Version -eq "mop") {
         foreach ($group in $sp.specializations) {
             if (@($group.talents).Count -ne 6) { continue }
 
@@ -805,7 +860,12 @@ foreach ($key in $wanted.Keys) {
     }
 
     if ($talents.Count -gt 0 -or $glyphs.Count -gt 0 -or $gear.Count -gt 0) {
-        $null = $records.Add("`t[`"$key`"]={g={" + ($gear -join ",") + "},t={" + ($talents -join ",") + "},y={" + ($glyphs -join ",") + "},s={" + ($sets -join ",") + "},p={" + (($professions.Keys | Sort-Object | ForEach-Object { '"' + $_ + '"' }) -join ",") + "},k={" + ($tinkers -join ",") + "}" + $vBlock + ",r=" + $raceId + ",x=" + $genderId + ",c=`"" + $klass + "`"},")
+        # Only when there is something to say, so MoP's file is byte for byte
+        # what it was before this parameter existed.
+        $treeBlock = ""
+        if ($trees.Count -gt 0) { $treeBlock = ",d={" + ($trees -join ",") + "}" }
+
+        $null = $records.Add("`t[`"$key`"]={g={" + ($gear -join ",") + "},t={" + ($talents -join ",") + "}" + $treeBlock + ",y={" + ($glyphs -join ",") + "},s={" + ($sets -join ",") + "},p={" + (($professions.Keys | Sort-Object | ForEach-Object { '"' + $_ + '"' }) -join ",") + "},k={" + ($tinkers -join ",") + "}" + $vBlock + ",r=" + $raceId + ",x=" + $genderId + ",c=`"" + $klass + "`"},")
         $found++
     } else {
         $missing++

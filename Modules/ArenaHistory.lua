@@ -2640,6 +2640,12 @@ function ns.CloseArenaHistory()
 	end
 end
 
+-- Read-only access to the frame itself, for the closecheck diagnostic below.
+-- Nothing else should need this -- CloseArenaHistory is the way to close it.
+function ns.HistoryWindow()
+	return window
+end
+
 ----------------------------------------------------------------
 -- The panel, and the button beside it
 ----------------------------------------------------------------
@@ -2867,6 +2873,26 @@ local function UpdateVisibility()
 		settleAt=nil
 		if panel then panel:Hide() end
 		if button then button:Hide() end
+
+		-- Both windows belong to the Rated page, so leaving it closes them.
+		--
+		-- Casual, War Games and Premade Groups all hide ConquestQueueFrame, and
+		-- so does moving to Dungeons & Raids or Challenges, so this one test
+		-- covers every way out of Rated without needing to know which was taken.
+		--
+		-- Only while the PvP window itself is still open, though. Both windows
+		-- are deliberately built on UIParent rather than on the panel so the
+		-- minimap button can open them with that window closed (see CreateWindow
+		-- in both files), and closing them here on the way out of PVEFrame would
+		-- take that away -- a window opened from the minimap would then be shut
+		-- by a PvP frame it was never opened from. PVEFrame still being up is
+		-- what separates "navigated somewhere else" from "put the whole thing
+		-- away", and only the first is a reason to close.
+		if PVEFrame and PVEFrame:IsShown() then
+			ns.CloseArenaHistory()
+			if ns.CloseLadder then ns.CloseLadder() end
+		end
+
 		-- After the hide, so anything still attached reads the panel as gone
 		-- and goes back to the middle rather than hiding with it.
 		ReanchorWindows()

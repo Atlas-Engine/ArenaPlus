@@ -157,15 +157,36 @@ local function ViewRegion()
 	return ns.ViewRegion()
 end
 
+-- The region AND the game, as one key -- "eu" or "tbc-eu".
+--
+-- Everything that reaches into the shipped tables goes through this;
+-- ViewRegion above stays the bare region, because the flags, the labels and
+-- "is this my region" all mean the geography and not the game.
+local function ViewKey()
+	local key=(ns.ViewRegionKey and ns.ViewRegionKey()) or ns.ViewRegion()
+
+	-- A game that shipped no file for this region falls back to the one that
+	-- did. Otherwise picking Anniversary on a region it was never scraped for
+	-- empties the window, which reads as "nobody here is rated" rather than as
+	-- "that ladder is not in this download".
+	if ns.LEADERBOARD_BY_REGION and not ns.LEADERBOARD_BY_REGION[key] then
+		return ns.ViewRegion()
+	end
+	return key
+end
+
 local function Board()
-	return ns.ViewLeaderboard()
+	-- Keyed, not bare: this feeds the "Blizzard built it at" line, and the
+	-- two games are scraped on different clocks -- an Anniversary ladder
+	-- stamped with the Classic pass's time is a quietly wrong answer.
+	return ns.ViewLeaderboard(ViewKey())
 end
 
 -- Through the core, so the rows arrive with class and spec already joined on
 -- from the specs file. Reading the board directly is what left every icon a
 -- question mark: the join lived in the index builder, which this never touched.
 local function Ladder(bracket)
-	return ns.LadderRows(bracket,ViewRegion())
+	return ns.LadderRows(bracket,ViewKey())
 end
 
 -- The class token the game's colour table uses. The scrape stores what the
@@ -402,7 +423,7 @@ local function LiveStanding(bracket)
 		end
 	end
 
-	local hex=ns.RankHex and ns.RankHex(bracket,{ rank=ranking, rating=rating },ViewRegion())
+	local hex=ns.RankHex and ns.RankHex(bracket,{ rank=ranking, rating=rating },ViewKey())
 	hex=hex or "ffffff"
 	return L.LADDER_LIVE_SELF:format(hex,ranking,hex,rating)
 end
@@ -416,11 +437,20 @@ end
 --
 -- Falls back to the stamp itself rather than to nothing: a time the reader has
 -- to subtract is still better than a blank.
-local function Ago(stamp)
-	if not stamp or stamp=="" then return "?" end
+-- The same stamp as a number, for the question Ago cannot answer.
+--
+-- Split out because two things ask about that stamp and only one of them wants
+-- a sentence: the footer wants "18 minutes ago", the staleness test below wants
+-- something it can compare against. Parsing it twice in two places is how the
+-- two would drift apart.
+--
+-- nil when the stamp cannot be read, which is a different answer from zero and
+-- has to stay that way -- an unreadable stamp must not read as freshly written.
+local function MinutesSince(stamp)
+	if not stamp or stamp=="" then return nil end
 
 	local y,mo,d,h,mi,ap=stamp:match("(%d+)-(%d+)-(%d+)%s+(%d+):(%d+)%s*([AP]M)")
-	if not y then return stamp:match("(%d+:%d+%s*[AP]?M?)") or stamp end
+	if not y then return nil end
 
 	h=tonumber(h)
 	-- 12 AM is hour 0 and 12 PM is hour 12; every other PM adds twelve.
@@ -432,12 +462,30 @@ local function Ago(stamp)
 
 	local when=time({ year=tonumber(y), month=tonumber(mo), day=tonumber(d),
 	                  hour=h, min=tonumber(mi), sec=0 })
-	if not when then return stamp end
+	if not when then return nil end
 
 	local seconds=difftime(time(),when)
-	if seconds<0 then return L.LADDER_AGO_NOW end
+	if seconds<0 then return 0 end
+	return math.floor(seconds/60)
+end
 
-	local minutes=math.floor(seconds/60)
+-- How old the ladder may get before the reader is the one behind.
+--
+-- The companion script publishes hourly, so anything inside the hour is simply
+-- the current file and says nothing. Past that it is a release that has been
+-- superseded and not picked up.
+--
+-- 75 rather than 60 because a publish is not instant: CurseForge has to approve
+-- it and the client has to fetch it, and somebody who updated the moment it
+-- landed should not be told they are stale for the gap in between.
+local STALE_MINUTES = 75
+
+local function Ago(stamp)
+	if not stamp or stamp=="" then return "?" end
+
+	local minutes=MinutesSince(stamp)
+	if not minutes then return stamp:match("(%d+:%d+%s*[AP]?M?)") or stamp end
+
 	if minutes<1  then return L.LADDER_AGO_NOW end
 	if minutes<60 then return L.LADDER_AGO_MINUTES:format(minutes) end
 
@@ -619,7 +667,7 @@ local function CreateRow(parent)
 		-- Asked for at click time rather than captured when the row was made:
 		-- rows outlive the bracket they were first drawn for, and the local
 		-- named bracket belongs to a different function entirely.
-		if ns.ToggleInspect then ns.ToggleInspect(self.entry,ViewRegion(),ns.ViewBracket()) end
+		if ns.ToggleInspect then ns.ToggleInspect(self.entry,ViewKey(),ns.ViewBracket()) end
 	end)
 
 	row:SetScript("OnEnter",function(self)
@@ -746,7 +794,7 @@ local function Layout()
 			-- reading it as a place would award rank one to a 1400 rating. So
 			-- there the rating decides, against the cutoffs.
 			local hex=showingAlts and ns.TierHex(bracket,entry.rating or 0)
-				or ns.RankHex(bracket,entry,ViewRegion())
+				or ns.RankHex(bracket,entry,ViewKey())
 
 			row.rank:SetText(("|cff%s#%d|r"):format(hex,entry.rank or 0))
 
@@ -909,9 +957,14 @@ local function Refresh()
 		:format(BRACKET_NAMES[bracket] or "?")
 		..L.REGION_TAG:format((ns.RegionFlagMarkup and ns.RegionFlagMarkup(ViewRegion(),12))
 			or ns.RegionShort(ViewRegion())))
-	window.subtitle:SetText(#full>0
-		and (showingAlts and L.LADDER_SUBTITLE_ALTS or L.LADDER_SUBTITLE):format(#full)
+	-- No place count on the ladder any more: the game picker stands where it
+	-- was. The alts view keeps its own count, which says how many of YOUR
+	-- characters are rated -- a different fact from how big somebody else's
+	-- ladder is, and the picker is hidden in that view anyway.
+	window.subtitle:SetText((showingAlts and #full>0)
+		and L.LADDER_SUBTITLE_ALTS:format(#full)
 		or "")
+	if window.RefreshGame then window.RefreshGame() end
 	-- Said outright when there is nothing to show, rather than an empty window
 	-- that reads as a fault. "No alts in this bracket" and "no ladder" are
 	-- different sentences.
@@ -955,6 +1008,19 @@ local function Refresh()
 		-- date that says how old everything else is.
 		local standing=LiveStanding(bracket)
 		if standing then read=read..standing end
+
+		-- Older than the publish interval, so this copy is behind rather than
+		-- Blizzard being slow.
+		--
+		-- Measured on `checked` -- when the companion script last read Blizzard --
+		-- because that is the one stamp that moves every time the data addon is
+		-- republished. The snapshot time beside it is Blizzard's own build and runs
+		-- nearly two hours behind on its own, so measuring that would tell a reader
+		-- on the very newest file to go and fetch it.
+		local age=board and MinutesSince(board.checked)
+		if age and age>STALE_MINUTES then
+			read=read..L.LADDER_DATA_STALE
+		end
 
 		window.source:SetText(read)
 	end
@@ -1202,6 +1268,181 @@ local function CreateWindow()
 	frame.subtitle=frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
 	frame.subtitle:SetPoint("LEFT",frame.title,"RIGHT",10,0)
 	frame.subtitle:SetTextColor(0.55,0.55,0.55)
+
+	-- The game picker, standing where the place count used to.
+	--
+	-- Two games ship in the data addon now, and the window had no way to say
+	-- which one it was showing: the flags answer where, not what. The count came
+	-- out rather than moving over -- it was decoration, and this is a control
+	-- that changes what every row in the window means.
+	--
+	-- Hidden outright when only one game shipped, which is every install that
+	-- has not taken a data update yet. A picker with one entry is furniture.
+	frame.gameButton=CreateFrame("Button",nil,frame)
+	frame.gameButton:SetHeight(18)
+	frame.gameButton:SetPoint("LEFT",frame.title,"RIGHT",10,0)
+
+	frame.gameButton.label=frame.gameButton:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+	frame.gameButton.label:SetPoint("LEFT")
+
+	frame.gameButton.arrow=frame.gameButton:CreateTexture(nil,"OVERLAY")
+	frame.gameButton.arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
+	frame.gameButton.arrow:SetSize(12,12)
+	frame.gameButton.arrow:SetPoint("LEFT",frame.gameButton.label,"RIGHT",2,-1)
+
+	frame.gameMenu=CreateFrame("Frame",nil,frame)
+	frame.gameMenu:SetFrameStrata("DIALOG")
+
+	-- Above its siblings, explicitly.
+	--
+	-- The window itself is already DIALOG, so strata separates nothing here and
+	-- frame LEVEL decides. This menu is built early, near the title, while the
+	-- spec filter icons are built later -- and among children sharing a level the
+	-- later one draws on top. The symptom was a menu whose text was readable and
+	-- whose background was not: the labels sit on the row buttons, children of
+	-- this frame and so a level above the icons, while this frame's own
+	-- background sat under them.
+	frame.gameMenu:SetFrameLevel(frame:GetFrameLevel()+20)
+	frame.gameMenu:SetPoint("TOPLEFT",frame.gameButton,"BOTTOMLEFT",0,-2)
+	frame.gameMenu:SetSize(120,44)
+
+	-- Painted, not backdropped.
+	--
+	-- SetBackdrop's background is translucent -- StyleAsPanel has to lay a solid
+	-- texture behind its own for exactly this reason -- and a see-through menu
+	-- over a list of ladder rows is unreadable, which is how this first shipped.
+	-- A flat texture plus four hairlines is fewer moving parts than a backdrop
+	-- plus a patch for the backdrop, and it needs no frame template.
+	local menuBg=frame.gameMenu:CreateTexture(nil,"BACKGROUND")
+	menuBg:SetAllPoints()
+	menuBg:SetColorTexture(0.04,0.04,0.05,1)
+
+	for _,edge in ipairs({
+		{ "TOPLEFT","TOPRIGHT",0,1 },
+		{ "BOTTOMLEFT","BOTTOMRIGHT",0,1 },
+		{ "TOPLEFT","BOTTOMLEFT",1,0 },
+		{ "TOPRIGHT","BOTTOMRIGHT",1,0 },
+	}) do
+		local line=frame.gameMenu:CreateTexture(nil,"BORDER")
+		line:SetPoint(edge[1])
+		line:SetPoint(edge[2])
+		if edge[3]>0 then line:SetWidth(edge[3]) else line:SetHeight(edge[4]) end
+		line:SetColorTexture(0.28,0.28,0.32,1)
+	end
+	frame.gameMenu:Hide()
+
+	-- Closed by picking something or by clicking the button again. No
+	-- click-anywhere-else catcher: that wants a full-screen frame above the
+	-- rows, and this menu has two entries and lives inside a window you can
+	-- already close.
+
+	local GAMES={
+		{ version="mop", label=L.LADDER_GAME_CLASSIC },
+		{ version="tbc", label=L.LADDER_GAME_ANNIVERSARY },
+	}
+
+	frame.gameMenu.rows={}
+	for index,game in ipairs(GAMES) do
+		local row=CreateFrame("Button",nil,frame.gameMenu)
+		row:SetPoint("TOPLEFT",frame.gameMenu,"TOPLEFT",4,-2-(index-1)*20)
+		row:SetPoint("TOPRIGHT",frame.gameMenu,"TOPRIGHT",-4,-2-(index-1)*20)
+		row:SetHeight(20)
+		row.version=game.version
+
+		row.label=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+		row.label:SetPoint("LEFT",4,0)
+		row.label:SetText(game.label)
+
+		row.highlight=row:CreateTexture(nil,"BACKGROUND")
+		row.highlight:SetAllPoints()
+		row.highlight:SetColorTexture(1,1,1,0.08)
+		row.highlight:Hide()
+		row:SetScript("OnEnter",function(self) self.highlight:Show() end)
+		row:SetScript("OnLeave",function(self) self.highlight:Hide() end)
+
+		row:SetScript("OnClick",function(self)
+			frame.gameMenu:Hide()
+			if ns.ViewVersion()==self.version then return end
+			ns.SetViewVersion(self.version)
+
+			-- Everything the region buttons reset, and for the same reasons: the
+			-- page, the search and the scroll all describe a place on the ladder
+			-- that was just replaced by a different one.
+			page=1
+			pageChosen=false
+			query=""
+			if frame.search then
+				frame.search:SetText("")
+				frame.search:ClearFocus()
+			end
+			if frame.scroll then frame.scroll:SetVerticalScroll(0) end
+			wantTop=true
+
+			-- The cutoffs box on the Rated page reads the same choice.
+			if ns.RefreshRatedPanel then ns.RefreshRatedPanel() end
+			Refresh()
+		end)
+
+		frame.gameMenu.rows[index]=row
+	end
+
+	frame.gameButton:SetScript("OnClick",function()
+		frame.gameMenu:SetShown(not frame.gameMenu:IsShown())
+	end)
+
+	frame.gameButton:SetScript("OnEnter",function(self)
+		self.label:SetTextColor(1,0.82,0)
+		GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
+		GameTooltip:SetText(L.LADDER_GAME_TOOLTIP,1,1,1,1,true)
+		GameTooltip:Show()
+	end)
+	frame.gameButton:SetScript("OnLeave",function(self)
+		self.label:SetTextColor(0.55,0.55,0.55)
+		GameTooltip:Hide()
+	end)
+
+	-- Called from Refresh, so the label follows a choice made anywhere.
+	function frame.RefreshGame()
+		local region=ns.ViewRegion()
+		local offer=ns.HasVersionData and ns.HasVersionData("tbc",region)
+
+		-- The alts view is your own characters across both ladders, so there is
+		-- no one game it could be showing and nothing for this to choose.
+		offer=offer and not showingAlts
+
+		frame.gameButton:SetShown(offer and true or false)
+
+		-- Re-anchored rather than left with a gap: a hidden frame keeps its
+		-- place, so a subtitle pinned to the picker would still sit a picker's
+		-- width away from the title with nothing in between.
+		frame.subtitle:ClearAllPoints()
+		if offer then
+			frame.subtitle:SetPoint("LEFT",frame.gameButton,"RIGHT",8,0)
+		else
+			frame.subtitle:SetPoint("LEFT",frame.title,"RIGHT",10,0)
+		end
+		frame.subtitle:SetPoint("RIGHT",frame.swapButton,"LEFT",-10,0)
+
+		if not offer then
+			frame.gameMenu:Hide()
+			return
+		end
+
+		local version=ns.ViewVersion()
+		local text=(version=="tbc") and L.LADDER_GAME_ANNIVERSARY or L.LADDER_GAME_CLASSIC
+		frame.gameButton.label:SetText(text)
+		frame.gameButton.label:SetTextColor(0.55,0.55,0.55)
+		frame.gameButton:SetWidth(frame.gameButton.label:GetStringWidth()+18)
+
+		for _,row in ipairs(frame.gameMenu.rows) do
+			if row.version==version then
+				row.label:SetTextColor(1,0.82,0)
+			else
+				row.label:SetTextColor(0.8,0.8,0.8)
+			end
+		end
+	end
+
 
 	-- Only of use when this is standing on its own; the helper hides it while
 	-- the Rated page is up.
@@ -1663,7 +1904,17 @@ local function CreateWindow()
 	frame.swapButton:SetScript("OnClick",function()
 		local bracket=ns.ViewBracket and ns.ViewBracket()
 
+		-- The region and game go across too, for the same reason the bracket
+		-- does: the hide below clears them, and swapping windows is not the
+		-- same as closing one. Saved as the raw choice, so a window that was
+		-- never pointed anywhere comes back still following the player.
+		local region=ns.ViewRegionChoice and ns.ViewRegionChoice()
+		local version=ns.ViewVersionChoice and ns.ViewVersionChoice()
+
 		if ns.ToggleArenaHistory then ns.ToggleArenaHistory() end
+
+		if ns.SetViewRegion then ns.SetViewRegion(region) end
+		if ns.SetViewVersion then ns.SetViewVersion(version) end
 
 		if bracket and ns.SetViewBracket then
 			ns.SetViewBracket(bracket)
@@ -1702,6 +1953,20 @@ local function CreateWindow()
 		if self.scroll then self.scroll:SetVerticalScroll(0) end
 		wantTop=true
 		if ns.ClearViewBracket then ns.ClearViewBracket() end
+
+		-- And back to your own region and your own game.
+		--
+		-- Looking at EU Anniversary is something you did to this window, not a
+		-- setting: reopening it should land where the bracket does, on what you
+		-- play. Leaving them behind also left the Rated page's cutoffs box
+		-- quietly describing another region's ladder long after the window that
+		-- chose it was gone.
+		--
+		-- Nil rather than the player's own values: both accessors fall back to
+		-- those on their own, and writing them in would make a default look like
+		-- a choice.
+		if ns.SetViewRegion then ns.SetViewRegion(nil) end
+		if ns.SetViewVersion then ns.SetViewVersion(nil) end
 	end)
 	return frame
 end
@@ -1796,6 +2061,12 @@ end
 
 function ns.CloseLadder()
 	if window and window:IsShown() then window:Hide() end
+end
+
+-- Read-only access to the frame itself, for the closecheck diagnostic below.
+-- Nothing else should need this -- CloseLadder is the way to close it.
+function ns.LadderWindow()
+	return window
 end
 
 -- Put back where it belongs when the panel arrives or leaves.

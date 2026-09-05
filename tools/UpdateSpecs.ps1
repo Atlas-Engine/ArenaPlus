@@ -18,6 +18,11 @@
 
 param(
     [string]$Region = "us",
+
+    # "mop" or "tbc" -- see the same parameter on UpdateFromBlizzard.ps1.
+    # $Region is re-keyed below so every file this writes is version-qualified.
+    [ValidateSet("mop","tbc")]
+    [string]$Version = "mop",
     # Re-ask about characters already known. The normal run skips them.
     [switch]$Force,
     # A ceiling per run, so a first pass can be done in stages.
@@ -61,6 +66,19 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+$apiRegion = $Region
+if ($Version -ne "mop") { $Region = $Version + "-" + $Region }
+
+# How many requests one character actually costs.
+#
+# TBC needs a second call for the talent trees, because active_spec comes
+# back empty there. The rate window below paces work ITEMS, so charging it
+# one apiece ran TBC at twice the configured rate -- over Blizzard's ceiling,
+# which does not answer with an error but by refusing requests. Measured
+# before this was here: 1,635 of 4,000 characters came back "missing" while
+# the very same names answered fine one at a time.
+$perItem = if ($Version -eq "tbc") { 2 } else { 1 }
 
 # Lower case the way Lua does, which is A-Z and nothing else.
 #
@@ -115,8 +133,9 @@ $token = (Invoke-RestMethod -Method Post -Uri "https://oauth.battle.net/token" -
 if (-not $token) { Write-Log "No access token."; return }
 
 $headers   = @{ Authorization = "Bearer $token" }
-$profileNs = "profile-classic-$Region"
-$apiRoot   = "https://$Region.api.blizzard.com"
+$profileNs = if ($Version -eq "tbc") { "profile-classicann-$apiRegion" }
+             else                    { "profile-classic-$apiRegion" }
+$apiRoot   = "https://$apiRegion.api.blizzard.com"
 
 # ---------------------------------------------------------------- who
 
@@ -254,11 +273,21 @@ if ($RefreshDays -gt 0 -and $seen.Count -gt 0) {
     $sinceLast = ((Get-Date) - $lastFull).TotalMinutes
     if ($sinceLast -lt 0) { $sinceLast = 0 }
 
-    $slice = [int][math]::Ceiling($seen.Count * $sinceLast / ($RefreshDays * 1440.0))
+    # Clamped BEFORE the cast, not after.
+    #
+    # A cache that exists with no recorded full pass leaves $lastFull at
+    # DateTime.MinValue, which makes $sinceLast about 739,000 days. Times a few
+    # thousand known characters that is ~3.3e9, and [int] on it throws
+    # "Value was either too large or too small for an Int32" -- so the run died
+    # here rather than being clamped by the very line meant to bound it. Seen on
+    # the first TBC US pass, whose cache had been written by a run that never
+    # finished a full sweep.
+    $want = [math]::Ceiling($seen.Count * $sinceLast / ($RefreshDays * 1440.0))
 
     # Never the whole roster in one run, whatever the gap: that is the spike
     # this exists to avoid. A month of downtime comes round over a week.
-    if ($slice -gt $seen.Count) { $slice = $seen.Count }
+    if ($want -gt $seen.Count) { $want = $seen.Count }
+    $slice = [int]$want
 }
 
 $full = [bool]$Force
@@ -372,16 +401,27 @@ foreach ($key in $wanted.Keys) {
     # since accented names are common at the top of a ladder.
     $name = [uri]::EscapeDataString($who.Name.ToLower())
 
+    $base = "$apiRoot/profile/wow/character/$($who.Realm)/$name"
+
+    # TBC has no specs, so active_spec on the character comes back EMPTY and a
+    # second request is the only way to learn what someone plays: the talent
+    # trees, whose biggest pile of spent points is the spec. Costs one extra
+    # request per character -- but only for characters never seen before, since
+    # this pass is incremental, so it is paid once each rather than every run.
+    $specUri = $null
+    if ($Version -eq "tbc") { $specUri = "$base/specializations?namespace=$profileNs&locale=en_US" }
+
     $work.Add([pscustomobject]@{
         Key = $key
-        Uri = "$apiRoot/profile/wow/character/$($who.Realm)/$name" + "?namespace=$profileNs&locale=en_US"
+        Uri = $base + "?namespace=$profileNs&locale=en_US"
+        SpecUri = $specUri
     })
 }
 
 # One request, in its own runspace. Self-contained on purpose: a runspace
 # inherits nothing from here, so everything it needs arrives as an argument.
 $one = {
-    param($uri, $auth)
+    param($uri, $auth, $specUri)
 
     for ($attempt = 1; $attempt -le 2; $attempt++) {
         try {
@@ -393,10 +433,34 @@ $one = {
             $genderId = 0
             if ($c.gender.type -eq 'FEMALE') { $genderId = 1 }
 
+            # Empty on TBC, filled from the talent trees just below.
+            $spec = $c.active_spec.name
+
+            if ($specUri) {
+                try {
+                    $sp = Invoke-RestMethod -Uri $specUri -Headers @{ Authorization = $auth } -ErrorAction Stop -TimeoutSec 30
+
+                    # The active group, not the first: TBC characters carry a
+                    # second saved build, and reading whichever came back first
+                    # would report the off-spec for anyone who has one.
+                    $group = $sp.specialization_groups | Where-Object { $_.is_active } | Select-Object -First 1
+                    if (-not $group) { $group = $sp.specialization_groups | Select-Object -First 1 }
+
+                    $best = $group.specializations |
+                            Sort-Object { [int]$_.spent_points } -Descending |
+                            Select-Object -First 1
+                    if ($best) { $spec = $best.specialization_name }
+                } catch {
+                    # Left as it was. A character whose trees cannot be read is
+                    # worth keeping with a class and no spec, the same as one
+                    # whose spec is genuinely blank -- not worth failing over.
+                }
+            }
+
             [pscustomobject]@{
                 Status = 'ok'
                 Class  = $c.character_class.name
-                Spec   = $c.active_spec.name
+                Spec   = $spec
                 Race   = $(if ($c.race.id) { [int]$c.race.id } else { 0 })
                 Gender = $genderId
             }
@@ -409,8 +473,11 @@ $one = {
                 continue
             }
 
-            # 404 is a renamed, transferred or deleted character.
-            [pscustomobject]@{ Status = 'fail' }
+            # The code comes out with it. 404 means this character is gone --
+            # renamed, transferred, deleted -- and is worth remembering as
+            # unanswerable. Anything else is us being refused or timed out, and
+            # remembering THAT would blank a live character for good.
+            [pscustomobject]@{ Status = 'fail'; Code = $code }
         }
 
         break
@@ -451,7 +518,7 @@ try {
 
             $shell = [powershell]::Create()
             $shell.RunspacePool = $pool
-            $null = $shell.AddScript($one).AddArgument($item.Uri).AddArgument($headers.Authorization)
+            $null = $shell.AddScript($one).AddArgument($item.Uri).AddArgument($headers.Authorization).AddArgument($item.SpecUri)
 
             $inFlight.Add([pscustomobject]@{
                 Shell   = $shell
@@ -459,7 +526,7 @@ try {
                 Item    = $item
                 Started = [datetime]::UtcNow
             })
-            $windowCount++
+            $windowCount += $perItem
         }
 
         # Collect whatever has landed. Backwards, because finished ones are
@@ -495,9 +562,17 @@ try {
                 # Answered, but not about a class and a spec.
                 $seen[$key] = @{ Slug = ''; Seen = $askedOn; Race = $answer.Race; Gender = $answer.Gender }
                 $missing++
-            } else {
-                # An empty slug is recorded so later runs stop asking.
+            } elseif ($answer -and $answer.Code -eq 404) {
+                # Gone for good: an empty slug is recorded so later runs stop
+                # asking about a character that no longer exists.
                 $seen[$key] = @{ Slug = ''; Seen = $askedOn; Race = 0; Gender = 0 }
+                $missing++
+            } else {
+                # Refused, timed out, or no answer at all -- nothing was learned
+                # about this character, so nothing is remembered and the next run
+                # asks again. Recording it here is how a burst of 429s used to
+                # blank 1,635 live characters permanently: they were cached as
+                # 'asked, nothing there' and an incremental run never revisits.
                 $missing++
             }
         }
@@ -665,4 +740,4 @@ $rowBody
 Set-Content -Path $specFile -Value $out -Encoding utf8
 $note = if ($full) { " full pass," } else { "" }
 Write-Log ("{0}:{1} asked {2}, found {3}, missing {4}. {5} characters written, {6} remembered. requests={7}" -f `
-    $Region.ToUpper(), $note, $asked, $found, $missing, $rows.Count, ($cacheLines.Count - 3), ($asked + 1))
+    $Region.ToUpper(), $note, $asked, $found, $missing, $rows.Count, ($cacheLines.Count - 3), ($asked * $perItem + 1))

@@ -113,10 +113,33 @@ class RunProgress
 // The three jobs used to be three sets of fields, which worked while each was a
 // single task. Splitting the regions apart doubled them, and six of everything
 // named by hand is how a window ends up wiring the EU picker to the US task.
+// One schedulable pass: which row it draws, and what the pass itself calls
+// itself in its log and .progress files.
+//
+// Label and Token are separate because they answer to different readers. The
+// label is for a person -- "TBC US" reads better with a space. The token is
+// matched against what the PowerShell pass writes, and follows the same
+// version-qualified region key the addon uses for its BY_REGION tables, so one
+// convention covers the scraper, the shipped data and this window.
+//
+// MoP keeps the bare "US"/"EU" tokens it already writes, so every log and
+// .progress file on disk right now keeps matching without a migration.
+class JobSlot
+{
+    public string Label;
+    public string Token;
+    public string Task;
+
+    public JobSlot(string label, string token, string task)
+    {
+        Label = label; Token = token; Task = task;
+    }
+}
+
 class TaskRow
 {
     public string Task;        // the scheduled task's name
-    public string Region;      // "US" or "EU"
+    public string Region;      // "US", "EU", "TBC-US", "TBC-EU"
     public string Kind;        // "ladder", "specs" or "inspect"
     public Label Status;
     public ComboBox Every;
@@ -182,6 +205,19 @@ class Dashboard : Form
     // window can see.
     const string TaskInspectUS = "ArenaPlus Inspect US";
     const string TaskInspectEU = "ArenaPlus Inspect EU";
+
+    // TBC Anniversary, scraped from the dynamic-classicann-<region> and
+    // profile-classicann-<region> namespaces rather than the MoP ones. Separate
+    // tasks for the same reason the regions are separate: each ladder rebuilds
+    // on its own clock, and either can be run or held on its own.
+    //
+    // These four have to be created in Task Scheduler by hand, like the others
+    // were. Until they exist the rows show "not scheduled", which is the honest
+    // answer rather than an error.
+    const string TaskDataTbcUS = "ArenaPlus Data TBC US";
+    const string TaskDataTbcEU = "ArenaPlus Data TBC EU";
+    const string TaskInspectTbcUS = "ArenaPlus Inspect TBC US";
+    const string TaskInspectTbcEU = "ArenaPlus Inspect TBC EU";
 
     // The step that puts it all on GitHub, and the only one with no row here.
     // Which is why four hours of it failing looked exactly like nothing being
@@ -313,9 +349,14 @@ class Dashboard : Form
         return l;
     }
 
-    // One section per job, two rows in each.
+    // One section per job, one row per version and region in each.
+    //
+    // Took a taskUS/taskEU pair while MoP was the only version. A pair cannot
+    // express four rows, and adding a second pair beside it is exactly the
+    // "six of everything named by hand" the TaskRow comment warns about -- so
+    // the slots arrive as a list and the loop stops knowing how many there are.
     int AddSection(int y, string heading, string what, string kind,
-                   string taskUS, string taskEU)
+                   JobSlot[] slots)
     {
         AddLabel(heading, 16, y, 300, 20, true, false);
         // 46, not 32: every one of these descriptions runs to three lines, and
@@ -323,16 +364,18 @@ class Dashboard : Form
         AddLabel(what, 16, y + 22, 596, 46, false, true);
         y += 72;
 
-        foreach (string region in new[] { "US", "EU" })
+        foreach (JobSlot slot in slots)
         {
-            bool us = (region == "US");
             var row = new TaskRow();
-            row.Region = region;
+            row.Region = slot.Token;
             row.Kind = kind;
-            row.Task = us ? taskUS : taskEU;
+            row.Task = slot.Task;
 
-            AddLabel(region, 16, y + 2, 28, 20, false, true);
-            row.Status = AddLabel("", 46, y + 2, 250, 20, false, false);
+            // 56 wide, not 28: "TBC US" does not fit the width two-letter
+            // region names were given, and a clipped label reads as a bug.
+            // Everything to its right shifts by the same amount.
+            AddLabel(slot.Label, 16, y + 2, 56, 20, false, true);
+            row.Status = AddLabel("", 78, y + 2, 218, 20, false, false);
             row.Every = AddEvery(302, y, EveryName);
             row.Run = AddButton("Run now", 458, y, 92, row.Task);
             row.Halt = AddStop(556, y, 60, row);
@@ -340,8 +383,8 @@ class Dashboard : Form
             // Under its own row, so which job is working is never in question.
             // One shared bar was fine for three tasks and ambiguous for six.
             row.Bar = new ProgressBar();
-            row.Bar.Location = new Point(46, y + 22);
-            row.Bar.Size = new Size(570, 6);
+            row.Bar.Location = new Point(78, y + 22);
+            row.Bar.Size = new Size(538, 6);
             row.Bar.Visible = false;
             Controls.Add(row.Bar);
 
@@ -1569,13 +1612,25 @@ class Dashboard : Form
             "Seven requests for the ladder itself, then class and spec for any new name plus a slice of " +
             "the roster -- about eight -- so everybody comes round once a week. Each region rebuilds on " +
             "its own clock, so the two are scheduled separately.",
-            "ladder", TaskDataUS, TaskDataEU);
+            "ladder", new[] {
+                new JobSlot("US",     "US",     TaskDataUS),
+                new JobSlot("EU",     "EU",     TaskDataEU),
+                new JobSlot("TBC US", "TBC-US", TaskDataTbcUS),
+                new JobSlot("TBC EU", "TBC-EU", TaskDataTbcEU),
+            });
 
         y = AddSection(y, "Gear, talents and glyphs",
             "Everything the inspect panel shows, for the best five of every spec in every bracket. " +
             "About 1,100 requests a region, and the only pass with no incremental mode: builds change, " +
             "so every run re-asks about everybody.",
-            "inspect", TaskInspectUS, TaskInspectEU);
+            // No TBC rows here yet: that pass has not been run for Anniversary
+            // and its two tasks do not exist, so listing them would show two
+            // permanently "not scheduled" lines with no way to act on them.
+            // The task names are kept below for when it is.
+            "inspect", new[] {
+                new JobSlot("US", "US", TaskInspectUS),
+                new JobSlot("EU", "EU", TaskInspectEU),
+            });
 
         y = AddPublishSection(y);
         y = AddAddonPublishSection(y);
@@ -1616,7 +1671,21 @@ class Dashboard : Form
 
         footer = AddLabel("", 16, y + 26, 600, 20, false, true);
 
-        ClientSize = new Size(640, y + 56);
+        // Four rows a section instead of two made this about 140px taller, and
+        // the window is FixedSingle with no maximise -- so anything past the
+        // screen would simply be unreachable. Clamp to the working area and
+        // scroll the remainder rather than growing off the bottom.
+        int wanted = y + 56;
+        int room = Screen.FromControl(this).WorkingArea.Height - 60;
+        if (wanted > room)
+        {
+            AutoScroll = true;
+            ClientSize = new Size(640, room);
+        }
+        else
+        {
+            ClientSize = new Size(640, wanted);
+        }
 
         // Last, so it reaches everything the sections above added.
         Darken(this);
@@ -1656,6 +1725,8 @@ class Dashboard : Form
         // Both regions of each job, since they are separate tasks now.
         menu.Items.Add("Run ladder, cutoffs, class and spec -- US", null, delegate { TryRun(TaskDataUS); });
         menu.Items.Add("Run ladder, cutoffs, class and spec -- EU", null, delegate { TryRun(TaskDataEU); });
+        menu.Items.Add("Run ladder, cutoffs, class and spec -- TBC US", null, delegate { TryRun(TaskDataTbcUS); });
+        menu.Items.Add("Run ladder, cutoffs, class and spec -- TBC EU", null, delegate { TryRun(TaskDataTbcEU); });
         menu.Items.Add("Run gear, talents and glyphs -- US", null, delegate { TryRun(TaskInspectUS); });
         menu.Items.Add("Run gear, talents and glyphs -- EU", null, delegate { TryRun(TaskInspectEU); });
         menu.Items.Add(new ToolStripSeparator());

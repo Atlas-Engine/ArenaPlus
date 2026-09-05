@@ -2195,7 +2195,13 @@ local function BuildWindow()
 		for index=1,GameTooltip:NumLines() do
 			local line=_G["GameTooltipTextLeft"..index]
 			local text=line and line:GetText()
-			local has,of=text and text:match("%((%d+)/(%d+)%)")
+			-- Two captures, so the guard cannot be an `and`.
+			--
+			-- An `and` expression yields one value, so `of` was nil every time --
+			-- which made the comparison below `nil ~= worn[2]`, always true, and
+			-- this always answered that the line needed correcting.
+			local has,of
+			if text then has,of=text:match("%((%d+)/(%d+)%)") end
 			if has then
 				-- The first such line is the set header, the same one the
 				-- correction rewrites.
@@ -2671,7 +2677,10 @@ ns.SlashCommands["talents"]=function(argument)
 	end
 
 	-- A range can be given, since the right one was a guess: /arena talents 1 30000
-	local from,to=argument and argument:match("^%s*(%d+)%s+(%d+)")
+	-- Both captures, which an `and` would throw the second of away: the range
+	-- was read as its first number and the second silently ignored.
+	local from,to
+	if argument then from,to=argument:match("^%s*(%d+)%s+(%d+)") end
 	from=tonumber(from) or PROBE_FROM
 	to=tonumber(to) or PROBE_TO
 

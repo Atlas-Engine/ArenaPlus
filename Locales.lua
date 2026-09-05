@@ -197,6 +197,11 @@ L.LADDER_AGO_HOUR         = "an hour ago"
 L.LADDER_AGO_HOURS        = "%d hours ago"
 L.LADDER_AGO_DAY          = "a day ago"
 L.LADDER_AGO_DAYS         = "%d days ago"
+-- Said when the ladder in hand is older than the publish interval. That is not
+-- Blizzard being slow -- it means this copy of the data addon has been
+-- superseded and not picked up, which is the one staleness the reader can
+-- actually do something about.
+L.LADDER_DATA_STALE       = "  |cffff8000ArenaPlus_Data update available on CurseForge|r"
 
 -- The inspect panel. Only the best few of each spec in each bracket carry gear,
 -- talents and glyphs, so some of these say why there is nothing to show.
@@ -345,6 +350,15 @@ L.LADDER_TITLE            = "%s"
 -- "top 5006 players", not "top 5006". The bare number read as a rank or a
 -- rating rather than as how many people are on the ladder.
 L.LADDER_SUBTITLE         = "top %d players"
+
+-- The game picker that replaced that count in the ladder window.
+--
+-- Blizzard's own names for the two, not "MoP" and "TBC": the launcher and the
+-- realm list call them Classic and Anniversary, and a window is a bad place to
+-- introduce private shorthand.
+L.LADDER_GAME_CLASSIC     = "Classic"
+L.LADDER_GAME_ANNIVERSARY = "Anniversary"
+L.LADDER_GAME_TOOLTIP     = "Which game's ladder to show"
 -- The button that goes to your own place, which the window used to do by
 -- itself every time it opened.
 L.LADDER_MINE             = "My rank"

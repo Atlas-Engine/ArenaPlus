@@ -55,10 +55,34 @@ param(
     #
     # So: anyone whose profile was written within this many days is asked every
     # run. 0 asks everybody, which is what the pass used to do.
-    [int]$ActiveDays = 2
+    [int]$ActiveDays = 2,
+
+    # Which game this pass is scraping.
+    #
+    # "mop" is the Classic progression realms, "tbc" the Anniversary ones. They
+    # are different namespaces holding different ladders, and a character can
+    # exist on both, so everything downstream has to keep them apart.
+    #
+    # The separation is done by re-keying $Region below rather than by threading
+    # a version through forty call sites: $Region already names every output
+    # file, every lock and progress file, every log label and -- the part that
+    # matters -- the BY_REGION table keys the addon reads. Making it "tbc-eu"
+    # gives all of that at once, and leaves MoP writing exactly what it always
+    # wrote, so nothing on disk needs migrating.
+    [ValidateSet("mop","tbc")]
+    [string]$Version = "mop"
 )
 
 $ErrorActionPreference = "Stop"
+
+# The region as Blizzard addresses it -- the API host and the namespace suffix
+# are always the bare "us"/"eu", whichever game this is.
+$apiRegion = $Region
+
+# ...and the region as everything of ours is keyed by. MoP keeps the bare name
+# it has always used; anything else is qualified, so Leaderboard-eu.lua and
+# Leaderboard-tbc-eu.lua sit side by side and neither overwrites the other.
+if ($Version -ne "mop") { $Region = $Version + "-" + $Region }
 
 $root       = Split-Path $PSScriptRoot -Parent
 # Everything the passes write lives under Data\, so the addon root stays
@@ -106,15 +130,20 @@ $token = (Invoke-RestMethod -Method Post -Uri "https://oauth.battle.net/token" `
             -Headers @{ Authorization = "Basic $pair" } -Body @{ grant_type = "client_credentials" }).access_token
 if (-not $token) { Write-Log "No access token."; return }
 
-$namespace = "dynamic-classic-$Region"
+# TBC Anniversary lives in its own namespace pair. "classicann" is not a
+# pattern anyone guesses -- classic2x, anniversary, classic-tbc and a dozen
+# other shapes all 403. See _brain/LESSONS.md.
+$namespace = if ($Version -eq "tbc") { "dynamic-classicann-$apiRegion" }
+             else                    { "dynamic-classic-$apiRegion" }
 
 # Characters live under a different namespace from game data, and this script
 # had never needed one until the live pass was added. Left undefined it becomes
 # an empty string, every URL asks for "namespace=", and all 5,915 requests fail
 # -- which the counter dutifully reported as "unreadable" without anyone
 # noticing that "all of them" is not a plausible number.
-$profileNs = "profile-classic-$Region"
-$apiRoot   = "https://$Region.api.blizzard.com"
+$profileNs = if ($Version -eq "tbc") { "profile-classicann-$apiRegion" }
+             else                    { "profile-classic-$apiRegion" }
+$apiRoot   = "https://$apiRegion.api.blizzard.com"
 $headers   = @{ Authorization = "Bearer $token" }
 
 $script:requests = 1   # the token exchange itself
@@ -265,6 +294,12 @@ $brackets = @(
     @{ Index = 4; Api = "rbg"; Reward = "BATTLEGROUNDS" }
 )
 
+# Rated battlegrounds arrived in Cataclysm, so TBC has three brackets and not
+# four. Dropped here rather than tolerated as an empty fourth: asking for a
+# leaderboard that cannot exist spends a request to be told 404, once a run,
+# and writes a bracket the addon would then have to know was always empty.
+if ($Version -eq "tbc") { $brackets = $brackets | Where-Object { $_.Api -ne "rbg" } }
+
 # ---------------------------------------------------------------- cutoffs
 
 # Which achievement names which title. Rank one is the seasonal Gladiator title
@@ -285,6 +320,11 @@ foreach ($bracket in $brackets) {
         $tier = $null
         if     ($name -match 'Hero of the Faction') { $tier = 'r1' }
         elseif ($name -match '^\w+ Gladiator:')       { $tier = 'r1' }
+        # TBC names its rank-one title without a season suffix -- "Vengeful
+        # Gladiator", not "Vengeful Gladiator: Season 3" -- so the pattern above
+        # slides straight past it and the season would ship with no r1 cutoff.
+        # Anchored at both ends so it cannot swallow the plain "Gladiator:" line.
+        elseif ($name -match '^\w+ Gladiator$')      { $tier = 'r1' }
         elseif ($name -match '^Gladiator:')         { $tier = 'gladiator' }
         elseif ($name -match '^Duelist:')           { $tier = 'duelist' }
         elseif ($name -match '^Rival:')             { $tier = 'rival' }

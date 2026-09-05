@@ -22,7 +22,17 @@ param(
     [string]$Bracket = "2v2",
     # A character to look for, so "is it live" can be answered against a rating
     # you already know rather than against a stranger's.
-    [string]$Name    = ""
+    [string]$Name    = "",
+    # Which game-data namespace to ask. Empty means the current Classic
+    # progression, which is what this script was written against. Naming
+    # another lets the same probe answer "does THIS version serve a
+    # leaderboard at all" -- e.g. dynamic-classic1x-us.
+    #
+    # PowerShell variable names are case-INSENSITIVE, so $Namespace and the
+    # $namespace used below are one and the same variable. That is why the
+    # default is applied with an if rather than a plain assignment: an
+    # unconditional one would silently overwrite whatever was passed in.
+    [string]$Namespace = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -57,7 +67,8 @@ $token = (Invoke-RestMethod -Method Post -Uri "https://oauth.battle.net/token" `
 if (-not $token) { Write-Host "No access token came back - check the credentials."; return }
 Write-Host "Token acquired."
 
-$namespace = "dynamic-classic-$Region"
+if (-not $Namespace) { $Namespace = "dynamic-classic-$Region" }
+Write-Host ("namespace: {0}" -f $Namespace)
 $root      = "https://$Region.api.blizzard.com"
 
 function Get-Api([string]$path) {
@@ -68,45 +79,50 @@ function Get-Api([string]$path) {
 
 # ---------------------------------------------------------------- discover
 
-# Classic has a pvp-region segment retail does not, so the ids have to be asked
-# for rather than guessed.
-$regions = Get-Api "/data/wow/pvp-region/index"
-$regionIds = @($regions.pvp_regions | ForEach-Object { ($_.href -split '/pvp-region/')[1] -replace '\?.*$','' })
-Write-Host ("pvp-region ids: {0}" -f ($regionIds -join ", "))
+# Same shape as UpdateFromBlizzard.ps1, which is the pass that actually runs:
+# the season index answers which season is current, and the leaderboard hangs
+# straight off it. An earlier version of this probe went through a
+# /data/wow/pvp-region/ segment, which 404s -- it never matched the working
+# scraper, so a failure here used to look like "this version has no ladder"
+# when it only meant the probe was asking the wrong URL.
+try {
+    $season = (Get-Api "/data/wow/pvp-season/index").current_season.id
+} catch {
+    # A namespace that does not exist fails here, on the very first call.
+    # Reported rather than thrown so a sweep over candidates keeps going.
+    Write-Host ("  no pvp-season index ({0})" -f $_.Exception.Message)
+    return
+}
+Write-Host ("current season: {0}" -f $season)
 
-foreach ($regionId in $regionIds) {
-    $seasons = Get-Api "/data/wow/pvp-region/$regionId/pvp-season/index"
-    $ids = @($seasons.seasons | ForEach-Object { [int](($_.href -split '/pvp-season/')[1] -replace '\?.*$','') })
-    if (-not $ids) { continue }
+try {
+    $board = Get-Api "/data/wow/pvp-season/$season/pvp-leaderboard/$Bracket"
+} catch {
+    Write-Host ("  {0}: no leaderboard ({1})" -f $Bracket, $_.Exception.Message)
+    return
+}
 
-    $current = ($ids | Measure-Object -Maximum).Maximum
-    Write-Host ("region {0}: seasons {1}  (current {2})" -f $regionId, ($ids -join ","), $current)
+$entries = @($board.entries)
+Write-Host ("  {0}: {1} entries" -f $Bracket, $entries.Count)
 
-    try {
-        $board = Get-Api "/data/wow/pvp-region/$regionId/pvp-season/$current/pvp-leaderboard/$Bracket"
-    } catch {
-        Write-Host ("  {0}: no leaderboard ({1})" -f $Bracket, $_.Exception.Message)
-        continue
-    }
+if ($entries.Count -gt 0) {
+    $top = $entries[0]
+    Write-Host ("  top: #{0} {1}-{2} rating {3} ({4}-{5})" -f `
+        $top.rank, $top.character.name, $top.character.realm.slug, $top.rating,
+        $top.season_match_statistics.won, $top.season_match_statistics.lost)
+    $last = $entries[$entries.Count - 1]
+    Write-Host ("  last: #{0} rating {1}" -f $last.rank, $last.rating)
+    $realms = @($entries | ForEach-Object { $_.character.realm.slug } | Sort-Object -Unique)
+    Write-Host ("  realms represented: {0}" -f ($realms -join ", "))
+}
 
-    $entries = @($board.entries)
-    Write-Host ("  {0}: {1} entries" -f $Bracket, $entries.Count)
-
-    if ($entries.Count -gt 0) {
-        $top = $entries[0]
-        Write-Host ("  top: #{0} {1} rating {2} ({3}-{4})" -f `
-            $top.rank, $top.character.name, $top.rating, $top.season_match_statistics.won, $top.season_match_statistics.lost)
-    }
-
-    if ($Name -ne "") {
-        $mine = $entries | Where-Object { $_.character.name -eq $Name }
-        if ($mine) {
-            Write-Host ("  {0}: #{1} rating {2} ({3}-{4}) on {5}" -f `
-                $Name, $mine.rank, $mine.rating, $mine.season_match_statistics.won,
-                $mine.season_match_statistics.lost, $mine.character.realm.slug)
-            Write-Host "  ^ compare that rating against what the game shows you right now."
-        } else {
-            Write-Host ("  {0}: not in this leaderboard" -f $Name)
-        }
+if ($Name -ne "") {
+    $mine = $entries | Where-Object { $_.character.name -eq $Name }
+    if ($mine) {
+        Write-Host ("  {0}: #{1} rating {2} ({3}-{4}) on {5}" -f `
+            $Name, $mine.rank, $mine.rating, $mine.season_match_statistics.won,
+            $mine.season_match_statistics.lost, $mine.character.realm.slug)
+    } else {
+        Write-Host ("  {0}: not in this leaderboard" -f $Name)
     }
 }
