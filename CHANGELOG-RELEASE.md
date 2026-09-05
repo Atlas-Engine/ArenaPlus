@@ -1,1 +1,8 @@
-﻿- Fixes and improvements in Auction house.
+﻿- ## 1.3b
+- The PvP button now appears on the Anniversary auction house. It was never drawn there at all -- that client uses the original auction house window, and the button was only ever looking for the modern one.
+- Clicking a player in the Top PvP gear list on Anniversary now opens their gear. Every one of them reported having no gear recorded, including the five it had just listed.
+- The shopping list now only shows things that can actually be bought at the auction house. Most of Burning Crusade's enchants are an enchanter's own work with no item to buy, and the list was offering them anyway.
+- Glyphs are no longer given a column on Anniversary, where they do not exist.
+- The inspect panel now shows the ranged weapon -- bow, gun, wand or thrown -- between the two weapons on Anniversary. It was missing entirely, and the off-hand enchant is no longer written over the slot beside it.
+- Anniversary no longer suggests installing Auctionator. Searching from the shopping list works there without it; the suggestion still appears on Mists, where it is needed.
+- Arena matches that end because somebody leaves are now recorded. Nothing at all was kept for them -- no damage, no healing, no rating change -- because the scoreboard is only read once somebody has died, and a forfeit has no deaths in it.
