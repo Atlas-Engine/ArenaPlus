@@ -359,10 +359,17 @@ class Dashboard : Form
                    JobSlot[] slots)
     {
         AddLabel(heading, 16, y, 300, 20, true, false);
-        // 46, not 32: every one of these descriptions runs to three lines, and
-        // two lines' worth of box cut the last one off in all of them.
-        AddLabel(what, 16, y + 22, 596, 46, false, true);
-        y += 72;
+
+        // The spend rides on the heading line, right-aligned, instead of taking
+        // a line of its own beneath the rows. Four rows a section rather than
+        // two had pushed this window past 1000px, and a figure nobody reads
+        // until they go looking does not need a row to itself.
+        spend[kind] = AddLabel("", 320, y + 2, 296, 18, false, true);
+        spend[kind].TextAlign = ContentAlignment.TopRight;
+
+        // 32, not 46: the descriptions were cut to two lines to match.
+        AddLabel(what, 16, y + 20, 596, 32, false, true);
+        y += 56;
 
         foreach (JobSlot slot in slots)
         {
@@ -383,19 +390,19 @@ class Dashboard : Form
             // Under its own row, so which job is working is never in question.
             // One shared bar was fine for three tasks and ambiguous for six.
             row.Bar = new ProgressBar();
-            row.Bar.Location = new Point(78, y + 22);
-            row.Bar.Size = new Size(538, 6);
+            // As wide as the status text it belongs to, not the whole row. Run
+            // to the far edge it read as a bar for the window rather than for
+            // this job, and ran on under buttons it has nothing to do with.
+            row.Bar.Location = new Point(78, y + 21);
+            row.Bar.Size = new Size(218, 4);
             row.Bar.Visible = false;
             Controls.Add(row.Bar);
 
             rows.Add(row);
-            y += 34;
+            y += 26;
         }
 
-        Label spent = AddLabel("", 46, y, 570, 20, false, true);
-        spend[kind] = spent;
-
-        return y + 34;
+        return y + 10;
     }
 
     // One row, because publishing has no regions -- it pushes whatever both
@@ -403,11 +410,10 @@ class Dashboard : Form
     int AddPublishSection(int y)
     {
         AddLabel("Publishing to GitHub", 16, y, 300, 20, true, false);
-        AddLabel("Copies what the passes wrote into the ArenaPlus_Data repository, commits, tags and " +
-                 "pushes it. Runs on its own clock, so what is on GitHub can be up to one interval " +
-                 "behind what is on disk. Keeps the newest ten tags and deletes the rest.",
-                 16, y + 22, 596, 46, false, true);
-        y += 72;
+        AddLabel("Copies what the passes wrote into ArenaPlus_Data, commits, tags and pushes it. On its " +
+                 "own clock, so GitHub can be an interval behind disk. Keeps the newest ten tags.",
+                 16, y + 20, 596, 32, false, true);
+        y += 56;
 
         var row = new TaskRow();
         row.Region = "";
@@ -422,16 +428,16 @@ class Dashboard : Form
         // Never shown -- this pass reports no progress -- but the tick loop
         // expects every row to have one.
         row.Bar = new ProgressBar();
-        row.Bar.Location = new Point(46, y + 22);
-        row.Bar.Size = new Size(570, 6);
+        row.Bar.Location = new Point(46, y + 21);
+        row.Bar.Size = new Size(250, 4);
         row.Bar.Visible = false;
         Controls.Add(row.Bar);
 
         rows.Add(row);
-        y += 34;
+        y += 26;
 
-        publishNote = AddLabel("", 46, y, 570, 20, false, true);
-        return y + 34;
+        publishNote = AddLabel("", 46, y, 570, 18, false, true);
+        return y + 24;
     }
 
     // What the publish log says happened last, and whether anything has been
@@ -532,7 +538,7 @@ class Dashboard : Form
         pauseNote.Text = paused
             ? string.Format("{0} job(s) switched off. Nothing runs on its own until you resume.",
                             pausedTasks.Count)
-            : "Switches every job below off at once, keeping what each is set to for when you resume.";
+            : "Switches every job below off at once, remembering what each was set to.";
     }
 
     void TogglePause()
@@ -698,11 +704,10 @@ class Dashboard : Form
     int AddAddonPublishSection(int y)
     {
         AddLabel("Releasing ArenaPlus", 16, y, 300, 20, true, false);
-        AddLabel("The addon itself, by hand, because a release of hand-written code deserves a commit " +
-                 "message somebody wrote. Commit first; this puts the version in the .toc, tags that " +
-                 "commit and pushes it. CurseForge builds from the tag.",
-                 16, y + 22, 596, 46, false, true);
-        y += 72;
+        AddLabel("The addon itself, by hand: hand-written code deserves a commit message somebody " +
+                 "wrote. Commit first; this tags the version and pushes. CurseForge builds the tag.",
+                 16, y + 20, 596, 32, false, true);
+        y += 56;
 
         AddLabel("Version", 46, y + 5, 56, 20, false, true);
 
@@ -1609,9 +1614,8 @@ class Dashboard : Form
         y = AddPauseRow(y);
 
         y = AddSection(y, "Ladder, cutoffs, class and spec",
-            "Seven requests for the ladder itself, then class and spec for any new name plus a slice of " +
-            "the roster -- about eight -- so everybody comes round once a week. Each region rebuilds on " +
-            "its own clock, so the two are scheduled separately.",
+            "Seven requests for the ladder, then class and spec for any new name plus a slice of the " +
+            "roster, so everybody comes round once a week. Each region is scheduled on its own clock.",
             "ladder", new[] {
                 new JobSlot("US",     "US",     TaskDataUS),
                 new JobSlot("EU",     "EU",     TaskDataEU),
@@ -1621,15 +1625,12 @@ class Dashboard : Form
 
         y = AddSection(y, "Gear, talents and glyphs",
             "Everything the inspect panel shows, for the best five of every spec in every bracket. " +
-            "About 1,100 requests a region, and the only pass with no incremental mode: builds change, " +
-            "so every run re-asks about everybody.",
-            // No TBC rows here yet: that pass has not been run for Anniversary
-            // and its two tasks do not exist, so listing them would show two
-            // permanently "not scheduled" lines with no way to act on them.
-            // The task names are kept below for when it is.
+            "About 1,100 requests a region. The TBC rows fetch no glyphs -- that expansion has none.",
             "inspect", new[] {
-                new JobSlot("US", "US", TaskInspectUS),
-                new JobSlot("EU", "EU", TaskInspectEU),
+                new JobSlot("US",     "US",     TaskInspectUS),
+                new JobSlot("EU",     "EU",     TaskInspectEU),
+                new JobSlot("TBC US", "TBC-US", TaskInspectTbcUS),
+                new JobSlot("TBC EU", "TBC-EU", TaskInspectTbcEU),
             });
 
         y = AddPublishSection(y);
@@ -1646,12 +1647,12 @@ class Dashboard : Form
         }
 
         AddLabel("On disk", 16, y, 300, 20, true, false);
-        summary = AddLabel("", 16, y + 22, 600, 44, false, false);
-        y += 76;
+        summary = AddLabel("", 16, y + 20, 600, 32, false, false);
+        y += 58;
 
         AddLabel("Request budget", 16, y, 300, 20, true, false);
-        quota = AddLabel("", 16, y + 22, 600, 60, false, true);
-        y += 90;
+        quota = AddLabel("", 16, y + 20, 600, 44, false, true);
+        y += 70;
 
         // Left of the footer rather than up with the tasks: it is a preference
         // about this window, not about the data.
@@ -1729,6 +1730,8 @@ class Dashboard : Form
         menu.Items.Add("Run ladder, cutoffs, class and spec -- TBC EU", null, delegate { TryRun(TaskDataTbcEU); });
         menu.Items.Add("Run gear, talents and glyphs -- US", null, delegate { TryRun(TaskInspectUS); });
         menu.Items.Add("Run gear, talents and glyphs -- EU", null, delegate { TryRun(TaskInspectEU); });
+        menu.Items.Add("Run gear and talents -- TBC US", null, delegate { TryRun(TaskInspectTbcUS); });
+        menu.Items.Add("Run gear and talents -- TBC EU", null, delegate { TryRun(TaskInspectTbcEU); });
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, delegate { Close(); });
 
