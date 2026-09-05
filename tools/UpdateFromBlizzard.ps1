@@ -1,4 +1,4 @@
-﻿# Cutoffs and ladder for ArenaPlus, read from Blizzard's own API.
+# Cutoffs and ladder for ArenaPlus, read from Blizzard's own API.
 #
 # Replaces the third-party scrape this used to do. Everything taken from it is
 # published first-party, and measured against the scrape on 2026-08-18 every one
@@ -1038,3 +1038,8 @@ if ($stamp -eq $now) {
 } else {
     Write-Log "${where}: No cutoff change. Wrote $total ladder entries. Blizzard built it $script:snapshot UTC. requests=$script:requests"
 }
+
+# Every other installed client gets the same files, so Anniversary is as fresh
+# as Mists instead of waiting on the next CurseForge publish.
+. (Join-Path $PSScriptRoot "DataClients.ps1")
+Copy-ToOtherClients -Primary $data -Files @($ladderFile, $cutoffFile) -Say ${function:Write-Log}

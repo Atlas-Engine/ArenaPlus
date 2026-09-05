@@ -41,7 +41,25 @@ $logFile = Join-Path $PSScriptRoot "Publish-Data.log"
 
 function Say($text) {
     Write-Host $text
-    Add-Content -Path $logFile -Value ("{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $text) -Encoding utf8
+
+    # Never fatal, which it was.
+    #
+    # ErrorActionPreference is Stop and the trap below turns any throw into an
+    # abandoned run, so something else holding this file for a moment -- the
+    # dashboard reading it, a scanner, the previous run's handle -- took the
+    # whole publish down with it. It cost the 07:05 publish on 09-03 and again
+    # on 09-05, and each one left players two hours behind instead of one. A
+    # line of text is not worth a missed publish, so it is tried a few times and
+    # then given up on.
+    $line = "{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $text
+    for ($try = 1; $try -le 5; $try++) {
+        try {
+            Add-Content -Path $logFile -Value $line -Encoding utf8 -ErrorAction Stop
+            return
+        } catch {
+            Start-Sleep -Milliseconds 200
+        }
+    }
 }
 
 # Logs the throw before it dies, which is the whole point. Without this the

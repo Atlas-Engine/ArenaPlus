@@ -560,7 +560,14 @@ local function Sample()
 	--
 	-- Nothing is lost by waiting: these are running totals, so the first read
 	-- after a death already carries everything done before it.
-	if (current.deaths or 0)==0 then return end
+	--
+	-- Except once the match is decided, which is the case this gate got wrong.
+	-- A match that ends because somebody left has no deaths in it at all, so
+	-- the gate held right through the forfeit and the whole thing recorded
+	-- nothing: no damage, no healing, no rating change. The traffic argument
+	-- only applies while the match is still running -- once there is a winner
+	-- there is exactly one more read to do, and it is the one that matters.
+	if (current.deaths or 0)==0 and not current.decided then return end
 
 	-- The numbers only arrive after being asked for.
 	if RequestBattlefieldScoreData then RequestBattlefieldScoreData() end

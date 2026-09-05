@@ -1,4 +1,4 @@
-﻿# Gear, enchants, gems, talents and glyphs for the top of each ladder.
+# Gear, enchants, gems, talents and glyphs for the top of each ladder.
 #
 # Separate from UpdateSpecs.ps1 because the two answer different questions and
 # cost very differently. A spec is one word and is wanted for every one of the
@@ -1214,3 +1214,8 @@ $size = [math]::Round((Get-Item $outFile).Length / 1KB)
 Write-Log ("{0}: asked {1}, carried {2}, found {3}, missing {4}. {5} KB. requests={6}" -f `
     $Region.ToUpper(), $asked, $carried, $found, $missing, $size, $requests)
 if ($wrong -gt 0) { Write-Host ("  {0} tiers did not come out clean." -f $wrong) }
+
+# Every other installed client gets the same files, so Anniversary is as fresh
+# as Mists instead of waiting on the next CurseForge publish.
+. (Join-Path $PSScriptRoot "DataClients.ps1")
+Copy-ToOtherClients -Primary $data -Files @($outFile) -Say ${function:Write-Log}

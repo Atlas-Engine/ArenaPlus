@@ -177,6 +177,23 @@ local LEFT_SLOTS   = { "head", "neck", "shoulder", "back", "chest", "shirt", "ta
 local RIGHT_SLOTS  = { "hands", "waist", "legs", "feet", "finger_1", "finger_2", "trinket_1", "trinket_2" }
 local BOTTOM_SLOTS = { "main_hand", "off_hand" }
 
+-- The ranged slot is TBC's alone.
+--
+-- Bows, guns, thrown weapons and wands all live there, and every TBC character
+-- on the ladder has one -- 325 of 325, against none at all in Mists, which
+-- folded ranged weapons into the main hand and stopped drawing a third weapon.
+-- So it is added rather than declared: a permanently empty slot under the Mists
+-- model would be worse than the missing one was here.
+-- Between the two weapons rather than after them.
+--
+-- Appended, it took the right-hand end, which pushed the off hand into the
+-- middle -- and the off hand's enchant is written to its right, so "Mongoose"
+-- landed on top of the bow. Each weapon's enchant runs outwards from the pair
+-- it belongs to, so the pair has to stay on the outside.
+if (ns.ClientVersion and ns.ClientVersion()) == "tbc" then
+	table.insert(BOTTOM_SLOTS, 2, "ranged")
+end
+
 local frame
 
 -- ---------------------------------------------------------------- data
@@ -694,7 +711,7 @@ local function Dress(gear,look)
 	-- Weapons have to name their slot. Without it both daggers are offered to
 	-- the main hand, the second replaces the first, and a dual wielder shows up
 	-- holding one.
-	local MODEL_SLOT={ main_hand="MAINHANDSLOT", off_hand="SECONDARYHANDSLOT" }
+	local MODEL_SLOT={ main_hand="MAINHANDSLOT", off_hand="SECONDARYHANDSLOT", ranged="RANGEDSLOT" }
 
 	local function Wear(list)
 		for _,slotKey in ipairs(list) do
@@ -780,14 +797,26 @@ local function BuildCharacterPage(parent)
 
 	-- Centred under the model, the way the character sheet has them, with each
 	-- weapon's enchant running outwards so the two cannot collide.
-	local weaponSide={ main_hand="right", off_hand="left" }
+	local weaponSide={ main_hand="right", off_hand="left", ranged="right" }
+
+	-- Centred from the row's own width rather than from a hand-picked offset,
+	-- so two weapons and three both sit under the middle of the model. The old
+	-- half-a-gap nudge was the two-slot answer written out longhand.
+	local wide=#BOTTOM_SLOTS*SLOT_SIZE+(#BOTTOM_SLOTS-1)*SLOT_GAP
+
 	local previous
 	for index,slotKey in ipairs(BOTTOM_SLOTS) do
 		local button=CreateSlot(page,weaponSide[slotKey] or "left")
+
+		-- The middle slot writes no enchant beside itself: there is a weapon on
+		-- either side of it and nowhere for the text to go that is not on top of
+		-- one of them. A scope still shows as the green pip and in the tooltip.
+		if slotKey=="ranged" then button.enchantText:Hide() end
+
 		if previous then
 			button:SetPoint("LEFT",previous,"RIGHT",SLOT_GAP,0)
 		else
-			button:SetPoint("BOTTOMRIGHT",page,"BOTTOM",-math.floor(SLOT_GAP/2),FOOT+46)
+			button:SetPoint("BOTTOMLEFT",page,"BOTTOM",-math.floor(wide/2),FOOT+46)
 		end
 		page.slots[slotKey]=button
 		previous=button
@@ -1232,6 +1261,9 @@ local function BuildSocketsPage(parent)
 			row:Hide()
 			rows[index]=row
 		end
+
+		-- Kept so a whole column can be taken away, heading and all.
+		rows.head=head
 		return rows
 	end
 
@@ -1291,11 +1323,25 @@ local function HaveAuctionator()
 	return (api and (api.MultiSearchAdvanced or api.MultiSearch or api.MultiSearchExact)) and true or false
 end
 
+-- Whether a click can search at all, which is not the same question as whether
+-- Auctionator is installed.
+--
+-- The original auction house has a search box of its own, and the fallback in
+-- SearchAuctionHouse fills BrowseName in the way a person would -- so on
+-- Anniversary every row here works with nothing installed. The modern house
+-- has no such box to type into, so there it really does take Auctionator.
+--
+-- Asking the wrong one of those two questions sent Anniversary players off to
+-- install an addon they did not need, under a feature that was already working.
+local function CanSearch()
+	return HaveAuctionator() or _G.BrowseName~=nil
+end
+
 -- Why a click did nothing, in the order the reasons actually apply.
 local function ExplainNoSearch(name)
 	if not AuctionHouseIsOpen() then
 		ns.Print(L.INSPECT_AH_CLOSED,name)
-	elseif not HaveAuctionator() then
+	elseif not CanSearch() then
 		ns.Print(L.INSPECT_AH_NEEDS_AUCTIONATOR,name)
 	else
 		ns.Print(L.INSPECT_AH_CLOSED,name)
@@ -1480,6 +1526,89 @@ local function AliasFor(text)
 	return nil
 end
 
+-- What the auction house can actually sell you.
+--
+-- Three different things wear the same shape in the enchant data and only one
+-- of them belongs on a shopping list.
+--
+-- Blizzard's source_item for an enchantment is whatever its API knows produced
+-- it, and for an enchanter's work that is the *formula*. "Formula: Enchant
+-- Cloak - Spell Penetration" is a real auction house item at a real price which
+-- teaches an enchanter a spell and does nothing whatever for the person reading
+-- this list. It is bind-on-equip and openly for sale, so no test of the binding
+-- will ever exclude it -- which is what the first attempt at this got wrong.
+--
+-- The Aldor and Scryer inscriptions and the head arcanums are the other kind:
+-- the real item, applied by the person wearing it, but bound to whoever earned
+-- the reputation. Only the third kind -- leg armours, spellthreads, weapon
+-- chains -- is a thing to go and buy, so both tests have to run.
+--
+-- True while the client has not cached the item, which reads as "let it
+-- through": the page asks for what it is missing and fills again when the
+-- answer arrives, so an unknown item shows for a moment rather than never.
+local BIND_ON_PICKUP=1
+local RECIPE_CLASS=9
+
+-- Consumable / Item Enhancement, which is what a thing you apply to gear is.
+local CONSUMABLE_CLASS=0
+local ITEM_ENHANCEMENT=6
+
+local function Buyable(itemID)
+	if not itemID then return false end
+
+	-- An item the client cannot even name is not one you can shop for.
+	--
+	-- This used to let the unknown through on the reasoning that the page asks
+	-- for what it is missing and fills again when the answer arrives. But the
+	-- asking happened in the row rendering, so anything filtered out here was
+	-- never requested -- and the TBC enchant formulas, which the client has no
+	-- reason to have cached, sailed straight past every test below and sat on
+	-- the list showing their effect text because there was no item name to show
+	-- instead. Asked for here and left out until it answers, which is also the
+	-- honest thing to put on a shopping list: nothing we cannot name.
+	local itemType=select(6,GetItemInfo(itemID))
+	if not itemType then
+		AskForItem(itemID)
+		return false
+	end
+
+	-- Position 6, which WOW-API.md pins down, compared against the client's own
+	-- localised name for the class rather than against the English word.
+	local recipes=GetItemClassInfo and GetItemClassInfo(RECIPE_CLASS)
+	if recipes and itemType==recipes then return false end
+
+	-- Position 14 is past the eleven WOW-API.md pins down. Anything that is not
+	-- a plain number means the signature is not what we think it is, and the
+	-- binding goes unchecked rather than guessed at.
+	local bind=select(14,GetItemInfo(itemID))
+	if type(bind)=="number" and bind==BIND_ON_PICKUP then return false end
+
+	-- What the thing actually is, which turned out to be the only honest test.
+	--
+	-- Blizzard's source_item for most of TBC's enchants is an internal item
+	-- that exists, has a name, and cannot be bought by anybody. Measured on
+	-- Anniversary against one that can:
+	--
+	--   29861  QAEnchant Cloak +20 Spell Penetration   Consumable / Other
+	--   35430  Enchant Chest - Major Resilience        Consumable / Other
+	--   24276  Golden Spellthread                      Consumable / Item Enhancement
+	--
+	-- Every column that looked like it would separate them is the same across
+	-- all three: both unbuyable ones are bind type 0 exactly like the good one,
+	-- and one of them carries a 650 vendor price. Only the subtype differs, and
+	-- it says the true thing -- something you apply to a piece of gear is an
+	-- Item Enhancement, and these are not.
+	--
+	-- Compared against the client's own localised name for that subclass rather
+	-- than the English words, and skipped entirely if the client will not give
+	-- it, so a wrong constant leaves the list as it was instead of emptying it.
+	local enhancement=GetItemSubClassInfo and GetItemSubClassInfo(CONSUMABLE_CLASS,ITEM_ENHANCEMENT)
+	local subType=select(7,GetItemInfo(itemID))
+	if enhancement and subType and subType~=enhancement then return false end
+
+	return true
+end
+
 -- Gem item ids and enchant ids out of a gear table, counted.
 --
 -- A slot is { itemID, enchantID, gem, gem, gem }: everything from the third
@@ -1524,7 +1653,19 @@ local function SocketTally(gear)
 				local shopName=applied and GetItemInfo(applied)
 				local effect=ns.ENCHANT_TEXT and ns.ENCHANT_TEXT[enchant]
 
-				if not IsProfessionOnly(slotKey,applied,shopName,effect) then
+				-- Only what somebody can actually go and buy, which is the
+				-- whole point of a shopping list.
+				--
+				-- Most of TBC's enchants are an enchanter's own work with no
+				-- item behind them at all, and most of the ones that do have an
+				-- item -- the shoulder inscriptions, the head arcanums -- bind
+				-- to whoever earned the reputation. Listed, they were ten rows
+				-- of things to go and not buy. The leg armours, spellthreads
+				-- and weapon chains beside them are ordinary tradeable goods
+				-- and stay, so the expansion is the wrong thing to test: the
+				-- binding is, and the same test tidies Mists as well.
+				if Buyable(applied)
+					and not IsProfessionOnly(slotKey,applied,shopName,effect) then
 					enchants[#enchants+1]={ slot=slotKey, id=enchant, item=tonumber(piece[1]) }
 				end
 			end
@@ -1569,7 +1710,18 @@ local function FillSockets(gear,glyphs,class)
 	-- Set here rather than when the page was built: Auctionator can be
 	-- disabled between sessions, and a line promising a search that cannot
 	-- happen is worse than no line.
-	page.hint:SetText(HaveAuctionator() and L.INSPECT_AH_HINT or L.INSPECT_AH_HINT_NO_AUCTIONATOR)
+	-- The line that asks for Auctionator is a recommendation, not a footnote,
+	-- and it was wearing the same grey disabled font as the ordinary hint --
+	-- which is exactly how a person reads past it. Coloured when it has
+	-- something to ask for, and left grey when it is only describing what a
+	-- click does.
+	local haveIt=CanSearch()
+	page.hint:SetText(haveIt and L.INSPECT_AH_HINT or L.INSPECT_AH_HINT_NO_AUCTIONATOR)
+	if haveIt then
+		page.hint:SetTextColor(0.5,0.5,0.5)
+	else
+		page.hint:SetTextColor(1,0.82,0)
+	end
 
 	local gemOrder,gemCount,enchants=SocketTally(gear)
 
@@ -1694,6 +1846,7 @@ local function FillSockets(gear,glyphs,class)
 			row.gemLoose=(alias~=nil)
 			row.gemLink=link
 			row.gemCount=1
+
 			row:SetScript("OnEnter",function(self)
 				GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
 				if self.gemLink then
@@ -1742,7 +1895,12 @@ local function FillSockets(gear,glyphs,class)
 	local majorIcon=glyphArt and ("Interface/Icons/INV_Glyph_Major"..glyphArt)
 	local minorIcon=glyphArt and ("Interface/Icons/INV_Glyph_Minor"..glyphArt)
 
-	local worn=GlyphList(glyphs)
+	-- Not even an empty column where the expansion has no glyphs: "No glyphs."
+	-- under a Glyphs heading reads as something failing to load.
+	local noGlyphs=(ns.ClientVersion and ns.ClientVersion())=="tbc"
+	if page.glyphs.head then page.glyphs.head:SetShown(not noGlyphs) end
+
+	local worn=(not noGlyphs) and GlyphList(glyphs) or {}
 
 	for index,row in ipairs(page.glyphs) do
 		local glyph=worn[index]
@@ -1811,7 +1969,7 @@ local function FillSockets(gear,glyphs,class)
 		end
 	end
 
-	if #worn==0 and page.glyphs[1] then
+	if not noGlyphs and #worn==0 and page.glyphs[1] then
 		page.glyphs[1].icon:SetTexture(nil)
 		page.glyphs[1].text:SetText(L.INSPECT_NO_GLYPHS)
 		page.glyphs[1].text:SetTextColor(0.7,0.7,0.7)

@@ -558,6 +558,15 @@ local function InitDB()
 	db.version=db.version or CURRENT_DB_VERSION
 	db.modules=db.modules or {}
 
+	-- The spec icon harvest is read once and then done with.
+	--
+	-- /arena specicons writes its dump here because the copy box truncates it,
+	-- and it has to survive the reload that flushes SavedVariables to disk --
+	-- but no longer. Cleared on the way back in, so it is on disk exactly long
+	-- enough to be read and does not sit in every player's saved file forever
+	-- after one curious /arena specicons.
+	db.specIconDump=nil
+
 	InheritFromQoLPlus(db)
 
 	-- Fill each module's settings in from its own defaults, leaving anything

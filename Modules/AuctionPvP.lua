@@ -177,6 +177,19 @@ end
 -- Attach and both of those are defined further down.
 local Attach, OpenPanel
 
+-- Whichever auction house this client has.
+--
+-- MoP Classic carries the modern one: a single AuctionHouseFrame with a search
+-- bar across the top. Anniversary is still on the original, an AuctionFrame
+-- with Browse, Bids and Auctions as tabs along the bottom and the search
+-- controls living inside the Browse tab. The two share no widget names at all,
+-- so everything here that reached for AuctionHouseFrame by name simply found
+-- nothing on TBC -- which is why the button never appeared there, rather than
+-- appearing in the wrong place.
+local function House()
+	return AuctionHouseFrame or AuctionFrame
+end
+
 local function BuildPanel()
 	if panel then return panel end
 
@@ -187,7 +200,7 @@ local function BuildPanel()
 	-- inherits its parent's scale and position, so the two line up at any UI
 	-- Scale and stay lined up if the house moves -- and it hides with the house
 	-- for free.
-	panel = CreateFrame("Frame", "ArenaPlus_AuctionPvP", AuctionHouseFrame or UIParent, "BackdropTemplate")
+	panel = CreateFrame("Frame", "ArenaPlus_AuctionPvP", House() or UIParent, "BackdropTemplate")
 	panel:SetSize(PANEL_WIDTH, PANEL_HEIGHT)
 	panel:Hide()
 
@@ -334,7 +347,15 @@ local function BuildPanel()
 
 			-- The region the row came from, not the one you play in: opening a
 			-- EU player against the US tables would find nobody.
-			local region = panel.region
+			--
+			-- Through LadderKey, because the tables are keyed by region AND
+			-- game and panel.region is only ever the bare half. TopOfSpec
+			-- converts it before filling the list, so the rows were found under
+			-- "tbc-eu" and then looked up again under "eu" when one was
+			-- clicked -- a Mists table that has never heard of them. On Mists
+			-- the two keys are the same string, which is why this only ever
+			-- showed up on Anniversary.
+			local region = LadderKey(panel.region)
 
 			-- Straight to the gems, because that is what this window is for.
 			if ns.ShowInspect then ns.ShowInspect(self.entry, region, panel.bracket) end
@@ -517,13 +538,14 @@ end
 local ATTACH_X, ATTACH_Y = -1, 1
 
 function Attach()
-	if not (panel and AuctionHouseFrame) then return end
+	local house = House()
+	if not (panel and house) then return end
 
 	-- Re-parented as well as re-anchored: the panel may have been built before
 	-- the auction house existed, in which case it is still a child of UIParent
 	-- and would not follow the house at all.
-	if panel:GetParent() ~= AuctionHouseFrame then
-		panel:SetParent(AuctionHouseFrame)
+	if panel:GetParent() ~= house then
+		panel:SetParent(house)
 		panel:SetFrameStrata("FULLSCREEN_DIALOG")
 		panel:SetToplevel(true)
 	end
@@ -531,7 +553,7 @@ function Attach()
 	ForgetStoredPosition()
 
 	panel:ClearAllPoints()
-	panel:SetPoint("TOPLEFT", AuctionHouseFrame, "TOPRIGHT", ATTACH_X, ATTACH_Y)
+	panel:SetPoint("TOPLEFT", house, "TOPRIGHT", ATTACH_X, ATTACH_Y)
 
 	-- Anything already hanging off this one comes with it.
 	if ns.InspectReanchor then ns.InspectReanchor() end
@@ -621,7 +643,7 @@ ns.SlashCommands["ahalign"] = function(argument)
 			frame:GetEffectiveScale() or 0)
 	end
 
-	local house = AuctionHouseFrame
+	local house = House()
 	local shelf = _G.ArenaPlus_AuctionPvP
 	local gems  = _G.ArenaPlus_Inspect
 
@@ -713,21 +735,64 @@ end
 -- ---------------------------------------------------------------- the button
 
 local hooked = false
+local pvpButton
+
+-- Where the button sits on the original auction house.
+--
+-- It belongs on the Search button's line -- anything else reads as misaligned,
+-- which is what anchoring it to the page arrows produced. So it keeps Search's
+-- line and takes only its horizontal offset from the Prev arrow beneath it,
+-- far enough left to clear it.
+--
+-- Measured rather than guessed at, because the two are different distances
+-- apart at different UI scales. Measured again on every open, because GetLeft
+-- answers nil until the frame has been laid out once, which on a cold open is
+-- after the button has already been made.
+local function AlignClassicButton()
+	if not (pvpButton and BrowseSearchButton) then return end
+
+	local searchLeft = BrowseSearchButton:GetLeft()
+	local arrowLeft = BrowsePrevPageButton and BrowsePrevPageButton:GetLeft()
+	if not (searchLeft and arrowLeft and arrowLeft < searchLeft) then return end
+
+	pvpButton:ClearAllPoints()
+	pvpButton:SetPoint("RIGHT", BrowseSearchButton, "LEFT", arrowLeft - searchLeft - 8, 0)
+end
 
 local function PlaceButton()
 	if hooked then return end
 
-	-- The modern auction house, which is what this client has: a search bar
-	-- with a Filter button on its right. The button goes to the left of it,
-	-- where there is room and where the eye already is.
+	-- Two houses, two anchors, the same place on screen.
+	--
+	-- The modern one has a search bar with a Filter button at its right, and the
+	-- button goes to the left of that, where there is room and where the eye
+	-- already is. The original has no such bar: its Search button sits at the
+	-- top right with the two checkboxes well clear of it, so the gap beside it
+	-- is the same gap, reached by a different name.
+	--
+	-- Parented to the Browse tab rather than to the window, on the original,
+	-- because that is where the anchor lives -- a button left behind on the Bids
+	-- tab would hang beside a Search button that is no longer drawn.
+	local parent, place
 	local bar = AuctionHouseFrame and AuctionHouseFrame.SearchBar
-	local anchor = bar and (bar.FilterButton or bar.SearchButton)
-	if not anchor then return end
 
-	local button = CreateFrame("Button", "ArenaPlus_AuctionPvPButton", bar, "UIPanelButtonTemplate")
+	if bar and (bar.FilterButton or bar.SearchButton) then
+		parent = bar
+		place = { "RIGHT", bar.FilterButton or bar.SearchButton, "LEFT", -4, 0 }
+	elseif AuctionFrameBrowse and BrowseSearchButton then
+		parent = AuctionFrameBrowse
+
+		-- A starting point only; AlignClassicButton moves it clear of the page
+		-- arrows once the house has been laid out and can be measured.
+		place = { "RIGHT", BrowseSearchButton, "LEFT", -8, 0 }
+	end
+
+	if not place then return end
+
+	local button = CreateFrame("Button", "ArenaPlus_AuctionPvPButton", parent, "UIPanelButtonTemplate")
 	button:SetSize(56, 22)
 	button:SetText(L.AH_PVP_BUTTON)
-	button:SetPoint("RIGHT", anchor, "LEFT", -4, 0)
+	button:SetPoint(place[1], place[2], place[3], place[4], place[5])
 
 	-- The button is now a way to put it *back*, since it opens with the house.
 	button:SetScript("OnClick", function()
@@ -746,7 +811,10 @@ local function PlaceButton()
 	end)
 	button:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+	pvpButton = button
 	hooked = true
+
+	AlignClassicButton()
 end
 
 -- The auction house frame is loaded on demand, so the button cannot be made
@@ -756,7 +824,13 @@ local watcher = CreateFrame("Frame")
 watcher:RegisterEvent("AUCTION_HOUSE_SHOW")
 watcher:RegisterEvent("ADDON_LOADED")
 watcher:SetScript("OnEvent", function(_, event, name)
-	if event == "ADDON_LOADED" and name ~= "Blizzard_AuctionHouseUI" then return end
+	-- Each client loads its own auction house addon on demand, under its own
+	-- name, and neither exists until somebody talks to an auctioneer.
+	if event == "ADDON_LOADED"
+		and name ~= "Blizzard_AuctionHouseUI"
+		and name ~= "Blizzard_AuctionUI" then
+		return
+	end
 	-- The button, and only the button.
 	--
 	-- This used to open the panel with the house as well, on the reasoning
@@ -768,6 +842,9 @@ watcher:SetScript("OnEvent", function(_, event, name)
 	-- The button is the whole answer. It sits there saying what it does, and
 	-- one click is a smaller price than closing a window on every visit.
 	PlaceButton()
+
+	-- Again on every open: the first one happens before the house has a size.
+	AlignClassicButton()
 end)
 
 -- Closed with the house it belongs to.
