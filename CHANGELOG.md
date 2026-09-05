@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 1.3a
+
+- Fixes and improvements in Auction house.
+
 ## 1.2c
 
 - ArenaPlus now runs on TBC Classic Anniversary. The ladder, title cutoffs, ranks, class and spec, and the gear, gems and enchants behind the auction house list are all there for the Anniversary realms, in both regions.
@@ -41,6 +45,7 @@
 - Fixed characters with the same name on different realms showing each other's rank and rating.
 - Press Enter in the ladder search to step between characters sharing a name.
 - Changing page in the ladder now returns to the top of the list.
+
 
 
 
