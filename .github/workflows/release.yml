@@ -8,10 +8,16 @@ name: Publish release
 #
 # It runs on a tag rather than creating one, which is the opposite of
 # socialplus's workflow, and deliberately. There, the tag and the release are
-# made together because CurseForge would otherwise build before the notes it
-# reads exist. ArenaPlus has no manual-changelog in its .pkgmeta, so CurseForge
-# generates its own text and there is no window to lose: the tag can go up first
-# and the release can follow.
+# made together because nothing writes the notes before the tag exists, so
+# CurseForge would build against the previous version's file.
+#
+# Here tools/Publish-Addon.ps1 writes CHANGELOG-RELEASE.md and commits it BEFORE
+# it tags, so the tagged commit already carries the notes .pkgmeta points at.
+# There is no window to lose and the tag can go up first.
+#
+# (An earlier version of this note said ArenaPlus had no manual-changelog at
+# all. It has had one since .pkgmeta line 44 -- the reasoning above is what
+# actually keeps the ordering safe, not the absence of the setting.)
 #
 # Tags are pushed by tools/Publish-Addon.ps1, from the dashboard's Publish
 # button. Nothing here needs the GitHub CLI installed on the machine that does

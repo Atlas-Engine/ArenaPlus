@@ -2,7 +2,6 @@
 
 ## 1.3b
 
-- ## 1.3b
 - The PvP button now appears on the Anniversary auction house. It was never drawn there at all -- that client uses the original auction house window, and the button was only ever looking for the modern one.
 - Clicking a player in the Top PvP gear list on Anniversary now opens their gear. Every one of them reported having no gear recorded, including the five it had just listed.
 - The shopping list now only shows things that can actually be bought at the auction house. Most of Burning Crusade's enchants are an enchanter's own work with no item to buy, and the list was offering them anyway.

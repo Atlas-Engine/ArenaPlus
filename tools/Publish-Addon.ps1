@@ -122,6 +122,11 @@ try {
     #
     # Bullets are left as typed apart from being given a "- " where they have
     # none, so a line written as prose still reads as a list item.
+    #
+    # Headings are dropped rather than bulleted. A changelog handed over with its
+    # own "## 1.3b" on top came out as "- ## 1.3b" -- a bullet containing a
+    # heading on the CurseForge page, and the version named twice in CHANGELOG.md,
+    # since the history below writes its own heading from $Version.
     $Changelog = ""
     if ($ChangelogFile -and (Test-Path $ChangelogFile)) {
         $Changelog = Get-Content $ChangelogFile -Raw
@@ -129,7 +134,7 @@ try {
 
     $entry = ($Changelog -split "`r?`n" |
               ForEach-Object { $_.TrimEnd() } |
-              Where-Object { $_ -ne "" } |
+              Where-Object { $_ -ne "" -and $_ -notmatch '^\s*#' } |
               ForEach-Object { if ($_ -match '^\s*[-*]') { $_ } else { "- $_" } }) -join "`n"
 
     if (-not $entry) { $entry = "- Maintenance release." }
