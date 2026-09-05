@@ -335,7 +335,20 @@ Write-Host ("{0} to ask about this run." -f $todo)
 # One run per region, as in UpdateFromBlizzard.ps1: two writers on one file end
 # with the loser's work discarded. The process id is checked rather than trusted
 # so a run that died cannot lock the job out for ever.
-$lockFile = Join-Path $PSScriptRoot ("UpdateSpecs-" + $Region + ".lock")
+# One lock for every pass, not one per pass per region.
+#
+# Each pass paces itself to $RatePerSecond and knows nothing of the others,
+# so two running together ask for twice that -- past what Blizzard answers,
+# which it handles by refusing rather than by complaining. A refused
+# character is indistinguishable from one that does not exist, so the cost
+# lands as silently wrong data rather than as an error.
+#
+# Eight scheduled passes across two games made that a matter of time, so
+# they take turns instead: whoever is second says so and leaves. Nothing is
+# lost by waiting -- specs and inspect are incremental, and the ladder pass
+# runs again in fifteen minutes.
+$lockFile = Join-Path $PSScriptRoot "ArenaPlus-fetch.lock"
+$passLabel = "specs $Region"
 
 # Created, not checked and then created.
 #
@@ -354,7 +367,12 @@ for ($try = 1; $try -le 2; $try++) {
         try { $owner = [int](Get-Content $lockFile -TotalCount 1 -ErrorAction Stop) } catch { }
 
         if ($owner -gt 0 -and (Get-Process -Id $owner -ErrorAction SilentlyContinue)) {
-            Write-Host ("Already running as process {0}. Nothing to do." -f $owner)
+            # Line two names the pass, so the log says what to wait for
+            # rather than only that something is in the way.
+            $busy = ""
+            try { $busy = (Get-Content $lockFile -TotalCount 2)[1] } catch { }
+            if ($busy) { Write-Host ("Waiting: {0} is running (process {1})." -f $busy, $owner) }
+            else       { Write-Host ("Waiting: another pass is running (process {0})." -f $owner) }
             return
         }
 
@@ -374,6 +392,7 @@ for ($try = 1; $try -le 2; $try++) {
 # the handle stays open so the file cannot be deleted while it is held.
 $writer = New-Object System.IO.StreamWriter($held)
 $writer.WriteLine($PID)
+$writer.WriteLine($passLabel)
 $writer.Flush()
 
 $progressFile = Join-Path $PSScriptRoot ("UpdateSpecs-" + $Region + ".progress")

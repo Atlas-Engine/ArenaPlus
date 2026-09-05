@@ -61,19 +61,43 @@ local function PrettySpec(slug)
 	return (text:gsub("(%a)([%w]*)", function(first, rest) return first:upper() .. rest end))
 end
 
+-- The shipped tables are keyed by region AND game, so a bare "us" is the
+-- MISTS ladder whichever client is asking. This panel is about gearing your
+-- own character, so the game is always the one you are sitting in -- but the
+-- key still has to say so, or an Anniversary player was shown Mists players
+-- and sent shopping for their gems.
+local function LadderKey(region)
+	if not region then return region end
+	if not (ns.RegionKey and ns.ClientVersion) then return region end
+	return ns.RegionKey(region, ns.ClientVersion())
+end
+
 local function MySpecs()
 	local mine = MyClassSlug()
 	if not (mine and ns.SPEC_BY_SLUG) then return {} end
 
+	-- Only specs this game actually has.
+	--
+	-- SPEC_BY_SLUG describes Mists. A TBC druid would otherwise be offered
+	-- Feral and Guardian, neither of which exists there, and never offered
+	-- Feral Combat, which does -- three tabs, two of them permanently empty.
+	-- The shipped spec list for this ladder is the honest answer, so it is
+	-- what the tabs are built from where it exists.
+	local shipped
+	local key = LadderKey((ns.PlayerRegion and ns.PlayerRegion()) or "us")
+	local list = ns.SPEC_SLUGS_BY_REGION and ns.SPEC_SLUGS_BY_REGION[key]
+	if list then
+		shipped = {}
+		for _, slug in ipairs(list) do shipped[slug] = true end
+	end
+
 	local specs = {}
 	for slug, id in pairs(ns.SPEC_BY_SLUG) do
-		if slug:sub(1, #mine + 1) == mine .. "-" then
+		if slug:sub(1, #mine + 1) == mine .. "-"
+			and ((not shipped) or shipped[slug]) then
 			local specSlug = slug:sub(#mine + 2)
 
-			local icon = ns.SPEC_ICON and ns.SPEC_ICON[id]
-			if not icon and GetSpecializationInfoByID then
-				icon = select(4, GetSpecializationInfoByID(id))
-			end
+			local icon = ns.SpecIconForID and ns.SpecIconForID(id)
 
 			specs[#specs + 1] = {
 				id = id,
@@ -99,10 +123,11 @@ end
 -- exactly the unit it holds.
 local function TopOfSpec(classSlug, specSlug, bracket, region)
 	local list = {}
+	local key = LadderKey(region)
 
-	for _, entry in ipairs(ns.LadderRows and ns.LadderRows(bracket, region) or {}) do
+	for _, entry in ipairs(ns.LadderRows and ns.LadderRows(bracket, key) or {}) do
 		if entry.class == classSlug and entry.spec == specSlug and entry.rating then
-			if ns.HasInspectData and ns.HasInspectData(entry.name, entry.realm, region) then
+			if ns.HasInspectData and ns.HasInspectData(entry.name, entry.realm, key) then
 				list[#list + 1] = entry
 			end
 		end
