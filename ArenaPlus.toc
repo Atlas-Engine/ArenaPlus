@@ -11,7 +11,7 @@
 # Bagnon, Bartender4 -- tops out at 50504, and not one names 50505.
 ## Title: ArenaPlus
 ## Author: David / Atlas-Engine
-## Version: 1.2b
+## Version: 1.2c
 ## Notes: Rated arena and battleground tracking - match history with specs and crowd control, live title cutoffs and the ladder.
 # CurseForge's own number for the project, which is what identifies it
 # everywhere outside the website -- the packaging webhook posts to
