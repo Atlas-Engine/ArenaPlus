@@ -360,6 +360,15 @@ $rankVotes = @{}
 $talentIdOf = @{}
 $talentNames = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::Ordinal)
 
+# TBC only: the highest rank anybody has been seen in, keyed by TALENT id --
+# stable across ranks where the spell id is not -- plus the spell-to-talent
+# map that lets a shipped row find its ceiling. Nothing publishes these, so
+# they are harvested from the builds themselves, the same way the MoP tier
+# grid is: across a few hundred builds the real maximum turns up for anything
+# anybody actually takes.
+$talentMax = @{}
+$talentOfSpell = @{}
+
 $records = New-Object System.Collections.Generic.List[string]
 
 # ---------------------------------------------------------------- carry over
@@ -590,6 +599,7 @@ foreach ($key in $wanted.Keys) {
     # How far each talent tree was taken -- the "17/0/44" a TBC build is read
     # by. Empty on MoP, which has no trees.
     $trees = New-Object System.Collections.Generic.List[string]
+    $ranks = New-Object System.Collections.Generic.List[string]
 
     if ($Version -eq "tbc") {
         # A different shape entirely: TBC has no top-level "specializations" and
@@ -614,16 +624,46 @@ foreach ($key in $wanted.Keys) {
                 $treeName = [string]$tree.specialization_name
                 $treeName = $treeName -replace '\\', '\\'
                 $treeName = $treeName -replace '"', '\"'
-                $null = $trees.Add('"' + $treeName + '",' + [int]$tree.spent_points)
+                # Three numbers a tree, not two: name, points spent, and how
+                # many of the flat talent list belong to it. Without that count
+                # the list cannot be split back into trees, so a reader could
+                # say "37 points in Restoration" but not WHICH talents those
+                # were -- which is the whole of a build.
+                $treeCount = 0
 
-                # The spell id is the one for the rank actually taken -- rank 5
-                # of Master of Deception is its own spell -- so the client can
-                # resolve name and rank locally through GetSpellInfo, and no
-                # talent names have to ship. Same storage as MoP for that reason.
                 foreach ($t in $tree.talents) {
                     $id = $t.spell_tooltip.spell.id
-                    if ($id) { $null = $talents.Add([string]$id) }
+                    if (-not $id) { continue }
+                    $null = $talents.Add([string]$id)
+                    $null = $ranks.Add([string][int]$t.talent_rank)
+                    $treeCount++
+
+                    # The name ships rather than being resolved in the client.
+                    #
+                    # MoP reads talent names from GetSpellInfo, which works there
+                    # because they are that client's own spells. These are TBC
+                    # RANK spells -- one id per rank -- and Cataclysm consolidated
+                    # ranks away, so a 5.5 client asked about them may answer
+                    # nothing and draw a nameless row. The API hands the name over
+                    # with the talent; there is no reason to gamble on the client.
+                    $spellName = [string]$t.spell_tooltip.spell.name
+                    if ($spellName -and -not $talentNames.ContainsKey([string]$id)) {
+                        $talentNames[[string]$id] = $spellName
+                    }
+
+                    $talentId = [string]$t.talent.id
+                    if ($talentId) {
+                        $seenRank = [int]$t.talent_rank
+                        if ((-not $talentMax.ContainsKey($talentId)) -or ($talentMax[$talentId] -lt $seenRank)) {
+                            $talentMax[$talentId] = $seenRank
+                        }
+                        if (-not $talentOfSpell.ContainsKey([string]$id)) {
+                            $talentOfSpell[[string]$id] = $talentId
+                        }
+                    }
                 }
+
+                $null = $trees.Add('"' + $treeName + '",' + [int]$tree.spent_points + ',' + $treeCount)
             }
         }
     }
@@ -865,6 +905,11 @@ foreach ($key in $wanted.Keys) {
         $treeBlock = ""
         if ($trees.Count -gt 0) { $treeBlock = ",d={" + ($trees -join ",") + "}" }
 
+        # Ranks run parallel to t={}, one per talent, in the same order. Kept
+        # alongside rather than paired into the list so t={} stays exactly what
+        # MoP writes and every existing reader of it is untouched.
+        if ($ranks.Count -gt 0) { $treeBlock = $treeBlock + ",q={" + ($ranks -join ",") + "}" }
+
         $null = $records.Add("`t[`"$key`"]={g={" + ($gear -join ",") + "},t={" + ($talents -join ",") + "}" + $treeBlock + ",y={" + ($glyphs -join ",") + "},s={" + ($sets -join ",") + "},p={" + (($professions.Keys | Sort-Object | ForEach-Object { '"' + $_ + '"' }) -join ",") + "},k={" + ($tinkers -join ",") + "}" + $vBlock + ",r=" + $raceId + ",x=" + $genderId + ",c=`"" + $klass + "`"},")
         $found++
     } else {
@@ -888,6 +933,24 @@ $now = Get-Date -Format $TimeFormat
 
 $glyphBody = (($glyphNames.Keys | Sort-Object { [int]$_ }) | ForEach-Object {
     "`t[" + $_ + "]=`"" + ($glyphNames[$_] -replace '"','\"') + "`","
+}) -join "`n"
+
+# TBC talent names, and how deep each talent goes.
+#
+# Empty on MoP, where the client resolves both from its own spellbook. Written
+# as three small tables rather than folded into the rows: a name repeats across
+# hundreds of builds, and the rank ceiling is a property of the talent rather
+# than of anybody's character.
+$talentNameBody = (($talentNames.Keys | Sort-Object { [int]$_ }) | ForEach-Object {
+    "`t[" + $_ + "]=`"" + ($talentNames[$_] -replace '"','\"') + "`","
+}) -join "`n"
+
+$talentMaxBody = (($talentMax.Keys | Sort-Object { [int]$_ }) | ForEach-Object {
+    "`t[" + $_ + "]=" + $talentMax[$_] + ","
+}) -join "`n"
+
+$talentOfSpellBody = (($talentOfSpell.Keys | Sort-Object { [int]$_ }) | ForEach-Object {
+    "`t[" + $_ + "]=" + $talentOfSpell[$_] + ","
 }) -join "`n"
 
 # Enchants Blizzard gave no source item for, filled in from one that reads the
@@ -1018,6 +1081,30 @@ for id, name in pairs({
 $glyphBody
 }) do ns.GLYPH_NAMES[id] = name end
 
+-- Talent names by SPELL id, one entry per rank, because that is what a row
+-- stores. Shipped because these are TBC rank spells and the client reading
+-- them may be MoP, which consolidated ranks away and knows nothing of them.
+ns.TALENT_NAMES = ns.TALENT_NAMES or {}
+
+for id, name in pairs({
+$talentNameBody
+}) do ns.TALENT_NAMES[id] = name end
+
+-- Which talent a rank-spell belongs to, and how many ranks that talent has.
+-- Together they turn a stored spell id into "3/5" -- harvested across every
+-- build read this run, since nothing publishes the ceiling.
+ns.TALENT_OF_SPELL = ns.TALENT_OF_SPELL or {}
+
+for spell, talent in pairs({
+$talentOfSpellBody
+}) do ns.TALENT_OF_SPELL[spell] = talent end
+
+ns.TALENT_MAX_RANK = ns.TALENT_MAX_RANK or {}
+
+for talent, rank in pairs({
+$talentMaxBody
+}) do ns.TALENT_MAX_RANK[talent] = rank end
+
 ns.ENCHANT_TEXT = ns.ENCHANT_TEXT or {}
 
 for id, text in pairs({
@@ -1073,13 +1160,21 @@ $recordBody
 # gems lost their item-to-set map, so every set read 0/5, and the glyphs came
 # out as "none glyphed" for the whole ladder. A table that should never be empty
 # is worth one line to check.
-foreach ($table in @(
+# Glyphs are exempt on TBC: that expansion has none, so an empty table is the
+# correct answer there rather than a symptom. Left in the list for MoP, where
+# it is one of the two tables this check was written for -- a warning that
+# always fires on half the runs is a warning nobody reads.
+$expected = @(
     @{ Name = 'characters';      Count = $records.Count },
-    @{ Name = 'glyph names';     Count = $glyphNames.Count },
     @{ Name = 'enchant strings'; Count = $enchantText.Count },
     @{ Name = 'set names';       Count = $setNames.Count },
     @{ Name = 'item to set';     Count = $setOfItem.Count }
-)) {
+)
+if ($Version -ne "tbc") {
+    $expected += @{ Name = 'glyph names'; Count = $glyphNames.Count }
+}
+
+foreach ($table in $expected) {
     if ($table.Count -eq 0) { Write-Host ("  WARNING: {0} came out empty" -f $table.Name) }
 }
 

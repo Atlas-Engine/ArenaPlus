@@ -722,7 +722,13 @@ local BRACKET_BUTTON_GAP = 4
 -- until the picker moved.
 ns.BRACKET_PICKER_WIDTH = (4*BRACKET_BUTTON_W) + (3*BRACKET_BUTTON_GAP)
 
-function ns.BuildBracketPicker(frame,point,x,y)
+-- `follows` says which game decides the bracket list.
+--
+-- "view" for the ladder, which can be pointed at either game; "client" for
+-- the match history, which is always your own matches in the game you are
+-- sitting in and must not lose 10v10 just because the ladder next to it is
+-- showing Anniversary.
+function ns.BuildBracketPicker(frame,point,x,y,follows)
 	local names=ns.BRACKET_NAMES
 	local buttons={}
 	local previous
@@ -769,9 +775,24 @@ function ns.BuildBracketPicker(frame,point,x,y)
 		local docked=panel and panel:IsVisible()
 		local current=ns.ViewBracket()
 
+		-- Rated battlegrounds arrived in Cataclysm, so there is no fourth
+		-- bracket on the Anniversary realms and no ladder was ever scraped for
+		-- one. The button is hidden rather than left to open an empty window.
+		--
+		-- Keyed on the game being LOOKED AT, not the client: Mists viewing the
+		-- Anniversary ladder has no 10v10 to show either, and Anniversary
+		-- viewing the Classic ladder does.
+		local version
+		if follows=="client" then
+			version=(ns.ClientVersion and ns.ClientVersion()) or "mop"
+		else
+			version=(ns.ViewVersion and ns.ViewVersion()) or "mop"
+		end
+		local noRBG=(version=="tbc")
+
 		for bracket=1,4 do
 			local button=buttons[bracket]
-			button:SetShown(not docked)
+			button:SetShown(not docked and not (noRBG and bracket==4))
 
 			local active=bracket==current
 			if active then button:Disable() else button:Enable() end
@@ -838,8 +859,27 @@ end
 -- that happens to be reachable from here because both ship in the data
 -- addon. Defaults to this client's own game, so the window opens on the
 -- ladder the player is actually playing.
+-- Which game this client IS, as opposed to which one is being looked at.
+--
+-- The addon ships for both now, so this cannot be assumed. Everything that
+-- means "mine" -- the ladder a window opens on, whether a row is your own,
+-- which key ChooseRegion reads at login -- has to ask rather than take the
+-- Classic answer, or an Anniversary player is shown the MoP ladder as
+-- though it were theirs.
+--
+-- Note this is NOT the same question as ns.RegionKey's: the shipped keys
+-- are absolute, "eu" always meaning MoP and "tbc-eu" always meaning
+-- Anniversary, whichever client is reading them.
+function ns.ClientVersion()
+	if WOW_PROJECT_ID and WOW_PROJECT_BURNING_CRUSADE_CLASSIC
+		and WOW_PROJECT_ID==WOW_PROJECT_BURNING_CRUSADE_CLASSIC then
+		return "tbc"
+	end
+	return "mop"
+end
+
 function ns.ViewVersion()
-	viewVersion=viewVersion or "mop"
+	viewVersion=viewVersion or ns.ClientVersion()
 	return viewVersion
 end
 
@@ -875,6 +915,14 @@ function ns.ViewRegionKey()
 	return ns.RegionKey(ns.ViewRegion(),ns.ViewVersion())
 end
 
+-- The inverse of RegionKey: which game a shipped key belongs to.
+--
+-- "tbc-eu" is Anniversary, "eu" is the Classic progression -- an unprefixed
+-- key means MoP absolutely, not "whatever this client happens to be".
+function ns.VersionFromKey(key)
+	return (key and key:match("^(%a+)%-")) or "mop"
+end
+
 -- Whether a ladder actually shipped for that game and region, so a picker
 -- can leave out a choice that would only ever show an empty window.
 function ns.HasVersionData(version,region)
@@ -886,7 +934,7 @@ end
 -- somebody else's however well the region matches, and the live rating this
 -- gates is read from the client you are sitting in.
 function ns.ViewingOwnRegion()
-	if ns.ViewVersion()~="mop" then return false end
+	if ns.ViewVersion()~=ns.ClientVersion() then return false end
 	return ns.ViewRegion()==(ns.PlayerRegion() or "us")
 end
 
@@ -917,9 +965,15 @@ function ns.ViewLeaderboard(region)  return ForRegion(ns.LEADERBOARD_BY_REGION,n
 local function ChooseRegion()
 	local mine=ns.PlayerRegion()
 
+	-- The key for this player's region IN THIS CLIENT'S GAME. On Classic that
+	-- is the bare region; on Anniversary it is the tbc- one. Reading the bare
+	-- key on a TBC client would open every window on the MoP ladder.
+	local thisGame=ns.ClientVersion()
+	local myKey=mine and ns.RegionKey(mine,thisGame) or nil
+
 	local function pick(byRegion,fallback)
 		if type(byRegion)~="table" then return fallback end
-		if mine and byRegion[mine] then return byRegion[mine] end
+		if myKey and byRegion[myKey] then return byRegion[myKey] end
 
 		-- Only a key for the game this client is running.
 		--
@@ -929,11 +983,11 @@ local function ChooseRegion()
 		-- here, and pairs() has no order, so without this test a Korean player
 		-- could be handed the TBC ladder and shown it as their own.
 		--
-		-- The unqualified keys are this client's. A version-qualified one is
-		-- only ever reached by asking for it by name, through ViewLeaderboard
-		-- or the API -- which is what a lookup for a friend on another game does.
+		-- Matched against this client's game rather than "has no dash": that
+		-- test read the bare keys as ours, which is true on Classic and exactly
+		-- backwards on Anniversary.
 		for key,data in pairs(byRegion) do
-			if not key:find("-",1,true) then return data end
+			if ns.VersionFromKey(key)==thisGame then return data end
 		end
 		return fallback
 	end
@@ -953,7 +1007,14 @@ end
 -- knowing it is needed is the hard part.
 local function CheckRegion()
 	local mine=ns.PlayerRegion()
+
+	-- The shipped tables name themselves by the KEY they were written under,
+	-- which carries the game as well -- "tbc-us" -- while PlayerRegion answers
+	-- the geography alone. Compared as they came, every Anniversary player was
+	-- told their own region's data belonged to somebody else and sent off to
+	-- rerun a script that was already right.
 	local theirs=(ns.CUTOFFS and ns.CUTOFFS.region) or (ns.LEADERBOARD and ns.LEADERBOARD.region)
+	if theirs then theirs=theirs:gsub("^%a+%-","") end
 
 	if not (mine and theirs) then return end
 	if mine==theirs then return end
@@ -1593,20 +1654,21 @@ function ArenaPlusAPI.GetSpecIcon(entry)
 	if not (entry and entry.class and entry.spec) then return nil end
 	if entry.class=="" or entry.spec=="" or entry.class=="null" then return nil end
 
-	local id=ns.SPEC_BY_SLUG and ns.SPEC_BY_SLUG[entry.class.."-"..entry.spec]
+	local id=ns.SpecIdForSlug and ns.SpecIdForSlug(entry.class.."-"..entry.spec)
 	if not id then return nil end
 
-	-- This client answers some specs with art from a later version of the game,
-	-- so its own overrides win where they exist -- the same order the ladder
-	-- window uses.
-	if ns.SPEC_ICON and ns.SPEC_ICON[id] then return ns.SPEC_ICON[id] end
-
-	if GetSpecializationInfoByID then
-		local _,_,_,icon=GetSpecializationInfoByID(id)
-		if icon then return icon end
-	end
-
-	return nil
+	-- On Anniversary the file id wins.
+	--
+	-- SPEC_ICON holds hand-written corrections for art MISTS reports wrongly,
+	-- and they are texture PATHS -- several naming Cataclysm or Mists art the
+	-- TBC client does not ship, which drew nothing at all (Assassination and
+	-- Enhancement, reported live). A file id is what the client itself answered
+	-- with, and an id survives a rename where a path does not.
+	--
+	-- Keyed on the CLIENT, not the ladder being viewed: this is about which
+	-- art is installed, so Mists looking at the TBC ladder still gets its own
+	-- corrected icons.
+	return ns.SpecIconForID and ns.SpecIconForID(id)
 end
 
 -- Offer a name to be copied.
@@ -1788,6 +1850,52 @@ end
 --
 -- Here because the minimap button is itself one of the ticks: switching it off
 -- with no other way in would hide the only way to switch it back on.
+-- Dump every spec's icon path, so they can be shipped instead of asked for.
+--
+-- GetSpecializationInfoByID is a Mists API. On the Anniversary client it does
+-- not exist, so the 26 specs that rely on it drew no icon at all -- only the
+-- eight in SPEC_ICON, which are hand-written overrides for wrong art rather
+-- than a complete set.
+--
+-- Run this ON MISTS, where the API answers, and paste the result into
+-- SpecData.lua. Harvested from the client rather than typed from memory for
+-- the same reason the talent grid was: an icon path that looks right and is
+-- not shows a blank square, and nothing here could tell you which.
+ns.SlashCommands["specicons"]=function()
+	if not GetSpecializationInfoByID then
+		ns.Print("This client has no GetSpecializationInfoByID -- run it on Mists.")
+		return
+	end
+
+	local slugs={}
+	for slug,id in pairs(ns.SPEC_BY_SLUG or {}) do slugs[#slugs+1]={slug=slug,id=id} end
+	table.sort(slugs,function(a,b) return a.slug<b.slug end)
+
+	local lines,missing={},0
+	for _,entry in ipairs(slugs) do
+		local _,_,_,icon=GetSpecializationInfoByID(entry.id)
+		if icon then
+			-- The number, not the path: this client answers with a file id, and a
+			-- file id is what SetTexture wants on either version.
+			lines[#lines+1]=("\t[%d] = %s, -- %s"):format(entry.id,tostring(icon),entry.slug)
+		else
+			missing=missing+1
+		end
+	end
+
+	-- Into SavedVariables, not the copy box.
+	--
+	-- That box is a one-line StaticPopup with a letter cap: thirty-odd lines
+	-- came out truncated mid-entry, and a dump you have to notice is short is
+	-- worse than no dump. This writes the whole thing to disk, where it can be
+	-- read without anybody copying anything.
+	ArenaPlus_SavedVars=ArenaPlus_SavedVars or {}
+	ArenaPlus_SavedVars.specIconDump=table.concat(lines,"\n")
+
+	ns.Print("%d spec icon(s) read, %d without art. Now /reload -- the client",#lines,missing)
+	ns.Print("only writes SavedVariables on reload or logout.")
+end
+
 ns.SlashCommands["config"]=function()
 	if ns.ToggleConfig then ns.ToggleConfig() end
 end

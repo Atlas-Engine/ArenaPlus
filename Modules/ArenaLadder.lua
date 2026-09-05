@@ -225,23 +225,19 @@ local function SpecIcon(entry)
 	-- A numeric id first, which is what your own characters record about
 	-- themselves: a character knows its specialisation outright and has no need
 	-- of the slug table the ladder rows go through.
-	if entry.specID and GetSpecializationInfoByID then
-		local _,_,_,icon=GetSpecializationInfoByID(entry.specID)
+	if entry.specID then
+		local icon=ns.SpecIconForID and ns.SpecIconForID(entry.specID)
 		if icon then return icon end
 	end
 
 	local class,spec=entry.class,entry.spec
 
 	if class and spec and class~="" and spec~="" then
-		local id=ns.SPEC_BY_SLUG and ns.SPEC_BY_SLUG[class.."-"..spec]
+		local id=ns.SpecIdForSlug and ns.SpecIdForSlug(class.."-"..spec)
 
 		if id then
-			if ns.SPEC_ICON and ns.SPEC_ICON[id] then return ns.SPEC_ICON[id] end
-
-			if GetSpecializationInfoByID then
-				local _,_,_,icon=GetSpecializationInfoByID(id)
-				if icon then return icon end
-			end
+			local icon=ns.SpecIconForID and ns.SpecIconForID(id)
+			if icon then return icon end
 		end
 	end
 
@@ -303,7 +299,7 @@ local function EntrySpec(entry)
 	if not (entry and ns.SPEC_BY_SLUG) then return nil end
 	local class,spec=entry.class,entry.spec
 	if not (class and spec) or class=="" or spec=="" or class=="null" then return nil end
-	return ns.SPEC_BY_SLUG[class.."-"..spec]
+	return ns.SpecIdForSlug and ns.SpecIdForSlug(class.."-"..spec)
 end
 
 -- The ladder narrowed to one spec, for the bracket already being shown.
@@ -965,6 +961,7 @@ local function Refresh()
 		and L.LADDER_SUBTITLE_ALTS:format(#full)
 		or "")
 	if window.RefreshGame then window.RefreshGame() end
+	if window.LayoutSpecRow then window.LayoutSpecRow() end
 	-- Said outright when there is nothing to show, rather than an empty window
 	-- that reads as a fault. "No alts in this bracket" and "no ladder" are
 	-- different sentences.
@@ -1336,10 +1333,23 @@ local function CreateWindow()
 	-- rows, and this menu has two entries and lives inside a window you can
 	-- already close.
 
-	local GAMES={
-		{ version="mop", label=L.LADDER_GAME_CLASSIC },
-		{ version="tbc", label=L.LADDER_GAME_ANNIVERSARY },
-	}
+	-- Your own game first.
+	--
+	-- The addon ships for both Classic and Anniversary, so a fixed order puts
+	-- the other game at the top for half the players. The window already opens
+	-- on your own ladder; the menu should agree with it.
+	local GAMES
+	if (ns.ClientVersion and ns.ClientVersion())=="tbc" then
+		GAMES={
+			{ version="tbc", label=L.LADDER_GAME_ANNIVERSARY },
+			{ version="mop", label=L.LADDER_GAME_CLASSIC },
+		}
+	else
+		GAMES={
+			{ version="mop", label=L.LADDER_GAME_CLASSIC },
+			{ version="tbc", label=L.LADDER_GAME_ANNIVERSARY },
+		}
+	end
 
 	frame.gameMenu.rows={}
 	for index,game in ipairs(GAMES) do
@@ -1364,6 +1374,14 @@ local function CreateWindow()
 			frame.gameMenu:Hide()
 			if ns.ViewVersion()==self.version then return end
 			ns.SetViewVersion(self.version)
+
+			-- Anniversary has no rated battlegrounds. Coming from 10v10 the
+			-- button for it disappears, so the window would sit on a bracket
+			-- with no rows and nothing pressed.
+			if self.version=="tbc" and ns.ViewBracket and ns.ViewBracket()==4
+				and ns.SetViewBracket then
+				ns.SetViewBracket(1)
+			end
 
 			-- Everything the region buttons reset, and for the same reasons: the
 			-- page, the search and the scroll all describe a place on the ladder
@@ -1404,7 +1422,13 @@ local function CreateWindow()
 	-- Called from Refresh, so the label follows a choice made anywhere.
 	function frame.RefreshGame()
 		local region=ns.ViewRegion()
-		local offer=ns.HasVersionData and ns.HasVersionData("tbc",region)
+
+		-- Both games, not "is there TBC data": on an Anniversary client the
+		-- TBC ladder is simply the ladder, and a picker is only worth drawing
+		-- when there is a second one to pick.
+		local offer=ns.HasVersionData
+			and ns.HasVersionData("mop",region)
+			and ns.HasVersionData("tbc",region)
 
 		-- The alts view is your own characters across both ladders, so there is
 		-- no one game it could be showing and nothing for this to choose.
@@ -1608,6 +1632,12 @@ local function CreateWindow()
 	-- thing you pressed to apply it.
 	frame.specs={}
 
+	-- Each class's run of buttons and its underline, kept so the row can be
+	-- laid out again when the game changes. Death knights and monks are on the
+	-- Mists ladder and on no Anniversary one, and the picker can switch
+	-- between the two without rebuilding this window.
+	frame.specGroups={}
+
 	local x=0
 	-- No divider between the classes. There was one, briefly: with the pills
 	-- already grouping them it was a second device doing the first one's job,
@@ -1615,6 +1645,7 @@ local function CreateWindow()
 	for _,class in ipairs(CLASS_ORDER) do
 		local groupStart=x
 		local first
+		local groupButtons={}
 		local slugs={}
 		for slug in pairs(ns.SPEC_BY_SLUG or {}) do
 			if slug:sub(1,#class+1)==class.."-" then slugs[#slugs+1]=slug end
@@ -1673,6 +1704,7 @@ local function CreateWindow()
 
 			first=first or button
 			frame.specs[#frame.specs+1]=button
+			groupButtons[#groupButtons+1]=button
 			x=x+SPEC_ICON_SIZE+SPEC_ICON_GAP
 		end
 
@@ -1694,9 +1726,48 @@ local function CreateWindow()
 
 			local r,g,b=ClassColour(class)
 			underline:SetVertexColor(r,g,b,0.8)
+
+			frame.specGroups[#frame.specGroups+1]={
+				class=class, buttons=groupButtons, underline=underline,
+			}
 		end
 
 		x=x+SPEC_CLASS_GAP-SPEC_ICON_GAP
+	end
+
+	-- Position the row for the game on screen.
+	--
+	-- Run again whenever that changes rather than only at build: hiding a
+	-- class without re-running it leaves the gap where its icons were.
+	function frame.LayoutSpecRow()
+		local version=(ns.ViewVersion and ns.ViewVersion()) or "mop"
+		local at=0
+
+		for _,group in ipairs(frame.specGroups) do
+			local keep=(not ns.SpecExists)
+				or ns.SpecExists(group.class.."-",version)
+
+			if not keep then
+				for _,button in ipairs(group.buttons) do button:Hide() end
+				group.underline:Hide()
+			else
+				local start=at
+				for _,button in ipairs(group.buttons) do
+					button:ClearAllPoints()
+					button:SetPoint("TOPLEFT",frame,"TOPLEFT",16+at,-36)
+					button:Show()
+					at=at+SPEC_ICON_SIZE+SPEC_ICON_GAP
+				end
+
+				group.underline:ClearAllPoints()
+				group.underline:SetPoint("TOPLEFT",frame,"TOPLEFT",
+					16+start,-36-SPEC_ICON_SIZE-3)
+				group.underline:SetSize((at-SPEC_ICON_GAP)-start,2)
+				group.underline:Show()
+
+				at=at+SPEC_CLASS_GAP-SPEC_ICON_GAP
+			end
+		end
 	end
 
 	header:SetPoint("TOPLEFT",frame,"TOPLEFT",16,COLUMNS_TOP)

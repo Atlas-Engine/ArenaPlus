@@ -866,7 +866,9 @@ local function BuildCharacterPage(parent)
 	end)
 
 	page.hint=page:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-	page.hint:SetPoint("BOTTOM",page,"BOTTOM",0,FOOT-4)
+	-- FOOT is the room the tab row needs; sitting 4 INTO it put this line on
+	-- top of the tabs. Cleared above it instead.
+	page.hint:SetPoint("BOTTOM",page,"BOTTOM",0,FOOT+8)
 	page.hint:SetText(L.INSPECT_HINT)
 	page.hint:SetTextColor(0.4,0.4,0.4)
 
@@ -927,6 +929,74 @@ local function BuildTalentsPage(parent)
 		level:SetPoint("RIGHT",page.cells[tier][1],"LEFT",-4,0)
 		level:SetText(tier*15)
 		level:SetTextColor(0.35,0.35,0.35)
+
+		-- Kept, because these are the levels MISTS unlocks its tiers at. TBC
+		-- stops at 70 and has no tiers at all, so they have to go with the grid
+		-- rather than being left down the side of a tree list.
+		page.levels=page.levels or {}
+		page.levels[tier]=level
+	end
+
+	-- The Burning Crusade layout, built beside the grid above rather than
+	-- instead of it.
+	--
+	-- TBC has no tiers: it has three talent TREES, each taken to whatever
+	-- depth the player paid for, and a build is read as "17/0/44" plus which
+	-- talents those points bought. The six-by-three grid describes nothing
+	-- there -- it was drawing Mists tiers with TBC spell ids in them, which is
+	-- how a rogue came out showing "spell 108208" against level 15.
+	--
+	-- Which layout is used is decided by the DATA, not the client: a Mists
+	-- player looking at an Anniversary character needs this one too.
+	local treeRows=18
+	local treeRowHeight=18
+	page.trees={}
+
+	for column=1,TALENT_COLUMNS do
+		local tree={}
+		local left=46+(column-1)*cellWidth
+
+		tree.heading=page:CreateFontString(nil,"OVERLAY","GameFontNormal")
+		tree.heading:SetPoint("TOPLEFT",page,"TOPLEFT",left,TOP)
+		tree.heading:SetWidth(cellWidth-6)
+		tree.heading:SetJustifyH("LEFT")
+
+		tree.rows={}
+		for index=1,treeRows do
+			local row=CreateFrame("Button",nil,page)
+			row:SetSize(cellWidth-8,treeRowHeight-2)
+			row:SetPoint("TOPLEFT",page,"TOPLEFT",left,TOP-18-(index-1)*treeRowHeight)
+
+			row.icon=row:CreateTexture(nil,"ARTWORK")
+			row.icon:SetSize(treeRowHeight-4,treeRowHeight-4)
+			row.icon:SetPoint("LEFT",row,"LEFT",0,0)
+			row.icon:SetTexCoord(0.07,0.93,0.07,0.93)
+
+			row.rank=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+			row.rank:SetPoint("RIGHT",row,"RIGHT",-2,0)
+			row.rank:SetJustifyH("RIGHT")
+			row.rank:SetTextColor(0.7,0.7,0.7)
+
+			row.label=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+			row.label:SetPoint("LEFT",row.icon,"RIGHT",5,0)
+			row.label:SetPoint("RIGHT",row.rank,"LEFT",-4,0)
+			row.label:SetJustifyH("LEFT")
+			row.label:SetTextColor(1,0.82,0)
+
+			row:SetScript("OnEnter",function(self)
+				if not self.spellID then return end
+				GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
+				pcall(GameTooltip.SetSpellByID,GameTooltip,self.spellID)
+				GameTooltip:Show()
+			end)
+			row:SetScript("OnLeave",function() GameTooltip:Hide() end)
+			row:Hide()
+
+			tree.rows[index]=row
+		end
+
+		tree.heading:Hide()
+		page.trees[column]=tree
 	end
 
 	-- What the grid could not be filled in from. Said out loud, because a blank
@@ -1102,14 +1172,6 @@ local function BuildPvPPage(parent)
 
 		y=y-PVP_GROUP_GAP
 	end
-
-	-- Read out of the ladder rather than fetched: every bracket that character
-	-- placed in is already on disk, and a bracket they never played is simply
-	-- absent -- which is a fact worth showing rather than a gap.
-	page.note=page:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-	page.note:SetPoint("TOPLEFT",page,"TOPLEFT",24,y)
-	page.note:SetTextColor(0.45,0.45,0.45)
-	page.note:SetText(L.INSPECT_PVP_NOTE)
 
 	return page
 end
@@ -1374,6 +1436,17 @@ end
 --
 -- Engineering's tinkers never reach here -- they are kept in their own field
 -- rather than in the slot's enchant -- so they need no rule.
+-- "feral-combat" -> "Feral Combat". Slugs are how the ladder stores a class
+-- and a spec; this is how a person reads one.
+local function Titled(slug)
+	if not slug or slug=="" then return nil end
+	local words={}
+	for word in tostring(slug):gmatch("[^%-]+") do
+		words[#words+1]=word:sub(1,1):upper()..word:sub(2)
+	end
+	return table.concat(words," ")
+end
+
 local function IsProfessionOnly(slotKey,applied,name,effect)
 	local text=((name or "").." "..(effect or "")):lower()
 
@@ -1867,15 +1940,6 @@ local function BuildStatsPage(parent)
 	page.attributes=Group(0,290,L.INSPECT_STATS_ATTRIBUTES)
 	page.secondary=Group(330,290,L.INSPECT_STATS_SECONDARY)
 
-	-- Said once, in the place a reader would otherwise have to guess: these are
-	-- not the gear's numbers, and two of the stats they might look for are not
-	-- Blizzard's to give.
-	page.note=page:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
-	page.note:SetPoint("BOTTOMLEFT",0,4)
-	page.note:SetPoint("BOTTOMRIGHT",0,4)
-	page.note:SetJustifyH("LEFT")
-	page.note:SetText(L.INSPECT_STATS_NOTE)
-
 	page.empty=page:CreateFontString(nil,"OVERLAY","GameFontDisableLarge")
 	page.empty:SetPoint("CENTER",0,20)
 	page.empty:SetText(L.INSPECT_STATS_NONE)
@@ -1907,11 +1971,9 @@ local function FillStats(v)
 	if type(v)~="table" or #v==0 then
 		Draw(page.attributes,nil)
 		Draw(page.secondary,nil)
-		page.note:Hide()
 		page.empty:Show()
 		return
 	end
-	page.note:Show()
 	page.empty:Hide()
 
 	-- Which primary is theirs, decided by which one is big rather than from a
@@ -2058,6 +2120,16 @@ local function BuildWindow()
 
 	frame.title=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightLarge")
 	frame.title:SetPoint("TOPLEFT",16,-14)
+
+	-- "Subtlety Rogue", across the top in the class's colour.
+	--
+	-- Centred rather than beside the name: the name is what you looked them up
+	-- by, this is what they ARE, and on TBC it is not otherwise on screen at
+	-- all -- the tree list below says 41 points in Subtlety but never says the
+	-- word rogue.
+	frame.specLine=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightLarge")
+	frame.specLine:SetPoint("TOP",frame,"TOP",0,-18)
+	frame.specLine:SetJustifyH("CENTER")
 
 	frame.subtitle=frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
 	frame.subtitle:SetPoint("TOPLEFT",frame.title,"BOTTOMLEFT",0,-4)
@@ -2332,6 +2404,47 @@ function ns.ShowInspect(entry,region,bracket)
 	frame.showing=WhoKey(entry,region)
 	frame.title:SetText(who)
 
+	-- The spec, then the class.
+	--
+	-- On TBC it comes off the tree list, whose first entry is the deepest --
+	-- the scraper sorts them that way, so the spec is simply the front of it.
+	-- On Mists the ladder row already carries a spec slug.
+	local specName
+	if type(data.d)=="table" and data.d[1] then
+		specName=tostring(data.d[1])
+	elseif entry.spec and entry.spec~="" and entry.spec~="null" then
+		specName=Titled(entry.spec)
+	end
+
+	local classToken=entry.class and entry.class~="" and entry.class~="null"
+		and (entry.class:upper():gsub("%-","")) or nil
+	local className=classToken
+		and ((LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[classToken])
+			or Titled(entry.class))
+		or nil
+
+	if specName and className then
+		local colour=classToken and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken]
+		local text=specName.." "..className
+		-- colorStr is the game's own "ffRRGGBB" for the class. Preferred to
+		-- formatting r/g/b: those are floats, and %x on a float is a thing Lua
+		-- 5.1 handles by truncating rather than by refusing, which is the kind
+		-- of nearly-right that shows up as an off-by-one colour.
+		if colour and colour.colorStr then
+			frame.specLine:SetText(("|c%s%s|r"):format(colour.colorStr,text))
+		elseif colour then
+			frame.specLine:SetText(("|cff%02x%02x%02x%s|r"):format(
+				math.floor(colour.r*255+0.5),math.floor(colour.g*255+0.5),
+				math.floor(colour.b*255+0.5),text))
+		else
+			frame.specLine:SetText(text)
+		end
+	else
+		-- A hidden profile publishes neither, and half of "Rogue" on its own
+		-- says less than nothing.
+		frame.specLine:SetText("")
+	end
+
 	-- Coloured by the cutoffs, the same as on the ladder, so a gladiator rating
 	-- reads as one here too. Only when the caller said which bracket these
 	-- numbers came from: the same 2200 is a different colour in 2v2 and in
@@ -2396,7 +2509,83 @@ function ns.ShowInspect(entry,region,bracket)
 	local page=frame.pages.talents
 	local missing=0
 
+	-- A tree block means a Burning Crusade build, whichever client is asking.
+	local trees=data.d
+	local onTrees=(type(trees)=="table" and #trees>0)
+
+	for column=1,TALENT_COLUMNS do
+		local tree=page.trees[column]
+		tree.heading:SetShown(onTrees)
+		for _,row in ipairs(tree.rows) do row:Hide() end
+	end
+
+	if onTrees then
+		-- The grid describes nothing here, so it goes away entirely rather than
+		-- sitting behind the trees with Mists talents in it.
+		for tier=1,TALENT_TIERS do
+			for column=1,TALENT_COLUMNS do page.cells[tier][column]:Hide() end
+			if page.levels and page.levels[tier] then page.levels[tier]:Hide() end
+		end
+
+		local ranks=data.q or {}
+		local taken=0   -- how far into the flat talent list we have read
+
+		-- d={name,points,count, name,points,count, ...} -- the count is what
+		-- splits the flat t={} list back into its trees. Deepest first, as
+		-- written, so the spec reads off the top.
+		for index=1,math.min(#trees/3,TALENT_COLUMNS) do
+			local tree=page.trees[index]
+			local name=trees[(index-1)*3+1]
+			local points=trees[(index-1)*3+2] or 0
+			local count=trees[(index-1)*3+3] or 0
+
+			tree.heading:SetText(("%s |cffffd100%d|r"):format(tostring(name),points))
+
+			for slot=1,count do
+				local row=tree.rows[slot]
+				local spellID=(data.t or {})[taken+slot]
+				if row and spellID then
+					row.spellID=spellID
+
+					-- The name ships with the data: these are TBC rank spells and
+					-- a Mists client, asked about them, answers nothing.
+					local shipped=ns.TALENT_NAMES and ns.TALENT_NAMES[spellID]
+					local fromClient,_,icon=GetSpellInfo(spellID)
+					row.label:SetText(shipped or fromClient or ("spell "..spellID))
+					row.icon:SetTexture(icon or "Interface/Icons/INV_Misc_QuestionMark")
+
+					-- "3/5": the rank taken, and the ceiling harvested across every
+					-- build read. Just the rank when the ceiling is not known yet.
+					local rank=ranks[taken+slot]
+					local talentID=ns.TALENT_OF_SPELL and ns.TALENT_OF_SPELL[spellID]
+					local max=talentID and ns.TALENT_MAX_RANK and ns.TALENT_MAX_RANK[talentID]
+					if rank and max then
+						row.rank:SetText(("%d/%d"):format(rank,max))
+					elseif rank then
+						row.rank:SetText(tostring(rank))
+					else
+						row.rank:SetText("")
+					end
+
+					row:Show()
+				end
+			end
+
+			taken=taken+count
+		end
+
+		-- Trees the character spent nothing in are omitted by the API, so any
+		-- column left over is blanked rather than showing the last one twice.
+		for index=math.floor(#trees/3)+1,TALENT_COLUMNS do
+			page.trees[index].heading:SetText("")
+		end
+	end
+
 	for tier=1,TALENT_TIERS do
+		if not onTrees and page.levels and page.levels[tier] then
+			page.levels[tier]:Show()
+		end
+
 		local row=(grid and grid[tier]) or {}
 		for column=1,TALENT_COLUMNS do
 			local cell=page.cells[tier][column]
@@ -2427,10 +2616,14 @@ function ns.ShowInspect(entry,region,bracket)
 				missing=missing+1
 				cell:Hide()
 			end
+
+			if onTrees then cell:Hide() end
 		end
 	end
 
-	page.gaps:SetText(missing>0 and L.INSPECT_TALENT_GAPS:format(missing) or "")
+	-- The gap count belongs to the Mists grid; there are no gaps in a tree
+	-- list, which shows what was taken and nothing else.
+	page.gaps:SetText((not onTrees) and missing>0 and L.INSPECT_TALENT_GAPS:format(missing) or "")
 
 	local names={}
 
@@ -2452,7 +2645,14 @@ function ns.ShowInspect(entry,region,bracket)
 	local majorIcon=glyphArt and ("Interface/Icons/INV_Glyph_Major"..glyphArt)
 	local minorIcon=glyphArt and ("Interface/Icons/INV_Glyph_Minor"..glyphArt)
 
+	-- TBC has no glyphs, so the heading and its rows are hidden outright
+	-- rather than left saying "None glyphed" -- which reads as a character
+	-- who could have them and did not, when the expansion has none at all.
+	local noGlyphs=(ns.ClientVersion and ns.ClientVersion())=="tbc"
+	if page.glyphHeading then page.glyphHeading:SetShown(not noGlyphs) end
+
 	for index,row in ipairs(page.glyphs) do
+		if noGlyphs then row:Hide() end
 		row.label:SetText(names[index] or "")
 
 		-- Kept on the row, so the hover reads what is there now rather than
@@ -2473,10 +2673,19 @@ function ns.ShowInspect(entry,region,bracket)
 			row.icon:Hide()
 		end
 	end
-	if #names==0 then page.glyphs[1].label:SetText(L.INSPECT_GLYPH_NONE) end
+	if #names==0 and not noGlyphs then page.glyphs[1].label:SetText(L.INSPECT_GLYPH_NONE) end
 
+	-- Not on a Burning Crusade character.
+	--
+	-- These are inferred from the gear -- a tinker, a ring only an enchanter
+	-- can wear -- against a table of MISTS professions and their art, which
+	-- does not describe TBC. Rather than show a profession that is wrong, the
+	-- row is left out; the gear it was read from is on screen either way.
+	--
+	-- Keyed on the character's own data, not the client, so a TBC character
+	-- looked at from Mists is treated the same.
 	local shown=0
-	for _,key in ipairs(data.p or {}) do
+	for _,key in ipairs((not onTrees) and (data.p or {}) or {}) do
 		local icon=PROFESSION_ICONS[key]
 		if icon then
 			shown=shown+1

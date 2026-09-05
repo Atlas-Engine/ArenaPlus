@@ -1,4 +1,4 @@
-﻿## Interface: 50500, 50502, 50503, 50504
+﻿## Interface: 50500, 50502, 50503, 50504, 20506
 # 50504 is the newest of these and the one the client is on. There is no
 # 50505: it was listed here for three days, and CurseForge -- unable to
 # match it to any WoW version -- published the addon as supporting 3.80.2,

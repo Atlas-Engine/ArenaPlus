@@ -1,4 +1,4 @@
-local ADDON_NAME, ns = ...
+﻿local ADDON_NAME, ns = ...
 local L = ns.L
 
 -- A button on the minimap, wearing the gladiator helmet the ladder button uses.
@@ -18,7 +18,16 @@ local module = ns.RegisterModule("minimap",{
 	defaults    = { enabled=true, angle=-40 },
 })
 
-local ICON = "Interface\\Icons\\achievement_featsofstrength_gladiator_01"
+-- Our own art, not the game's.
+--
+-- This was Interface\Iconschievement_featsofstrength_gladiator_01, which
+-- is achievement-era art: the Anniversary client does not have it and drew
+-- nothing at all. Shipping the picture removes the question of which client
+-- happens to hold which texture.
+--
+-- Converted from tools\ArenaPlusDashboard.ico, so the taskbar, the dashboard
+-- and this button all wear the same helmet. 64x64 because it draws at 17.
+local ICON = "Interface\\AddOns\\ArenaPlus\\Media\\minimap"
 
 local button
 
@@ -94,8 +103,9 @@ local function Create()
 	button.icon:SetSize(17,17)
 	button.icon:SetPoint("TOPLEFT",7,-6)
 	button.icon:SetTexture(ICON)
-	-- Icons carry a border in the art itself; trimming it leaves the picture.
-	button.icon:SetTexCoord(0.08,0.92,0.08,0.92)
+	-- Drawn whole. The 8% trim that used to be here is for BLIZZARD icons,
+	-- whose art includes a border; ours has none, so trimming it just cut the
+	-- helmet.
 
 	local ring=button:CreateTexture(nil,"OVERLAY")
 	ring:SetSize(53,53)

@@ -230,7 +230,6 @@ L.INSPECT_STAT_CRIT       = "Critical Strike"
 L.INSPECT_STAT_HASTE      = "Haste"
 L.INSPECT_STAT_MASTERY    = "Mastery"
 L.INSPECT_STAT_SPIRIT     = "Spirit"
-L.INSPECT_STATS_NOTE      = "The character as the game had them at logout -- gear, gems, enchants, reforges and passives all counted in, not a sum of the gear. Hit and expertise are not in Blizzard's data."
 L.INSPECT_STATS_NONE      = "No stats on file for this character yet."
 -- The shopping list: gems, enchants and glyphs, everything you would have to
 -- buy to wear what they are wearing. Gems are counted rather than listed one
@@ -313,7 +312,6 @@ L.INSPECT_PROFESSION_BLACKSMITHING = "Blacksmithing"
 L.INSPECT_PROFESSION_TAILORING     = "Tailoring"
 L.INSPECT_PROFESSION_NOTE          = "Read from their gear, not from the armoury."
 L.INSPECT_PVP_NONE        = "not on this ladder"
-L.INSPECT_PVP_NOTE        = "Read from the ladder already on disk, so a bracket they have not placed in shows nothing."
 
 L.HISTORY_BEST_SEASON     = "Season best"
 L.HISTORY_BEST_VALUE      = "%s |cff808080%d games|r"

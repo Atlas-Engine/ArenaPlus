@@ -2533,7 +2533,7 @@ local function CreateWindow()
 
 	-- On the right of this one: its heading already carries the record, the
 	-- count and today's games, and there is no room left after them.
-	frame.UpdateBrackets=ns.BuildBracketPicker(frame,"TOPLEFT",BRACKET_X+SWAP_W+SWAP_GAP,HEADER_TOP)
+	frame.UpdateBrackets=ns.BuildBracketPicker(frame,"TOPLEFT",BRACKET_X+SWAP_W+SWAP_GAP,HEADER_TOP,"client")
 
 	-- Today's games, beside the season's. The stamp on each match is what
 	-- decides the day, so this needs nothing kept between sessions.
