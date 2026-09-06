@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 1.4a
+
+- Fixes and improvements in Match history, Minimap button.
+
 ## 1.3c
 
 - The PvP button now appears on the Anniversary auction house. It was never drawn there at all -- that client uses the original auction house window, and the button was only ever looking for the modern one.
@@ -65,6 +69,7 @@
 - Fixed characters with the same name on different realms showing each other's rank and rating.
 - Press Enter in the ladder search to step between characters sharing a name.
 - Changing page in the ladder now returns to the top of the list.
+
 
 
 
