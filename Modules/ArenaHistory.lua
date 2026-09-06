@@ -402,6 +402,21 @@ end
 -- fine; it simply never had an index to work from.
 --
 -- GetInspectSpecialization("player") answers 0 here, so it is no help either.
+-- Specializations are a Mists concept. The Anniversary client is Burning
+-- Crusade, where talent trees do the same job and none of these APIs mean
+-- anything.
+--
+-- Testing that the function exists is NOT enough, which is the whole reason
+-- this flag exists. GetSpecializationRole is present on that client and
+-- RAISES "API unsupported in this version of World of Warcraft" when called,
+-- so every `if GetSpecializationRole then` guard in this file passed and then
+-- threw. Reported live from Anniversary, 190 times in one session -- and
+-- because it threw from inside gather(), it took the rest of that call with
+-- it, so the enemy team was never collected at all.
+local function HasSpecs()
+	return ns.ClientVersion()~="tbc"
+end
+
 local function ActiveGroup()
 	if GetActiveSpecGroup then return GetActiveSpecGroup() end
 	if C_SpecializationInfo and C_SpecializationInfo.GetActiveSpecGroup then
@@ -411,6 +426,7 @@ local function ActiveGroup()
 end
 
 local function SpecIndex()
+	if not HasSpecs() then return nil end
 	local group=ActiveGroup()
 
 	if C_SpecializationInfo and C_SpecializationInfo.GetSpecialization then
@@ -432,6 +448,7 @@ end
 ns.SpecIndex=SpecIndex
 
 local function OwnSpecID(index)
+	if not HasSpecs() then return nil end
 	index=index or SpecIndex()
 
 	if index then
@@ -504,7 +521,7 @@ local function Sample()
 						AskForSpec(unit,player)
 					elseif unit=="player" then
 						local spec=SpecIndex()
-						if spec and GetSpecializationRole then
+						if spec and HasSpecs() and GetSpecializationRole then
 							player.role=GetSpecializationRole(spec) or player.role
 						end
 						player.spec=OwnSpecID(spec) or player.spec
@@ -648,7 +665,7 @@ local function PlayerByGUID(guid)
 end
 
 local function OnInspectReady(guid)
-	if not (current and inspecting and GetInspectSpecialization) then return end
+	if not (current and inspecting and HasSpecs() and GetInspectSpecialization) then return end
 	if guid and inspecting.guid and guid~=inspecting.guid then return end
 
 	local unit=inspecting.unit
@@ -1352,7 +1369,7 @@ local function SpecIcon(player)
 	if not spec then return nil end
 
 	if ns.SPEC_ICON and ns.SPEC_ICON[spec] then return ns.SPEC_ICON[spec] end
-	if not GetSpecializationInfoByID then return nil end
+	if not (HasSpecs() and GetSpecializationInfoByID) then return nil end
 
 	local _,_,_,icon=GetSpecializationInfoByID(spec)
 	return icon
@@ -1528,7 +1545,7 @@ local function RoleOf(player)
 	local spec=tonumber(player.spec)
 	if spec then
 		if ns.SPEC_ROLE and ns.SPEC_ROLE[spec] then return ns.SPEC_ROLE[spec] end
-		if GetSpecializationRoleByID then
+		if HasSpecs() and GetSpecializationRoleByID then
 			local role=GetSpecializationRoleByID(spec)
 			if role then return role end
 		end

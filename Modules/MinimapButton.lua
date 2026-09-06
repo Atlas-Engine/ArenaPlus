@@ -20,10 +20,10 @@ local module = ns.RegisterModule("minimap",{
 
 -- Our own art, not the game's.
 --
--- This was Interface\Iconschievement_featsofstrength_gladiator_01, which
--- is achievement-era art: the Anniversary client does not have it and drew
--- nothing at all. Shipping the picture removes the question of which client
--- happens to hold which texture.
+-- This was Interface\Icons\Achievement_featsofstrength_gladiator_01,
+-- which is achievement-era art: the Anniversary client does not have it and
+-- drew nothing at all. Shipping the picture removes the question of which
+-- client happens to hold which texture.
 --
 -- Converted from tools\ArenaPlusDashboard.ico, so the taskbar, the dashboard
 -- and this button all wear the same helmet. 64x64 because it draws at 17.
@@ -92,13 +92,6 @@ local function Create()
 	button:RegisterForDrag("LeftButton")
 	button:RegisterForClicks("LeftButtonUp","RightButtonUp","MiddleButtonUp")
 
-	-- Behind the icon, so the corners the round crop cuts away are dark rather
-	-- than showing the map through them.
-	local backdrop=button:CreateTexture(nil,"BACKGROUND")
-	backdrop:SetSize(20,20)
-	backdrop:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
-	backdrop:SetPoint("TOPLEFT",7,-5)
-
 	button.icon=button:CreateTexture(nil,"ARTWORK")
 	button.icon:SetSize(17,17)
 	button.icon:SetPoint("TOPLEFT",7,-6)
@@ -106,6 +99,31 @@ local function Create()
 	-- Drawn whole. The 8% trim that used to be here is for BLIZZARD icons,
 	-- whose art includes a border; ours has none, so trimming it just cut the
 	-- helmet.
+
+	-- Round, like every other icon on the minimap.
+	--
+	-- The art is a square texture and nothing was ever cropping it. The ring is
+	-- drawn OVER the icon, so the corners simply stick out past the hole in it
+	-- -- which is what made this read as a square next to AtlasProfiler's,
+	-- whose .tga is already round in the file. SetMask takes the mask's alpha
+	-- as the texture's own, so the corners go transparent instead of being
+	-- painted over.
+	--
+	-- Guarded, and the fallback is the old look: without SetMask the icon is
+	-- square, which is exactly what it was before.
+	local mask="Interface\\CharacterFrame\\TempPortraitAlphaMask"
+	if button.icon.SetMask then button.icon:SetMask(mask) end
+
+	-- Behind the icon, cut to the same circle. It is there so the corners the
+	-- crop removes are dark rather than showing the map through them -- but
+	-- unmasked it would be a square halo around a round icon, which is worse
+	-- than the problem. Concentric with the ICON rather than the button: the
+	-- icon sits a point above the button's own centre.
+	local backdrop=button:CreateTexture(nil,"BACKGROUND")
+	backdrop:SetSize(20,20)
+	backdrop:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+	backdrop:SetPoint("CENTER",button.icon,"CENTER",0,0)
+	if backdrop.SetMask then backdrop:SetMask(mask) end
 
 	local ring=button:CreateTexture(nil,"OVERLAY")
 	ring:SetSize(53,53)
