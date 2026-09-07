@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 1.4b
+
+- Added cutoffs for TBC, fixed bunch of stuff.
+
 ## 1.4a
 
 - Fixes and improvements in Match history, Minimap button.
@@ -69,6 +73,7 @@
 - Fixed characters with the same name on different realms showing each other's rank and rating.
 - Press Enter in the ladder search to step between characters sharing a name.
 - Changing page in the ladder now returns to the top of the list.
+
 
 
 

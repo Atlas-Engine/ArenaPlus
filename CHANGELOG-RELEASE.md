@@ -1,1 +1,1 @@
-﻿- Fixes and improvements in Match history, Minimap button.
+﻿- Added cutoffs for TBC, fixed bunch of stuff.
