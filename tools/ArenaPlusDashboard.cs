@@ -2468,7 +2468,15 @@ class Dashboard : Form
         int from = Math.Max(0, lines.Length - 400);
         for (int i = from; i < lines.Length; i++)
         {
-            Match m = Regex.Match(lines[i], @"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2} [AP]M)\s+(?:([A-Za-z]{2}):\s*)?.*requests=(\d+)");
+            // The region token, spelled out rather than "two letters".
+            //
+            // [A-Za-z]{2} cannot match TBC-US or TBC-EU, so every TBC run fell to
+            // the unlabelled "?" bucket and was then discarded by the rule below,
+            // which exists to drop runs from before regions were logged at all.
+            // The forecast therefore counted the two MoP ladders and nothing else:
+            // it read 3,732 an hour against an actual spend of 101,600, and the
+            // line whose whole job is to say "am I all right?" said yes.
+            Match m = Regex.Match(lines[i], @"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2} [AP]M)\s+(?:((?:TBC-)?(?:US|EU)):\s*)?.*requests=(\d+)");
             if (!m.Success) continue;
 
             // Runs from before the region was logged are still worth counting,
@@ -2477,7 +2485,10 @@ class Dashboard : Form
             cost.ByRegion[region] = int.Parse(m.Groups[3].Value);
 
             DateTime when;
-            if (DateTime.TryParseExact(m.Groups[3].Value, "yyyy-MM-dd hh:mm tt",
+            // Group 1, the timestamp -- not group 3, which is the request count.
+            // Parsing "11947" as a date always failed, so Latest never moved off
+            // its default and every caller reading it saw the same empty answer.
+            if (DateTime.TryParseExact(m.Groups[1].Value, "yyyy-MM-dd hh:mm tt",
                     CultureInfo.InvariantCulture, DateTimeStyles.None, out when) && when > cost.Latest)
             {
                 cost.Latest = when;

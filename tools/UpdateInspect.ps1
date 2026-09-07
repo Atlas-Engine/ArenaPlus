@@ -1,4 +1,4 @@
-# Gear, enchants, gems, talents and glyphs for the top of each ladder.
+﻿# Gear, enchants, gems, talents and glyphs for the top of each ladder.
 #
 # Separate from UpdateSpecs.ps1 because the two answer different questions and
 # cost very differently. A spec is one word and is wanted for every one of the
@@ -603,7 +603,42 @@ foreach ($key in $wanted.Keys) {
             [int]$stats.stamina.effective,
             [int]$stats.health,
             [int]$stats.spell_power,
-            [int]$stats.attack_power
+            [int]$stats.attack_power,
+
+            # Appended after the first eleven, never inserted among them:
+            # a character harvested before this existed still has a valid
+            # vector, just a shorter one, and renumbering would silently
+            # reinterpret every one of those rows.
+            #
+            # Both schools, because only one of them is the character's and
+            # the file cannot tell which. A caster checked while writing
+            # this had 2.18% melee crit against 15.51% spell crit, and the
+            # panel had always shown the melee figure -- every caster's crit
+            # and haste have been the wrong number. The reader picks the
+            # larger, the same way it already picks between attack power and
+            # spell power.
+            #
+            # Hundredths of a percent, as integers. Writing a float here
+            # formats it with the machine's decimal separator, and on a
+            # comma-decimal locale the emitted Lua would not parse -- this
+            # runs unattended, where nobody would see it fail.
+            [int]([math]::Round([double]$stats.melee_crit.value * 100)),
+            [int]([math]::Round([double]$stats.melee_haste.value * 100)),
+            [int]([math]::Round([double]$stats.spell_crit.value * 100)),
+            [int]([math]::Round([double]$stats.spell_haste.value * 100)),
+
+            # A TBC and Mists caster stat, and absent from the panel when it
+            # is zero. Mastery is deliberately NOT extended the same way:
+            # the Anniversary statistics document has no mastery field at
+            # all, so it stays the zero it already was and the panel drops
+            # the row on that client instead.
+            [int]$stats.spell_penetration,
+
+            # Mastery as the percentage it is shown as, beside the rating it
+            # has always been stored as. Same mistake as crit and haste: the
+            # panel printed a rating where every site prints +40.60%. Absent
+            # on Anniversary, where it lands as 0 and the panel drops the row.
+            [int]([math]::Round([double]$stats.mastery.value * 100))
         ) -join ",") + "}"
     } catch { }
 

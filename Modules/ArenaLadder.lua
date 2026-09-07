@@ -442,7 +442,27 @@ end
 --
 -- nil when the stamp cannot be read, which is a different answer from zero and
 -- has to stay that way -- an unreadable stamp must not read as freshly written.
-local function MinutesSince(stamp)
+-- The epoch is preferred over the written stamp, and this is why.
+--
+-- `checked` is written in the LOCAL time of the machine that collects the
+-- data, with no timezone on it, and time({...}) reads a table back as the
+-- READER's local time. Those are the same clock only for whoever runs the
+-- collector. For anybody else the age is wrong by the whole offset between
+-- them -- reported from an Australian realm as fourteen hours old on a file
+-- minutes off the press, which is exactly EDT to AEST.
+--
+-- An epoch has no timezone to get wrong: time() is the same instant
+-- everywhere, so difftime against it is the same answer everywhere. The
+-- parsed stamp stays as the fallback for a data addon published before the
+-- epoch was written, which would otherwise show no age at all.
+local function MinutesSince(stamp,epoch)
+	epoch=tonumber(epoch)
+	if epoch and epoch>0 then
+		local seconds=difftime(time(),epoch)
+		if seconds<0 then return 0 end
+		return math.floor(seconds/60)
+	end
+
 	if not stamp or stamp=="" then return nil end
 
 	local y,mo,d,h,mi,ap=stamp:match("(%d+)-(%d+)-(%d+)%s+(%d+):(%d+)%s*([AP]M)")
@@ -476,10 +496,10 @@ end
 -- landed should not be told they are stale for the gap in between.
 local STALE_MINUTES = 75
 
-local function Ago(stamp)
+local function Ago(stamp,epoch)
 	if not stamp or stamp=="" then return "?" end
 
-	local minutes=MinutesSince(stamp)
+	local minutes=MinutesSince(stamp,epoch)
 	if not minutes then return stamp:match("(%d+:%d+%s*[AP]?M?)") or stamp end
 
 	if minutes<1  then return L.LADDER_AGO_NOW end
@@ -675,14 +695,56 @@ local function CreateRow(parent)
 
 		-- What the right button does, since the left one's job -- opening the
 		-- inspect panel -- is the obvious one and this is not.
+		--
+		-- Only while the pointer is actually over the name or the realm, which is
+		-- what the hint is about. The row runs the full width of the window, so
+		-- hanging it off the row alone offered to copy a name while the pointer
+		-- was out past the rating column.
+		--
+		-- Watched rather than answered once: OnEnter fires when the pointer
+		-- crosses into the row and never again, and the pointer then moves along
+		-- it. Only the hovered row carries this, and it is dropped in OnLeave.
+		--
+		-- A mouse-enabled child over the two columns would have been simpler and
+		-- is wrong here: it would swallow the clicks the row itself handles, and
+		-- moving onto a child fires the parent's OnLeave, which would drop the
+		-- row highlight the moment you reached the name.
 		if self.entry then
-			GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
-			GameTooltip:SetText(L.COPY_HINT,1,1,1,1,true)
-			GameTooltip:Show()
+			self.hintWait=0
+			self:SetScript("OnUpdate",function(me,elapsed)
+				me.hintWait=(me.hintWait or 0)+elapsed
+				if me.hintWait<0.05 then return end
+				me.hintWait=0
+
+				-- Measured off the labels, not off the column constants: the two
+				-- would have to be kept in step by hand, and the labels are already
+				-- where the columns are.
+				local x=GetCursorPosition()
+				local scale=me:GetEffectiveScale()
+				local left=me.name and me.name:GetLeft()
+				local right=me.realm and me.realm:GetRight()
+				local over=false
+				if x and scale and scale>0 and left and right then
+					x=x/scale
+					over=(x>=left and x<=right)
+				end
+
+				if over and not me.hintShown then
+					me.hintShown=true
+					GameTooltip:SetOwner(me,"ANCHOR_CURSOR")
+					GameTooltip:SetText(L.COPY_HINT,1,1,1,1,true)
+					GameTooltip:Show()
+				elseif not over and me.hintShown then
+					me.hintShown=nil
+					GameTooltip:Hide()
+				end
+			end)
 		end
 	end)
 
 	row:SetScript("OnLeave",function(self)
+		self:SetScript("OnUpdate",nil)
+		self.hintShown=nil
 		GameTooltip:Hide()
 		if self.hover then
 			self.hover=nil
@@ -804,7 +866,9 @@ local function Layout()
 
 			SetRaceIcon(row.race,entry)
 			row.spec:SetTexture(SpecIcon(entry))
-			row.realm:SetText(entry.realm or "")
+			-- The name, not the slug it is stored and matched by. Searching and
+			-- key building below still use entry.realm as it is.
+			row.realm:SetText(ns.RealmName(entry.realm))
 			-- The split where it is known, the total where only that is.
 			if entry.won or entry.lost then
 				row.record:SetText(L.HISTORY_RECORD:format(entry.won or 0,entry.lost or 0))
@@ -849,6 +913,20 @@ local function Refresh()
 	-- that switching brackets on the Rated page changes what the ladder shows,
 	-- and there is nothing to change while it is closed.
 	if not (window and window:IsShown()) then return end
+
+	-- The cutoffs view reads the region too, and a region swap arrives here
+	-- rather than through the tab -- so without this it kept the numbers it
+	-- was opened with, and switching to EU looked like there were no EU
+	-- cutoffs at all.
+	--
+	-- At the TOP, not the end. This function has three `return Layout()`
+	-- shortcuts further down and the ordinary redraw takes one of them, so
+	-- anything at the bottom runs only on a search or a centring pass. That
+	-- is why closing and reopening the window looked like it worked while
+	-- clicking a flag did not.
+	if window.viewingCutoffs and window.ShowCutoffs then
+		window.ShowCutoffs(true)
+	end
 
 	local bracket=ns.ViewBracket()
 
@@ -965,7 +1043,9 @@ local function Refresh()
 	-- Said outright when there is nothing to show, rather than an empty window
 	-- that reads as a fault. "No alts in this bracket" and "no ladder" are
 	-- different sentences.
-	window.empty:SetShown(#full==0)
+	-- Never over the cutoffs: that view has taken the window, and an
+	-- "empty ladder" line under three full tables reads as a bug.
+	window.empty:SetShown(#full==0 and not window.viewingCutoffs)
 	if #full==0 then
 		window.empty:SetText(showingAlts and L.LADDER_NO_ALTS or L.LADDER_EMPTY)
 	end
@@ -996,7 +1076,7 @@ local function Refresh()
 		local read
 		local snapshot=board and board.snapshot and board.snapshot:match("(%d%d:%d%d)$")
 		if snapshot then
-			read=L.CUTOFF_SOURCE_SNAPSHOT:format(snapshot,Ago(board.checked))
+			read=L.CUTOFF_SOURCE_SNAPSHOT:format(snapshot,Ago(board.checked,board.checkedEpoch))
 		else
 			read=L.CUTOFF_SOURCE:format((board and board.checked) or "?")
 		end
@@ -1014,7 +1094,7 @@ local function Refresh()
 		-- republished. The snapshot time beside it is Blizzard's own build and runs
 		-- nearly two hours behind on its own, so measuring that would tell a reader
 		-- on the very newest file to go and fetch it.
-		local age=board and MinutesSince(board.checked)
+		local age=board and MinutesSince(board.checked,board.checkedEpoch)
 		if age and age>STALE_MINUTES then
 			read=read..L.LADDER_DATA_STALE
 		end
@@ -1190,6 +1270,7 @@ local function Refresh()
 	-- Setting the scroll fires the handler, which lays out -- but not when the
 	-- position happens to be unchanged, so it is done here too.
 	Layout()
+
 end
 
 local function CreateWindow()
@@ -1473,8 +1554,303 @@ local function CreateWindow()
 	-- Clear of the heading and its place count at their widest.
 	-- After History and Home. Written as the sum rather than as a number so the
 	-- row cannot come apart when one of the two buttons is resized.
-	frame.UpdateBrackets=ns.BuildBracketPicker(frame,"TOPLEFT",
+	frame.UpdateBrackets,frame.bracketButtons=ns.BuildBracketPicker(frame,"TOPLEFT",
 		BRACKET_X+SWAP_W+ROW_GAP+HOME_W+ROW_GAP,HEADER_TOP)
+
+	-- [[ Cutoffs tab ]]
+	--
+	-- Anniversary has three brackets where Mists has four, so the fourth slot in
+	-- the picker row sits empty there. This puts the cutoffs in it: the numbers
+	-- exist for every bracket and had nowhere to be read except the Rated page's
+	-- little box, which only ever shows the one bracket you are looking at.
+	--
+	-- Three columns rather than a fourth ladder, because the question is "what
+	-- does a title cost", and comparing 2v2 against 5v5 is most of the point.
+	--
+	-- Only on Anniversary. Mists has a real 10v10 button in this slot, and a
+	-- window with two things claiming one position is a thing to get wrong.
+	-- Beside History and Home rather than after the brackets: it is a view of
+	-- the window, which is what those two are, and the brackets are a filter
+	-- within a view. Where 2v2 would start, with the picker pushed along to
+	-- make room for it -- see the wrapper below, which does that only while
+	-- the tab is actually up.
+	local CUTOFF_TAB_W = 68
+	local BRACKET_ORIGIN_X = BRACKET_X+SWAP_W+ROW_GAP+HOME_W+ROW_GAP
+
+	local cutoffsButton=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
+	cutoffsButton:SetSize(CUTOFF_TAB_W,20)
+	cutoffsButton:SetText(L.LADDER_CUTOFFS)
+	cutoffsButton:Hide()
+	-- Not anchored here.
+	--
+	-- It belongs after Home, and Home is built some seven hundred lines below
+	-- this -- so frame.homeButton is nil at this point and SetPoint against it
+	-- leaves the tab with no anchor at all. Anything chained onto the tab then
+	-- has none either, which took the bracket buttons off the window with it,
+	-- and only on Anniversary, because that is the only place the chain goes
+	-- through the tab. Placed on the first update instead, by which time the
+	-- whole row exists.
+	frame.cutoffsButton=cutoffsButton
+
+	-- The three columns, laid over the list rather than beside it: this is a
+	-- different view of the same window, the way the brackets are.
+	local cutoffs=CreateFrame("Frame",nil,frame)
+	cutoffs:SetPoint("TOPLEFT",frame,"TOPLEFT",16,LIST_TOP)
+	cutoffs:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",-36,30)
+	cutoffs:Hide()
+	frame.cutoffs=cutoffs
+
+	cutoffs.columns={}
+	for index=1,3 do
+		local column={}
+		-- The window's whole width, less the insets this frame already carries.
+		-- It used to divide (WIDTH-90), which left about fifty points of empty
+		-- window past the third column and made the row look left-aligned rather
+		-- than laid out.
+		local width=(WIDTH-52)/3
+
+		column.frame=CreateFrame("Frame",nil,cutoffs)
+		column.frame:SetPoint("TOPLEFT",cutoffs,"TOPLEFT",(index-1)*width,0)
+		column.frame:SetSize(width-24,220)
+
+		-- A rule down the gap, so three tables read as three rather than as one
+		-- wide one with erratic spacing. Not after the last: a line with nothing
+		-- on its right is an edge, and the window already has one.
+		if index<3 then
+			local gap=cutoffs:CreateTexture(nil,"ARTWORK")
+			gap:SetPoint("TOPLEFT",cutoffs,"TOPLEFT",index*width-12,-2)
+			gap:SetSize(1,200)
+			gap:SetColorTexture(1,1,1,0.10)
+		end
+
+		column.title=column.frame:CreateFontString(nil,"OVERLAY","GameFontNormal")
+		column.title:SetPoint("TOPLEFT",column.frame,"TOPLEFT",4,-4)
+		column.title:SetTextColor(1,0.82,0)
+
+		-- Under the heading, so each column reads as its own small table.
+		column.rule=column.frame:CreateTexture(nil,"ARTWORK")
+		column.rule:SetPoint("TOPLEFT",column.frame,"TOPLEFT",4,-24)
+		column.rule:SetPoint("TOPRIGHT",column.frame,"TOPRIGHT",-4,-24)
+		column.rule:SetHeight(1)
+		column.rule:SetColorTexture(1,1,1,0.15)
+
+		column.rows={}
+		for tierIndex,tier in ipairs(ns.TIERS or {}) do
+			local row={}
+			local y=-34-(tierIndex-1)*20
+
+			row.label=column.frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+			row.label:SetPoint("TOPLEFT",column.frame,"TOPLEFT",4,y)
+			row.label:SetJustifyH("LEFT")
+
+			row.value=column.frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+			row.value:SetPoint("TOPRIGHT",column.frame,"TOPRIGHT",-52,y)
+			row.value:SetJustifyH("RIGHT")
+
+			-- How many places the fixed-count titles are worth. Blizzard does
+			-- not publish these; the ladder pass counts them.
+			row.spots=column.frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+			row.spots:SetPoint("TOPRIGHT",column.frame,"TOPRIGHT",-4,y)
+			row.spots:SetJustifyH("RIGHT")
+			row.spots:SetTextColor(0.5,0.5,0.5)
+
+			row.tier=tier
+			column.rows[tierIndex]=row
+		end
+
+		cutoffs.columns[index]=column
+	end
+
+	-- Where the numbers came from, once for the three: they are one reading of
+	-- one ladder, not three separate ones.
+	--
+	-- On the window's own footer line, after the snapshot age, because that is
+	-- where this window already says where its data came from and when. It
+	-- floated under the columns before, which put two provenance lines on one
+	-- screen saying different halves of the same thing.
+	--
+	-- Parented to the cutoffs frame so it comes and goes with the view, but
+	-- ANCHORED to that footer, which is built a long way below this. Placed on
+	-- first show rather than here, because it does not exist yet.
+	cutoffs.source=cutoffs:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+	cutoffs.source:SetTextColor(0.45,0.45,0.45)
+
+	-- Filling it, and swapping the window between the two views.
+	--
+	-- The list and its column headings are hidden rather than covered: a
+	-- scroll frame under an opaque one still takes the mouse wheel, and a
+	-- ladder scrolling invisibly behind the cutoffs is the kind of thing
+	-- nobody reports and everybody notices.
+	function frame.ShowCutoffs(show)
+		frame.viewingCutoffs=show and true or nil
+
+		cutoffs:SetShown(show and true or false)
+		if frame.scroll then frame.scroll:SetShown(not show) end
+		if frame.header then frame.header:SetShown(not show) end
+		if frame.empty and show then frame.empty:Hide() end
+
+		-- Dead while you are already on it, the way the bracket buttons are.
+		if show then cutoffsButton:Disable() else cutoffsButton:Enable() end
+
+		-- The search searches the ladder, and there is no ladder on screen.
+		-- Dimmed and deaf rather than hidden: a box that vanishes and comes
+		-- back moves everything beside it, and it is coming straight back.
+		if frame.search then
+			frame.search:SetAlpha(show and 0.35 or 1)
+			frame.search:EnableMouse(not show)
+			if show then frame.search:ClearFocus() end
+		end
+
+		local label=cutoffsButton.GetFontString and cutoffsButton:GetFontString()
+		if label then
+			if show then
+				label:SetTextColor(1,0.82,0)
+			else
+				label:SetTextColor(0.75,0.75,0.75)
+			end
+		end
+
+		if not cutoffs.sourcePlaced and frame.source then
+			cutoffs.source:ClearAllPoints()
+			cutoffs.source:SetPoint("LEFT",frame.source,"RIGHT",10,0)
+			cutoffs.sourcePlaced=true
+		end
+
+		-- The picker's state depends on which view is up, and this is what
+		-- changed it.
+		if frame.UpdateBrackets then frame.UpdateBrackets() end
+
+		if not show then return end
+
+		-- ViewKey, not the bare region.
+		--
+		-- ns.ViewCutoffs() with no argument falls back to ns.ViewRegion(), which
+		-- answers "us" -- so looking at the Anniversary ladder read the MISTS
+		-- cutoffs and showed them without a word. The rest of this window has
+		-- always used ViewKey, which is the version-qualified key the data files
+		-- are actually written under ("tbc-us").
+		local key=ViewKey()
+		local byRegion=ns.ViewCutoffs and ns.ViewCutoffs(key)
+		local slotsByRegion=ns.ViewCutoffSlots and ns.ViewCutoffSlots(key)
+
+		for index,column in ipairs(cutoffs.columns) do
+			column.title:SetText(BRACKET_NAMES[index] or "?")
+
+			local numbers=byRegion and byRegion[index]
+			local slots=slotsByRegion and slotsByRegion[index]
+
+			for _,row in ipairs(column.rows) do
+				-- Rated battlegrounds award different titles, and this view
+				-- only ever draws the three arena brackets -- but ask anyway,
+				-- so a fourth column later cannot quietly print a Gladiator
+				-- cutoff for a bracket that has none.
+				local applies=(not ns.TierApplies) or ns.TierApplies(row.tier,index)
+				local rating=applies and numbers and numbers[row.tier.key]
+
+				if rating then
+					row.label:SetText((ns.TierName and ns.TierName(row.tier,index))
+						or row.tier.key)
+					row.label:SetTextColor(ns.HexToRGB(row.tier.hex))
+					row.value:SetText(tostring(rating))
+					row.value:SetTextColor(ns.HexToRGB(row.tier.hex))
+
+					local count=slots and slots[row.tier.key]
+					row.spots:SetText(count and ("("..count..")") or "")
+
+					row.label:Show() row.value:Show() row.spots:Show()
+				else
+					row.label:Hide() row.value:Hide() row.spots:Hide()
+				end
+			end
+		end
+
+		-- Which ladder these are, said outright.
+		--
+		-- The window is showing three tables of bare numbers, and nothing else
+		-- in them says whether they are US or EU, Mists or Anniversary. The row
+		-- of flags above is the only clue, and it is a long way from the numbers.
+		-- The table's own region is used rather than the key we asked with, so
+		-- this reports what was actually found -- if the two ever disagree, this
+		-- line is where it shows.
+		-- The region alone, and nothing about when.
+		--
+		-- The footer to its left already carries the reading and its age, and
+		-- spelling it out twice ran this line under My rank and My alts. What
+		-- the footer cannot say is WHICH ladder, which is the whole reason this
+		-- is here.
+		local where=(byRegion and byRegion.region) or key
+		cutoffs.source:SetText(where and string.upper(where) or "")
+	end
+
+	cutoffsButton:SetScript("OnClick",function()
+		frame.ShowCutoffs(not frame.viewingCutoffs)
+	end)
+
+	-- Any bracket puts the ladder back.
+	--
+	-- Hooked rather than folded into the picker: the picker is shared with the
+	-- history and the Rated page, and neither of those has a cutoffs view to
+	-- come back from. The hook runs after the picker's own handler, which has
+	-- already asked for the redraw.
+	for _,button in ipairs(frame.bracketButtons or {}) do
+		button:HookScript("OnClick",function()
+			if frame.viewingCutoffs then frame.ShowCutoffs(false) end
+		end)
+	end
+
+	-- Offered only where the slot is free, and only while the picker itself is
+	-- up: the Rated page hides the brackets and this belongs with them.
+	local updateBrackets=frame.UpdateBrackets
+	frame.UpdateBrackets=function()
+		updateBrackets()
+
+		local version=(ns.ViewVersion and ns.ViewVersion()) or "mop"
+		local third=frame.bracketButtons and frame.bracketButtons[3]
+		local room=(version=="tbc") and third and third:IsShown()
+		cutoffsButton:SetShown(room and true or false)
+
+		if not cutoffsButton.placed and frame.homeButton then
+			cutoffsButton:ClearAllPoints()
+			cutoffsButton:SetPoint("LEFT",frame.homeButton,"RIGHT",ROW_GAP,0)
+			cutoffsButton.placed=true
+		end
+
+		-- The picker starts after the tab, or after Home when there is no tab.
+		-- Re-anchored rather than laid out once, because whether there is a tab
+		-- at all changes with the ladder being viewed.
+		local first=frame.bracketButtons and frame.bracketButtons[1]
+		if first then
+			first:ClearAllPoints()
+			-- Never onto a button with no anchor of its own: that is what put the
+			-- whole picker off the window once already.
+			local after=frame.homeButton
+			if room and cutoffsButton.placed then after=cutoffsButton end
+			if after then
+				first:SetPoint("LEFT",after,"RIGHT",ROW_GAP,0)
+			end
+		end
+
+		-- Looking at a ladder whose slot is taken -- Mists from Anniversary, say
+		-- -- leaves the view nowhere to live, so it goes back to the list rather
+		-- than staying on with no way out of it.
+		if frame.viewingCutoffs and not room then frame.ShowCutoffs(false) end
+
+		-- No bracket is the current view while the cutoffs are up, so none of
+		-- them is the disabled one. The picker greys whichever bracket you are
+		-- looking at, which left 2v2 dead on a screen that is not showing 2v2 --
+		-- and dead is exactly the thing you would click to get back to it.
+		--
+		-- Undone here rather than in ShowCutoffs because the picker re-decides
+		-- this every redraw, and would take it straight back.
+		if frame.viewingCutoffs then
+			for _,button in ipairs(frame.bracketButtons or {}) do
+				button:Enable()
+				local label=button.GetFontString and button:GetFontString()
+				if label then label:SetTextColor(0.75,0.75,0.75) end
+			end
+		end
+	end
+
 
 	local close=CreateFrame("Button",nil,frame,"UIPanelCloseButton")
 	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0)
@@ -1624,6 +2000,9 @@ local function CreateWindow()
 
 	-- A heading row, outside the scrolling area so it stays put.
 	local header=CreateFrame("Frame",nil,frame)
+	-- Kept, so the cutoffs view can take the window over: the column
+	-- headings belong to the list and mean nothing beside three title tables.
+	frame.header=header
 	-- One icon per spec, grouped by class with a wider gap between groups, so
 	-- eleven clusters read as eleven classes rather than as thirty-four squares.
 	--
@@ -1923,7 +2302,16 @@ local function CreateWindow()
 	-- OnHide the difference between being closed and being replaced, which is a
 	-- thing neither window can see.
 	frame.swapButton=PageButton(L.LADDER_SWAP,SWAP_W)
-	frame.swapButton:SetPoint("TOPLEFT",frame,"TOPLEFT",BRACKET_X,HEADER_TOP)
+	-- Off the game dropdown, not off a measured constant.
+	--
+	-- BRACKET_X was 208 because the subtitle beside it runs to about 195 at
+	-- its longest, and 182 had already been tried and landed under it. But
+	-- that label is not a fixed width -- it is the game being viewed, and
+	-- "Classic" is a good deal shorter than "Anniversary" -- so any one number
+	-- is either too far left for the longest or wasting room for the rest.
+	-- Anchored to the thing it has to clear, it is always as far left as it
+	-- can be, which leaves the most room at the other end for the flags.
+	frame.swapButton:SetPoint("LEFT",frame.gameButton,"RIGHT",12,0)
 
 	-- Home, in the bracket row rather than down among the page buttons.
 	--
@@ -1959,6 +2347,8 @@ local function CreateWindow()
 	frame.homeButton:SetScript("OnLeave",function() GameTooltip:Hide() end)
 
 	frame.homeButton:SetScript("OnClick",function()
+		-- Home means the ladder, from wherever you are -- including the cutoffs.
+		if frame.viewingCutoffs and frame.ShowCutoffs then frame.ShowCutoffs(false) end
 		showingAlts=false
 		specFilter=nil
 

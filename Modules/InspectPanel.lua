@@ -1453,6 +1453,14 @@ local function AskForItem(id)
 	end
 end
 
+-- Declared up here because the item-info watcher below reaches back for
+-- both, and it sits a couple of hundred lines above where they are written.
+-- A local declared after its reader is not that local at all: the watcher
+-- would read a nil global and the stats page would never repaint once the
+-- last item arrived. ordercheck caught exactly that.
+local FillStats
+local statsFor
+
 -- Every slot the paper doll draws, in the order it draws them, so the lists
 -- below read top to bottom the way the doll does.
 local EVERY_SLOT={}
@@ -1999,6 +2007,10 @@ local function FillSockets(gear,glyphs,class)
 						FillSlot(button,socketGear[slotKey],(socketTinkers or {})[slotKey],slotKey)
 					end
 				end
+
+				-- And the stats page, whose PvP totals are summed from those
+				-- same items and were left blank while they loaded.
+				if statsFor then FillStats(statsFor.v,statsFor.gear) end
 			end)
 		end
 		socketWatcher:RegisterEvent("GET_ITEM_INFO_RECEIVED")
@@ -2033,6 +2045,39 @@ local V_CRIT, V_HASTE, V_MASTERY, V_SPIRIT       = 1, 2, 3, 4
 local V_STRENGTH, V_AGILITY, V_INTELLECT         = 5, 6, 7
 local V_STAMINA, V_HEALTH                        = 8, 9
 local V_SPELL_POWER, V_ATTACK_POWER              = 10, 11
+
+-- Added after the first eleven, never inserted among them: a character
+-- harvested before this existed still has a valid v, just a shorter one, and
+-- renumbering would have silently reinterpreted every one of those rows.
+--
+-- Percentages in hundredths, as integers. The harvest writes this file from
+-- PowerShell, where formatting a float uses the machine's decimal separator
+-- -- on a comma-decimal locale it would emit 12,35 and the Lua would not
+-- parse. An integer cannot be spelled two ways.
+local V_MELEE_CRIT_PCT, V_MELEE_HASTE_PCT        = 12, 13
+local V_SPELL_CRIT_PCT, V_SPELL_HASTE_PCT        = 14, 15
+local V_SPELL_PEN                                = 16
+local V_MASTERY_PCT                              = 17
+
+-- The colours the stat itself is known by, so the eye finds the row it
+-- wants without reading. Secondary stats stay neutral on purpose -- there
+-- are only ever a few and colouring them too would make the page loud.
+local STAT_COLOUR = {
+	strength  = {0.91,0.24,0.20},
+	agility   = {0.26,0.80,0.28},
+	stamina   = {0.96,0.75,0.22},
+	intellect = {0.29,0.58,0.95},
+	spirit    = {0.20,0.80,0.75},
+	health    = {0.88,0.36,0.36},
+	power     = {0.85,0.78,0.55},
+}
+
+-- Whole numbers stay whole; a percentage keeps two places, because the
+-- second one is where gear choices actually show up.
+local function Percent(hundredths)
+	if not hundredths then return nil end
+	return string.format("%.2f%%",hundredths/100)
+end
 
 local STAT_ROWS = 6
 
@@ -2089,6 +2134,24 @@ local function BuildStatsPage(parent)
 			row.value:SetPoint("RIGHT",-8,0)
 			row.value:SetJustifyH("RIGHT")
 
+			-- Heavier, and the number left plain.
+			--
+			-- The colour is the whole point of the row: it is what lets the eye find
+			-- intellect without reading the word. A gold number beside a coloured
+			-- name competes with it, and the regular weight left both looking washed
+			-- out against the striped background. Outlined and near-white, the label
+			-- carries the colour and the value carries the reading.
+			--
+			-- Taken from the font object rather than named: the size belongs to
+			-- whatever template these were built from, and hardcoding one here would
+			-- go stale the moment that changed.
+			local labelFont,labelSize=row.label:GetFont()
+			if labelFont then row.label:SetFont(labelFont,labelSize,"OUTLINE") end
+
+			local valueFont,valueSize=row.value:GetFont()
+			if valueFont then row.value:SetFont(valueFont,valueSize,"OUTLINE") end
+			row.value:SetTextColor(0.96,0.96,0.96)
+
 			row:Hide()
 			rows[index]=row
 		end
@@ -2106,9 +2169,69 @@ local function BuildStatsPage(parent)
 	return page
 end
 
-local function FillStats(v)
+-- A stat Blizzard does not report, added up off the gear instead.
+--
+-- The statistics document has no PvP Power and no Resilience, on either
+-- client -- checked field by field. They are item stats, so the only place
+-- they exist is the gear, and the gear is already here.
+--
+-- Matched on a fragment of the key rather than against a named constant.
+-- GetItemStats answers with keys like ITEM_MOD_RESILIENCE_RATING_SHORT, and
+-- the exact spelling has moved between clients; a substring survives that
+-- where an equality test silently totals nothing.
+--
+-- The full item string, not the bare id: gems and enchants carry these
+-- stats too, and asking about the plain item would miss every socket.
+--
+-- Returns nil, not 0, while anything is still loading. A partial total is a
+-- wrong number that looks like a right one, and the watcher below repaints
+-- when the rest arrives.
+local function GearTotal(gear,needle)
+	if not gear then return nil end
+
+	local total,waiting=0,false
+	for _,slotKey in ipairs(EVERY_SLOT) do
+		local record=gear[slotKey]
+		local id=record and tonumber(record[1])
+		if id and id>0 then
+			-- The bare item, and each gem asked about separately.
+			--
+			-- Gem ids in the item string are ignored: measured on a socketed
+			-- helm, GetItemStats answered 622 PvP Power with the gems in the
+			-- string and 622 without. It also reports the sockets as empty
+			-- either way, so nothing about its answer says the gems were
+			-- dropped. Summing them one at a time is the only way they count,
+			-- and there is no double counting to worry about because of it.
+			local pieces={ id }
+			for index=3,#record do
+				local gem=tonumber(record[index])
+				if gem and gem>0 then pieces[#pieces+1]=gem end
+			end
+
+			for _,piece in ipairs(pieces) do
+				local stats=GetItemStats("item:"..piece)
+				if not stats then
+					AskForItem(piece)
+					waiting=true
+				else
+					for key,value in pairs(stats) do
+						if key:find(needle,1,true) then total=total+(value or 0) end
+					end
+				end
+			end
+		end
+	end
+
+	if waiting then return nil end
+	return total
+end
+
+-- statsFor is held so the item-info watcher can draw this page again once
+-- the last item arrives, and is forward-declared far above for that reason.
+function FillStats(v,gear)
 	local page=frame and frame.pages and frame.pages.stats
 	if not page then return end
+	statsFor={ v=v, gear=gear }
 
 	local function Draw(rows,list)
 		for index,row in ipairs(rows) do
@@ -2116,8 +2239,21 @@ local function FillStats(v)
 			if not entry then
 				row:Hide()
 			else
-				row.label:SetText(entry[1])
-				row.value:SetText(Grouped(entry[2]))
+				-- Capitals, like every stat block the game itself draws. It also stops
+				-- the two columns reading as sentences.
+				row.label:SetText((entry[1] or ""):upper())
+				if entry[3] then
+					row.label:SetTextColor(entry[3][1],entry[3][2],entry[3][3])
+				else
+					row.label:SetTextColor(HIGHLIGHT_FONT_COLOR:GetRGB())
+				end
+				-- Already formatted, or a plain number to be grouped. A percentage
+				-- arrives as text because 12.35% is not a number to put commas in.
+				if type(entry[2])=="string" then
+					row.value:SetText(entry[2])
+				else
+					row.value:SetText(Grouped(entry[2]))
+				end
 				row:Show()
 			end
 		end
@@ -2138,11 +2274,14 @@ local function FillStats(v)
 	-- class table. Every character has all three and two of them sit at their
 	-- unbuffed base, so the gear picks the winner without being asked.
 	local primaryName,primaryValue=L.INSPECT_STAT_STRENGTH,v[V_STRENGTH] or 0
+	local primaryColour=STAT_COLOUR.strength
 	if (v[V_AGILITY] or 0)>primaryValue then
 		primaryName,primaryValue=L.INSPECT_STAT_AGILITY,v[V_AGILITY]
+		primaryColour=STAT_COLOUR.agility
 	end
 	if (v[V_INTELLECT] or 0)>primaryValue then
 		primaryName,primaryValue=L.INSPECT_STAT_INTELLECT,v[V_INTELLECT]
+		primaryColour=STAT_COLOUR.intellect
 	end
 
 	-- And the same for whichever power they actually use: a healer's attack
@@ -2153,18 +2292,68 @@ local function FillStats(v)
 	end
 
 	Draw(page.attributes,{
-		{ primaryName, primaryValue },
-		{ L.INSPECT_STAT_STAMINA, v[V_STAMINA] },
-		{ L.INSPECT_STAT_HEALTH,  v[V_HEALTH] },
-		{ powerName, powerValue },
+		{ primaryName, primaryValue, primaryColour },
+		{ L.INSPECT_STAT_STAMINA, v[V_STAMINA], STAT_COLOUR.stamina },
+		{ L.INSPECT_STAT_SPIRIT,  v[V_SPIRIT],  STAT_COLOUR.spirit },
+		{ L.INSPECT_STAT_HEALTH,  v[V_HEALTH],  STAT_COLOUR.health },
+		{ powerName, powerValue, STAT_COLOUR.power },
 	})
 
-	Draw(page.secondary,{
-		{ L.INSPECT_STAT_CRIT,    v[V_CRIT] },
-		{ L.INSPECT_STAT_HASTE,   v[V_HASTE] },
-		{ L.INSPECT_STAT_MASTERY, v[V_MASTERY] },
-		{ L.INSPECT_STAT_SPIRIT,  v[V_SPIRIT] },
-	})
+	-- Crit and haste come in two schools, and the character only cares about
+	-- one of them: the caster this was first checked against had 2.18% melee
+	-- crit against 15.51% spell crit, and it was the melee figure being shown.
+	-- Whichever is larger is theirs, the same way the primary stat and the
+	-- power above are picked -- the gear decides, and no class table has to be
+	-- kept in step with it.
+	--
+	-- The percentages only exist for characters harvested since they were
+	-- added; an older row falls back to the rating it has always carried,
+	-- which is a number without a unit but is not wrong.
+	-- Absent, not zero. math.max of two missing slots is 0, and 0 is true in
+	-- Lua -- so formatting it produced a confident "0.00%" for every character
+	-- harvested before these slots existed, and the fallback to the rating they
+	-- do carry never ran. Ask whether either slot is THERE first.
+	local crit,haste
+	if v[V_MELEE_CRIT_PCT] or v[V_SPELL_CRIT_PCT] then
+		crit=Percent(math.max(v[V_MELEE_CRIT_PCT] or 0,v[V_SPELL_CRIT_PCT] or 0))
+	end
+	if v[V_MELEE_HASTE_PCT] or v[V_SPELL_HASTE_PCT] then
+		haste=Percent(math.max(v[V_MELEE_HASTE_PCT] or 0,v[V_SPELL_HASTE_PCT] or 0))
+	end
+
+	local secondary={
+		{ L.INSPECT_STAT_CRIT,  crit or v[V_CRIT] },
+		{ L.INSPECT_STAT_HASTE, haste or v[V_HASTE] },
+	}
+
+	-- Mastery is a Mists stat and does not exist on the Anniversary client.
+	-- The statistics endpoint has no field for it there at all, so the harvest
+	-- stored a zero and this page printed "Mastery 0" for every TBC character
+	-- -- a stat nobody has, reported as a stat everybody has none of.
+	if ns.ClientVersion() ~= "tbc" then
+		secondary[#secondary+1]={ L.INSPECT_STAT_MASTERY,
+			Percent(v[V_MASTERY_PCT]) or v[V_MASTERY] }
+	end
+
+	-- Only where it means something: it is a TBC and Mists caster stat, and a
+	-- row reading zero for everyone else is a row worth not drawing.
+	if (v[V_SPELL_PEN] or 0)>0 then
+		secondary[#secondary+1]={ L.INSPECT_STAT_SPELL_PEN, v[V_SPELL_PEN] }
+	end
+
+	-- Off the gear, because Blizzard reports neither. Absent rather than zero
+	-- while the items load, and absent on a character wearing none of it.
+	local power=GearTotal(gear,"PVP_POWER")
+	if power and power>0 then
+		secondary[#secondary+1]={ L.INSPECT_STAT_PVP_POWER, power }
+	end
+
+	local resilience=GearTotal(gear,"RESILIENCE")
+	if resilience and resilience>0 then
+		secondary[#secondary+1]={ L.INSPECT_STAT_PVP_RESILIENCE, resilience }
+	end
+
+	Draw(page.secondary,secondary)
 end
 
 -- ---------------------------------------------------------------- window
@@ -2213,6 +2402,10 @@ local function BuildWindow()
 	-- all: at 660x560 it runs off the bottom of a small screen, taking the
 	-- tab row with it.
 	if ns.FitScale then frame:SetScale(ns.FitScale(WIDTH,HEIGHT,1)) end
+	-- Last line of defence. Everything below works out a scale that should
+	-- fit, and this is what happens when the arithmetic is still not enough:
+	-- a panel pushed half off the screen can at least be dragged back.
+	frame:SetClampedToScreen(true)
 	frame:SetPoint("CENTER")
 	-- Above the ladder, which is also DIALOG and was drawing straight over the
 	-- top of this -- the panel looked transparent when it was simply behind.
@@ -2879,7 +3072,7 @@ function ns.ShowInspect(entry,region,bracket)
 	frame:Show()
 
 	FillSockets(gear,data.y,entry.class)
-	FillStats(data.v)
+	FillStats(data.v,gear)
 
 	-- After Show, never before: see DressWhenReady.
 	local look={ race=data.r or 0, gender=data.x or 0 }
@@ -2895,6 +3088,50 @@ end
 --
 -- Anchored, not merely placed: the panel is itself anchored to the house, so
 -- following it keeps all three lined up whatever the user's UI Scale is.
+-- How much room is actually left where the panel is going.
+--
+-- ns.FitScale answers for a window in the middle of the screen, which is
+-- what this is until the auction house opens. Attached, it starts where the
+-- shelf ends -- and the shelf starts where the auction house ends -- so on a
+-- smaller screen there can be three hundred points left for a six hundred
+-- point panel, while the standalone answer sees 660 against the whole screen
+-- and says 1. Reported live: a friend at a lower resolution had the gems and
+-- the tab row off the right-hand edge.
+--
+-- Both edges are converted into UIParent's units first. The shelf is
+-- parented to the auction house frame, which carries its own effective
+-- scale, and comparing a raw GetRight() against UIParent:GetWidth() would
+-- silently mix the two coordinate spaces.
+local function RoomBeside(shelf)
+	if not (UIParent and shelf and shelf.GetRight) then return nil end
+
+	local ours=UIParent:GetEffectiveScale()
+	local theirs=shelf:GetEffectiveScale()
+	if not (ours and theirs and ours>0) then return nil end
+
+	local right,top=shelf:GetRight(),shelf:GetTop()
+	if not (right and top) then return nil end
+
+	-- The 11 is the border overlap the anchor below takes back.
+	return UIParent:GetWidth()-(right*theirs/ours)+11,top*theirs/ours
+end
+
+local function AttachedScale(shelf)
+	local standalone=(ns.FitScale and ns.FitScale(WIDTH,HEIGHT,1)) or 1
+
+	local across,down=RoomBeside(shelf)
+	if not across then return standalone end
+
+	-- Never larger than it would be on its own: attaching can only ever take
+	-- room away.
+	local fits=math.min(across/WIDTH,down/HEIGHT,standalone)
+
+	-- The same floor ns.FitScale uses. Below this it cannot be read, and an
+	-- unreadable panel is no better than one off the edge -- but this one is
+	-- clamped to the screen, so it stays reachable either way.
+	return math.max(fits,0.65)
+end
+
 function ns.InspectAttachToAuction()
 	local shelf=_G.ArenaPlus_AuctionPvP
 	if not (frame and shelf) then return false end
@@ -2905,6 +3142,7 @@ function ns.InspectAttachToAuction()
 	-- so butting the frames together at zero leaves the width of two borders
 	-- between them.
 	frame:SetPoint("TOPLEFT",shelf,"TOPRIGHT",-11,0)
+	frame:SetScale(AttachedScale(shelf))
 	return true
 end
 
@@ -2923,6 +3161,9 @@ function ns.InspectDetachFromAuction()
 	frame.attached=nil
 	frame:ClearAllPoints()
 	frame:SetPoint("CENTER")
+	-- Back to the standalone answer: it was shrunk to fit beside the auction
+	-- house, and in the middle of the screen it has the whole screen again.
+	if ns.FitScale then frame:SetScale(ns.FitScale(WIDTH,HEIGHT,1)) end
 end
 
 -- Open on a particular tab.

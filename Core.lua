@@ -32,6 +32,24 @@ local CURRENT_DB_VERSION = 1
 -- and there is one list to change if that ever stops being true.
 ns.BRACKET_NAMES = { "2v2", "3v3", "5v5", "10v10" }
 
+-- A realm's display name from its slug.
+--
+-- The ladder carries slugs, and a slug cannot be turned back into a name by
+-- any rule: raden is Ra-den, lei-shen is Lei Shen, arugal-au is Arugal (AU).
+-- Capitalising the first letter gets the first wrong, capitalising each piece
+-- gets all three wrong. So the names are asked of Blizzard's realm index by
+-- the ladder pass and shipped in the data addon; this only looks them up.
+--
+-- The fallback is the slug itself with a capital, which is what a realm with
+-- no entry yet used to look like anyway, only tidier. Never nil: every caller
+-- here is drawing a row.
+function ns.RealmName(slug)
+	if not slug or slug=="" then return "" end
+	local known=ns.REALM_NAMES and ns.REALM_NAMES[slug]
+	if known then return known end
+	return (slug:gsub("^%l",string.upper))
+end
+
 -- The region flags.
 --
 -- The client has no region art of its own -- checked, and it has faction crests
@@ -777,7 +795,14 @@ function ns.BuildBracketPicker(frame,point,x,y,follows)
 		buttons[bracket]=button
 	end
 
-	return function()
+	-- The updater, and the buttons themselves.
+	--
+	-- Second return so a window can put something of its own in the row and
+	-- have it line up: the ladder hangs a Cutoffs tab off the third button on
+	-- Anniversary, where there is no fourth bracket and the slot is empty.
+	-- Callers that only want the updater are unaffected.
+	local update
+	update=function()
 		-- Hidden while the Rated page is up: that page is the picker there, and
 		-- a second one beside it that has to agree is a thing to get wrong.
 		local panel=ns.HistoryPanel and ns.HistoryPanel()
@@ -816,6 +841,8 @@ function ns.BuildBracketPicker(frame,point,x,y,follows)
 			end
 		end
 	end
+
+	return update,buttons
 end
 
 -- Forgotten when the windows close, so the next open works the bracket out
@@ -1736,10 +1763,29 @@ function ns.CopyName(text,beside)
 
 	-- Moved after Show, because the popup manager places it as part of showing
 	-- it and anything set before is overwritten.
-	if dialog and beside then
+	if dialog then
 		dialog:ClearAllPoints()
-		dialog:SetPoint("BOTTOM",beside,"TOP",0,8)
-		-- A window sitting high enough leaves "above it" off the screen, and a
+
+		-- At the pointer, where the click was.
+		--
+		-- It used to anchor above the window the row belongs to, which on a tall
+		-- ladder is a long way from whichever row was actually right-clicked --
+		-- and the box wants a copy from the keyboard immediately, so it has to be
+		-- where the eye already is.
+		--
+		-- Divided by the DIALOG's effective scale, not UIParent's: a SetPoint
+		-- offset is measured in the units of the frame being placed, and the two
+		-- scales are not the same whenever the popup carries one of its own.
+		local x,y=GetCursorPosition()
+		local scale=dialog:GetEffectiveScale()
+		if x and y and scale and scale>0 then
+			dialog:SetPoint("TOPLEFT",UIParent,"BOTTOMLEFT",x/scale,y/scale)
+		elseif beside then
+			-- No cursor to speak of, which is a keybind rather than a click.
+			dialog:SetPoint("BOTTOM",beside,"TOP",0,8)
+		end
+
+		-- A pointer near an edge would otherwise put the box half off it, and a
 		-- dialog nobody can reach is worse than one in the wrong place.
 		dialog:SetClampedToScreen(true)
 	end

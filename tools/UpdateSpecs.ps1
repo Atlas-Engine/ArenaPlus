@@ -1,4 +1,4 @@
-# Class and spec for everybody on the ladder, one character at a time.
+﻿# Class and spec for everybody on the ladder, one character at a time.
 #
 # Separate from UpdateFromBlizzard.ps1 because the two change at wildly
 # different rates. A rating moves hourly; a character's spec almost never. So
@@ -62,7 +62,11 @@ param(
     # It is nearly free at this cadence: five and a half thousand characters
     # over ninety-six runs is about sixty a run, against an hourly budget of
     # thirty-six thousand that currently sees four and a half.
-    [int]$RefreshDays = 1
+    [int]$RefreshDays = 1,
+    # How sure the armour has to be before it overrules the armory. See the
+    # note beside the correction itself; 0 turns it off entirely.
+    [double]$SetSpecConfidence = 0.70,
+    [int]$SetSpecMinWearers = 8
 )
 
 $ErrorActionPreference = "Stop"
@@ -648,12 +652,129 @@ foreach ($key in $wanted.Keys) {
 #
 # Built before the slug list below, because resolving a cached slug can add to
 # that list -- a spec nobody on this region played last run.
+# ---------------------------------------------------------------- armour
+
+# What the armour says, where the armour is decisive.
+#
+# active_spec is whatever the character logged out in, which is a true answer to
+# a question nobody asked: a holy paladin who quested in retribution is recorded
+# as retribution, and the daily refresh above cannot help, because the source
+# itself says retribution. Reported live -- 3v3 US #76, a holy paladin shown as
+# ret, while the armory agreed with us and every other site did not.
+#
+# The gear knows. A season's sets are per class AND role, so the wearers of one
+# set nearly all share a spec, and the handful who do not are this bug.
+# Measured across both regions at the time this was written:
+#
+#   Gladiator's Thunderfist   24   elemental   100%
+#   Gladiator's Earthshaker   23   enhancement  96%
+#   Gladiator's Redemption    33   holy         85%   <- 3 ret, 2 prot: the bug
+#   Gladiator's Investiture   40   holy         65%   <- holy AND disc wear it
+#   Gladiator's Sanctuary     26   feral        65%   <- feral AND guardian
+#   Gladiator's Pursuit       67   survival     37%   <- one set, three specs
+#
+# The threshold is what does the work. A set that identifies a spec corrects it;
+# a set that only identifies a class or a role stays out of the way. Priest
+# healer is the case to watch -- Investiture covers Discipline and Holy, and
+# must never be allowed to flip one into the other. At 65% it cannot.
+#
+# Only characters with gear harvested are eligible, which is the top of the
+# ladder rather than all of it. That is where it matters and where anyone looks.
+$fixed = @{}
+$inspectFile = Join-Path $data ("Inspect-" + $Region + ".lua")
+
+if ((Test-Path $inspectFile) -and $SetSpecConfidence -gt 0) {
+
+    # Whichever set a character wears most of, if they wear enough of it to
+    # mean anything. Four, because a two-piece is something people wear for the
+    # bonus while playing another spec entirely.
+    $wear = @{}
+    foreach ($line in (Get-Content $inspectFile)) {
+        $who = [regex]::Match($line, '^\s*\["([^"]+)"\]=\{')
+        if (-not $who.Success) { continue }
+
+        $sets = [regex]::Match($line, 's=\{((?:\{\d+,\d+,\d+\},?)+)\}')
+        if (-not $sets.Success) { continue }
+
+        $bestId = 0
+        $bestHave = 0
+        foreach ($piece in [regex]::Matches($sets.Groups[1].Value, '\{(\d+),(\d+),(\d+)\}')) {
+            $have = [int]$piece.Groups[2].Value
+            if ($have -gt $bestHave) {
+                $bestHave = $have
+                $bestId = [int]$piece.Groups[1].Value
+            }
+        }
+
+        if ($bestHave -ge 4) { $wear[$who.Groups[1].Value] = $bestId }
+    }
+
+    # Tallied from the RAW armory answers, never from corrected ones.
+    #
+    # This is the part that has to stay true. $seen is what gets written to the
+    # cache and read back next run, so correcting it in place would feed each
+    # correction into the next run's tally -- a set would drift towards total
+    # agreement with itself, the confidence figure would climb to 100% whatever
+    # the truth was, and the threshold would stop meaning anything. The
+    # correction lives in $fixed, which is used for the shipped file and
+    # nothing else.
+    $tally = @{}
+    foreach ($key in $wear.Keys) {
+        if (-not $seen.ContainsKey($key)) { continue }
+
+        $slug = $seen[$key].Slug
+        if ([string]::IsNullOrEmpty($slug)) { continue }
+        # A bare class with no spec ("warrior") says nothing about the set.
+        if ($slug -notmatch '-') { continue }
+
+        $set = $wear[$key]
+        if (-not $tally.ContainsKey($set)) { $tally[$set] = @{} }
+        if (-not $tally[$set].ContainsKey($slug)) { $tally[$set][$slug] = 0 }
+        $tally[$set][$slug]++
+    }
+
+    $decisive = @{}
+    foreach ($set in $tally.Keys) {
+        $total = 0
+        $topSlug = $null
+        $topCount = 0
+        foreach ($slug in $tally[$set].Keys) {
+            $n = $tally[$set][$slug]
+            $total += $n
+            if ($n -gt $topCount) {
+                $topCount = $n
+                $topSlug = $slug
+            }
+        }
+        if ($total -ge $SetSpecMinWearers -and ($topCount / $total) -ge $SetSpecConfidence) {
+            $decisive[$set] = $topSlug
+        }
+    }
+
+    foreach ($key in $wear.Keys) {
+        if (-not $seen.ContainsKey($key)) { continue }
+        if (-not $decisive.ContainsKey($wear[$key])) { continue }
+
+        $slug = $seen[$key].Slug
+        if ([string]::IsNullOrEmpty($slug)) { continue }
+        if ($slug -eq $decisive[$wear[$key]]) { continue }
+
+        $fixed[$key] = $decisive[$wear[$key]]
+        Write-Log ("  armour says {0} is {1}, not {2}" -f $key, $fixed[$key], $slug)
+    }
+
+    Write-Log ("  {0} spec(s) corrected from {1} decisive set(s)" -f $fixed.Count, $decisive.Count)
+}
+
 $rows = New-Object System.Collections.Generic.List[string]
 $looks = New-Object System.Collections.Generic.List[string]
 foreach ($key in ($seen.Keys | Sort-Object)) {
     if (-not $wanted.Contains($key)) { continue }
 
     $slug = $seen[$key].Slug
+    # The shipped answer, which is the armory's unless the armour overruled
+    # it above. The cache below keeps the armory's either way.
+    if ($fixed.ContainsKey($key)) { $slug = $fixed[$key] }
     if ([string]::IsNullOrEmpty($slug)) {
         $value = 0
     } else {

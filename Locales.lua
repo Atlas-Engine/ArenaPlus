@@ -167,6 +167,8 @@ L.CUTOFF_RIVAL            = "Rival"
 L.CUTOFF_CHALLENGER       = "Challenger"
 
 L.CUTOFF_TITLE            = "%s title cutoffs"
+L.LADDER_CUTOFFS          = "Cutoffs"
+L.LADDER_CUTOFFS_READ     = "Read from the ladder %s"
 -- Appended to a heading so both windows say whose numbers these are. Gold
 -- rather than grey: which region you are reading changes every figure under it,
 -- and a grey aside is exactly what the eye skips.
@@ -230,6 +232,9 @@ L.INSPECT_STAT_CRIT       = "Critical Strike"
 L.INSPECT_STAT_HASTE      = "Haste"
 L.INSPECT_STAT_MASTERY    = "Mastery"
 L.INSPECT_STAT_SPIRIT     = "Spirit"
+L.INSPECT_STAT_SPELL_PEN  = "Spell Penetration"
+L.INSPECT_STAT_PVP_POWER  = "PvP Power"
+L.INSPECT_STAT_PVP_RESILIENCE = "PvP Resilience"
 L.INSPECT_STATS_NONE      = "No stats on file for this character yet."
 -- The shopping list: gems, enchants and glyphs, everything you would have to
 -- buy to wear what they are wearing. Gems are counted rather than listed one

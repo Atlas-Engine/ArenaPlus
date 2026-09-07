@@ -1,4 +1,4 @@
-# Cutoffs and ladder for ArenaPlus, read from Blizzard's own API.
+﻿# Cutoffs and ladder for ArenaPlus, read from Blizzard's own API.
 #
 # Replaces the third-party scrape this used to do. Everything taken from it is
 # published first-party, and measured against the scrape on 2026-08-18 every one
@@ -377,10 +377,24 @@ foreach ($bracket in $brackets) {
     $total += $kept.Count
 
     # Not published anywhere: counted off the ladder itself.
+    #
+    # Every tier, not just the two fixed-count ones. Duelist, Rival and
+    # Challenger are percentages of the field rather than a fixed number of
+    # places, but the question a reader has is the same either way -- how
+    # many people hold this title -- and the ladder can answer it.
+    #
+    # Only where the ladder actually reaches past the cutoff. Blizzard caps
+    # what it publishes -- 2v2 stops around five thousand places, above the
+    # Challenger line -- so counting a tier the list stops short of gives a
+    # floor dressed up as a total. $lowest is the deepest rating returned;
+    # if it does not get below the cutoff, the count is not knowable and the
+    # tier is left out rather than under-reported.
     $counts = [ordered]@{}
-    foreach ($tier in @('r1','gladiator')) {
+    foreach ($tier in @('r1','gladiator','duelist','rival','challenger')) {
         $rating = $cutoffs[$bracket.Index][$tier]
-        if ($rating) { $counts[$tier] = @($all | Where-Object { $_.rating -ge $rating }).Count }
+        if ($rating -and $all.Count -gt 0 -and $lowest -le $rating) {
+            $counts[$tier] = @($all | Where-Object { $_.rating -ge $rating }).Count
+        }
     }
     $slots[$bracket.Index] = $counts
 
@@ -748,6 +762,15 @@ if ($Live) {
 Step-Progress
 $now = Get-Date -Format $TimeFormat
 
+# The same moment with no timezone to get wrong.
+#
+# $now is this machine's local time and carries no zone, and the addon read
+# it back as the READER's local clock -- so everyone outside this timezone
+# saw an age off by the whole offset between the two. Reported from an
+# Australian realm as a fourteen hour old file minutes after it published,
+# which is EDT to AEST to the hour.
+$nowEpoch = [int][math]::Floor(((Get-Date).ToUniversalTime() - [datetime]'1970-01-01').TotalSeconds)
+
 # "updated" only moves when a cutoff actually moved; "checked" moves every run.
 $stamp = $now
 if (Test-Path $cutoffFile) {
@@ -797,6 +820,7 @@ ns.CUTOFFS_BY_REGION["$Region"] = {
 `tregion  = "$Region",
 `tupdated = "$stamp",
 `tchecked = "$now",
+`tcheckedEpoch = $nowEpoch,
 
 $cutoffBody
 }
@@ -841,9 +865,62 @@ if ($baselineDate) {
 
 $refused = 0
 $rows = New-Object System.Collections.Generic.List[string]
+# Which realms this region's ladder actually mentions, so the name table
+# below carries those and not the fifty in Blizzard's index.
+$usedRealms = @{}
 $nextBaseline = New-Object System.Collections.Generic.List[string]
 $null = $nextBaseline.Add("# Where everybody stood a week ago, for the change columns. Not shipped.")
 $null = $nextBaseline.Add("# taken " + (Get-Date).ToString('yyyy-MM-dd HH:mm'))
+
+# ---------------------------------------------------------------- activity
+
+# Who actually played, each time this runs.
+#
+# The shipped files are a photograph: where everybody stands right now. Almost
+# every interesting question is about the film instead -- who is queuing at this
+# moment, what somebody's rating did over a week, whether a run of losses is a
+# slump or a bad night, which characters are never online at the same time as
+# each other. None of that can be recovered later: a poll not written down is
+# gone, and no amount of asking Blizzard afterwards brings it back. So it is
+# written down now and what to do with it is decided later.
+#
+# The diff is free. Every row is already in hand and already compared against
+# the weekly baseline a few lines below; this compares against the LAST poll
+# rather than against last week, and keeps only the rows that moved.
+#
+# Deliberately not alt-shaped. It records what happened -- character, when,
+# rating, games -- and nothing inferred, so it can answer questions nobody has
+# asked yet rather than only the one that prompted it.
+#
+# Not shipped, like Baseline-*.txt beside it. One file per month, because
+# pruning history means deleting a file rather than rewriting a large one, and
+# because anything reading it usually wants a recent window rather than all of
+# it.
+$activityFile = Join-Path $PSScriptRoot ("Activity-" + $Region + "-" + (Get-Date).ToString('yyyy-MM') + ".tsv")
+$lastFile     = Join-Path $PSScriptRoot ("LastPoll-" + $Region + ".txt")
+
+# key|bracket -> "rating won lost", as of the previous run.
+$lastPoll = @{}
+if (Test-Path $lastFile) {
+    foreach ($line in Get-Content $lastFile) {
+        if ($line.StartsWith("#")) { continue }
+        $bit = $line -split "`t"
+        if ($bit.Count -ge 4) {
+            $lastPoll[$bit[0]] = [pscustomobject]@{
+                Rating = [int]$bit[1]; Won = [int]$bit[2]; Lost = [int]$bit[3]
+            }
+        }
+    }
+}
+
+$nextPoll = New-Object System.Collections.Generic.List[string]
+$null = $nextPoll.Add("# Where everybody stood at the previous poll, to diff the next one against.")
+$null = $nextPoll.Add("# Not shipped. Safe to delete: it costs one poll to rebuild, losing one window.")
+$activity = New-Object System.Collections.Generic.List[string]
+# Epoch by arithmetic, not by parsing. -UFormat %s hands back a string, and
+# [double]::Parse reads it in the current culture -- on a machine whose
+# decimal separator is a comma that either throws or silently misreads, and
+# this runs unattended where nobody would see either.
 
 foreach ($bracket in $brackets) {
     $info = $fetched[$bracket.Index]
@@ -927,6 +1004,28 @@ foreach ($bracket in $brackets) {
     foreach ($row in $ordered) {
         $null = $nextBaseline.Add(("{0}`t{1}`t{2}" -f $row.Key, $row.Rating, $row.Rank))
 
+        # Bracket in the key: one character plays several, and 2v2 games are
+        # not 3v3 games.
+        $usedRealms[[string]$row.Realm] = $true
+        $pollKey = $row.Key + "|" + $bracket.Api
+        $null = $nextPoll.Add(("{0}`t{1}`t{2}`t{3}" -f $pollKey, $row.Rating, $row.Won, $row.Lost))
+
+        # Only rows that moved, and only games -- a rating that drifts with
+        # nothing played is a decay or a correction, not a session. The
+        # first sighting of a character writes nothing: there is no previous
+        # poll to have moved from, and treating their whole season as one
+        # window would be a lie about when it happened.
+        $before = $lastPoll[$pollKey]
+        if ($Live -and $before) {
+            $dw = $row.Won - $before.Won
+            $dl = $row.Lost - $before.Lost
+            if ($dw -ne 0 -or $dl -ne 0) {
+                $null = $activity.Add(("{0}`t{1}`t{2}`t{3}`t{4}`t{5}`t{6}" -f `
+                    $nowEpoch, $bracket.Api, $row.Key, $row.Rating,
+                    ($row.Rating - $before.Rating), $dw, $dl))
+            }
+        }
+
         # The week's movement, when there is a week to compare against.
         $change = ""
         $was = $baseline[$row.Key]
@@ -950,6 +1049,44 @@ foreach ($bracket in $brackets) {
     $rows.Add("`t},")
 }
 
+# ---------------------------------------------------------------- realms
+
+# What each realm is actually called.
+#
+# The ladder carries only a slug -- "raden", "lei-shen", "arugal-au" -- and a
+# slug cannot be turned back into a name by any rule. Every plausible one is
+# wrong somewhere:
+#
+#   raden                 -> Ra-den                 not Raden, not Ra-Den
+#   lei-shen              -> Lei Shen               a space, not a hyphen
+#   arugal-au             -> Arugal (AU)            brackets, and capitals
+#   bloodsail-buccaneers  -> Bloodsail Buccaneers
+#
+# So it is asked rather than derived. One request per run for the whole realm
+# index, which is nothing beside the ladder itself, and only the realms that
+# appear on this region's ladder are written -- the index carries fifty, most of
+# them internal ("US2 CWOW CSI 180") and none of them anybody's realm.
+#
+# Failure is not fatal: without this the addon falls back to the slug it has
+# always shown, which is what it looked like before this existed.
+$realmNames = @{}
+try {
+    $index = Get-Api "/data/wow/realm/index"
+    foreach ($realm in $index.realms) {
+        if ($realm.slug -and $realm.name) { $realmNames[[string]$realm.slug] = [string]$realm.name }
+    }
+} catch {
+    Write-Log "  realm names unavailable, slugs will be shown as they are"
+}
+
+$realmRows = New-Object System.Collections.Generic.List[string]
+foreach ($slug in ($usedRealms.Keys | Sort-Object)) {
+    $name = $realmNames[$slug]
+    if ($name -and $name -ne $slug) {
+        $realmRows.Add(("`t[""{0}""]=""{1}""," -f (Escape-Lua $slug), (Escape-Lua $name)))
+    }
+}
+
 $ladderOut = @"
 -- Shipped as its own addon so the ladder can be republished without reshipping
 -- the code: this file was half of every ArenaPlus release.
@@ -971,11 +1108,21 @@ local ns = ArenaPlusData
 -- No class or spec: the leaderboard endpoint carries neither.
 --
 -- Region $Region, season $season, read $now.
+-- Realm display names, because the ladder only carries slugs and no rule
+-- turns one back into the other: raden is Ra-den, lei-shen is Lei Shen and
+-- arugal-au is Arugal (AU). Read from Blizzard's realm index; a slug with no
+-- entry here is shown as it always was.
+ns.REALM_NAMES = ns.REALM_NAMES or {}
+for slug, name in pairs({
+$($realmRows -join "`n")
+}) do ns.REALM_NAMES[slug] = name end
+
 ns.LEADERBOARD_BY_REGION = ns.LEADERBOARD_BY_REGION or {}
 
 ns.LEADERBOARD_BY_REGION["$Region"] = {
 `tregion  = "$Region",
 `tchecked = "$now",
+`tcheckedEpoch = $nowEpoch,
 `tsnapshot = "$script:snapshot",
 
 $($rows -join "`n")
@@ -994,6 +1141,27 @@ if ($refused -gt 0) {
 if ($baselineAge -ge 7) {
     Set-Content -Path $baselineFile -Value ($nextBaseline -join "`n") -Encoding utf8
     Write-Host ("Baseline replaced: the change columns now measure from today.")
+}
+
+# Every run, NOT once a week.
+#
+# This first went inside the baseline block above, which rewrites itself only
+# when the week is up -- so the activity log recorded one window in seven days
+# and the snapshot it diffs against was a week stale. Caught by there being no
+# files at all after a run that reported success.
+#
+# Appended, never rewritten: this is a log, and the whole point is that older
+# windows stay exactly as they were recorded.
+#
+# The snapshot is written whatever happened, including a run that recorded no
+# activity -- otherwise the next run would diff against a stale poll and
+# report one long session covering both gaps.
+if ($Live) {
+    if ($activity.Count -gt 0) {
+        Add-Content -Path $activityFile -Value ($activity -join "`n") -Encoding utf8
+    }
+    Set-Content -Path $lastFile -Value ($nextPoll -join "`n") -Encoding utf8
+    Write-Log ("  activity: {0} character(s) played since the last poll" -f $activity.Count)
 }
 
 # Gone when the work is: its absence is what says "not running". Removed before
