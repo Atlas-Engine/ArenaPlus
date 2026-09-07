@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## 1.5a
+
+- Clicking a player in the Top PvP gear list now lights up their row, so it is clear whose shopping list is open. Changing spec, bracket or region closes it.
+- The shopping list is no longer a tab in the inspect panel as well. It has its own window beside the auction house.
+- The ladder heading is now a fixed width, so the buttons and flags beside it stop moving when you switch bracket.
+- The alts view is headed "My alts" rather than repeating the bracket you are already in.
+
 ## 1.4c
 
 - Fixes and improvements in Auction house, shopping panel.
