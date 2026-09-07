@@ -1027,10 +1027,49 @@ local function Refresh()
 		list[#list+1]=full[index]
 	end
 
-	window.title:SetText((showingAlts and L.LADDER_TITLE_ALTS or L.LADDER_TITLE)
-		:format(BRACKET_NAMES[bracket] or "?")
-		..L.REGION_TAG:format((ns.RegionFlagMarkup and ns.RegionFlagMarkup(ViewRegion(),12))
-			or ns.RegionShort(ViewRegion())))
+	-- The heading, at the width of the widest bracket rather than its own.
+	--
+	-- Everything across the top hangs off it: the game picker, History, Home,
+	-- and the bracket buttons behind those. So a heading that says "10v10" in
+	-- one bracket and "2v2" in the next dragged the whole row sideways every
+	-- time the bracket changed -- noticed as the icons moving, which is the
+	-- part you see, rather than as two words nobody was reading changing
+	-- length. Mists only, in effect: the Anniversary brackets are all three
+	-- characters and the question never came up.
+	--
+	-- Measured rather than written down as a number. The bracket names come
+	-- from the data addon and the flag is an inline texture, so any constant
+	-- here would be wrong the first time either of them changed.
+	local flag=L.REGION_TAG:format((ns.RegionFlagMarkup and ns.RegionFlagMarkup(ViewRegion(),12))
+		or ns.RegionShort(ViewRegion()))
+	-- The alts view names no bracket at all. It is your characters, and the
+	-- bracket buttons a few points above already say which bracket -- "My 10v10
+	-- alts" spent half the heading repeating them.
+	local heading=showingAlts and L.LADDER_TITLE_ALTS
+		or L.LADDER_TITLE:format(BRACKET_NAMES[bracket] or "?")
+
+	-- One fixed width, found by measuring. The alts heading does not change
+	-- with the bracket, so there is only ever the one thing to measure there;
+	-- the ladder's does, and takes the widest of them.
+	--
+	-- Only the brackets this game has. Rated battlegrounds arrived after the
+	-- Burning Crusade, so the Anniversary ladder has no fourth bracket and no
+	-- reason to hold room for the one word that would have been wider than all
+	-- the rest.
+	local widest=0
+	if showingAlts then
+		window.titleRuler:SetText(heading..flag)
+		widest=window.titleRuler:GetStringWidth() or 0
+	else
+		local last=((ns.ViewVersion and ns.ViewVersion())=="tbc") and 3 or #BRACKET_NAMES
+		for index=1,last do
+			window.titleRuler:SetText(L.LADDER_TITLE:format(BRACKET_NAMES[index])..flag)
+			widest=math.max(widest,window.titleRuler:GetStringWidth() or 0)
+		end
+	end
+
+	window.title:SetWidth(math.ceil(widest))
+	window.title:SetText(heading..flag)
 	-- No place count on the ladder any more: the game picker stands where it
 	-- was. The alts view keeps its own count, which says how many of YOUR
 	-- characters are rated -- a different fact from how big somebody else's
@@ -1342,6 +1381,23 @@ local function CreateWindow()
 
 	frame.title=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightLarge")
 	frame.title:SetPoint("LEFT",frame,"TOPLEFT",16,HEADER_MID)
+	-- Given a width below, and a fixed width needs both of these said out
+	-- loud: a FontString centres its text by default, so "2v2" would sit in
+	-- the middle of a box sized for "10v10" instead of starting where it
+	-- does, and one wide enough to wrap would grow a second line.
+	frame.title:SetJustifyH("LEFT")
+	frame.title:SetWordWrap(false)
+
+	-- Something to measure with that nobody sees.
+	--
+	-- The heading is fixed at the width of its widest bracket, and finding
+	-- that means setting four strings and asking how wide each one came out.
+	-- Done to the heading itself that would be four texts written to a label
+	-- on screen every refresh; done here it is arithmetic.
+	frame.titleRuler=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightLarge")
+	frame.titleRuler:SetPoint("LEFT",frame,"TOPLEFT",16,HEADER_MID)
+	frame.titleRuler:SetWordWrap(false)
+	frame.titleRuler:Hide()
 
 	frame.subtitle=frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
 	frame.subtitle:SetPoint("LEFT",frame.title,"RIGHT",10,0)

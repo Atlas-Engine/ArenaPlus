@@ -239,11 +239,6 @@ L.INSPECT_STATS_NONE      = "No stats on file for this character yet."
 -- The shopping list: gems, enchants and glyphs, everything you would have to
 -- buy to wear what they are wearing. Gems are counted rather than listed one
 -- per socket, because what somebody copying a build needs to know is how many.
---
--- Named for the job rather than the contents. It was "Gems", then "Gems &
--- Enchants", and glyphs made the third name in a row that would have to change
--- again the next time a column moved in.
-L.INSPECT_TAB_SOCKETS     = "Shopping List"
 L.INSPECT_GEMS            = "Gems"
 L.INSPECT_ENCHANTS        = "Enchants"
 L.INSPECT_GEM_COUNT       = "%dx %s"
@@ -392,7 +387,7 @@ L.LADDER_EMPTY            = "No ladder recorded for this bracket."
 -- by where they sit on the ladder. An alt at 1400 has no ladder place at all,
 -- which is the whole reason this cannot just filter the ladder.
 L.LADDER_ALTS             = "My alts"
-L.LADDER_TITLE_ALTS       = "My %s alts"
+L.LADDER_TITLE_ALTS       = "My alts"
 L.LADDER_SUBTITLE_ALTS    = "%d rated"
 L.LADDER_NO_ALTS          = "None of your characters has a rating in this bracket."
 -- For an alt the ladder does not list: the store keeps how many games it has

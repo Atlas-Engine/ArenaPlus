@@ -190,6 +190,27 @@ local function House()
 	return AuctionHouseFrame or AuctionFrame
 end
 
+-- Which player the shopping list beside this is showing.
+--
+-- The list is a window of its own with its own title, so without this the
+-- panel that opened it gave no sign of which of five rows it came from --
+-- and reading four gem names is exactly when you look back at the list to
+-- check you clicked the right person.
+--
+-- Cleared rather than remembered: it is the state of a window that is open
+-- right now, and a lit row with nothing beside it would be a lie.
+local function ChooseRow(chosen)
+	if not (panel and panel.rows) then return end
+	for _, row in ipairs(panel.rows) do
+		if row.chosen then row.chosen:SetShown(row == chosen) end
+	end
+end
+
+-- Called by the shopping list when it closes, however it closed.
+function ns.AuctionPvPClearChoice()
+	ChooseRow(nil)
+end
+
 local function BuildPanel()
 	if panel then return panel end
 
@@ -336,6 +357,14 @@ local function BuildPanel()
 		glow:SetColorTexture(1, 1, 1, 0.10)
 		row:SetHighlightTexture(glow)
 
+		-- The row whose list is open. ARTWORK rather than OVERLAY, so it
+		-- lies under the name and the rating instead of washing over them,
+		-- and faint: this says which of five, not look at me.
+		row.chosen = row:CreateTexture(nil, "ARTWORK")
+		row.chosen:SetAllPoints()
+		row.chosen:SetColorTexture(1, 0.82, 0, 0.14)
+		row.chosen:Hide()
+
 		row.rank = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 		row.rank:SetPoint("LEFT", 2, 0)
 		row.rank:SetWidth(28)
@@ -371,9 +400,13 @@ local function BuildPanel()
 			-- auctioneer is looking at -- and which, on a UI where three windows
 			-- that wide do not fit across the screen, covered the auction house
 			-- itself.
-			if ns.ToggleShoppingList then
-				ns.ToggleShoppingList(self.entry, region)
-			end
+			--
+			-- The row lights up while its list is open, and goes dark again
+			-- when the same row closes it -- which is why the toggle answers
+			-- with what it did rather than being told twice.
+			local open = ns.ToggleShoppingList
+				and ns.ToggleShoppingList(self.entry, region)
+			ChooseRow(open and self or nil)
 		end)
 
 		row:Hide()
@@ -449,6 +482,14 @@ function ns.AuctionPvPShow(spec)
 	local classSlug = MyClassSlug() or ""
 
 	panel.spec = spec
+
+	-- Whatever list was open belonged to a player who is about to stop being
+	-- on screen. Every path into here is a change of what this panel is
+	-- showing -- another spec, another bracket, another region -- and a
+	-- shopping list left standing beside a list it is no longer part of
+	-- reads as belonging to whoever now sits in that row.
+	if ns.CloseShoppingList then ns.CloseShoppingList() end
+	ChooseRow(nil)
 
 	-- The chosen spec in colour, the others grey. Desaturated rather than
 	-- merely dimmed: three lit icons with one slightly brighter is a thing you

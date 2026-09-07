@@ -626,8 +626,8 @@ local function FillSlot(button,record,tinker,slotKey)
 	-- Quality comes from GetItemInfo, which is the slow one: it answers nil
 	-- until the client has the item, and the icon above deliberately uses the
 	-- instant call so the slot is never blank. So the edge is grey until the
-	-- name arrives and coloured afterwards -- the sockets tab already asks for
-	-- these items, and looking at a character asks for them again.
+	-- name arrives and coloured afterwards -- the shopping list already asks
+	-- for these items, and looking at a character asks for them again.
 	local quality=select(3,GetItemInfo(record[1]))
 	if quality and GetItemQualityColor then
 		local r,g,b=GetItemQualityColor(quality)
@@ -1213,70 +1213,14 @@ end
 -- edge of a model -- fine for "what is in their gloves", useless for "what do I
 -- need to buy". Counted and named instead: four Delicate Primordial Rubies is a
 -- thing you can take to the auction house.
+--
+-- This is the filling of it. The window it goes in is built at the foot of
+-- the file, beside the auction house it shops from -- it was a fifth tab in
+-- here first, which put a 660 point window carrying a paper doll and a talent
+-- tree in front of the auction house every time somebody wanted four gem
+-- names.
 
 local SOCKET_ROWS = 14
-
-local function BuildSocketsPage(parent)
-	local page=CreateFrame("Frame",nil,parent)
-	page:SetPoint("TOPLEFT",14,TOP)
-	page:SetPoint("BOTTOMRIGHT",-14,44)
-	page:Hide()
-
-	-- Three columns across the full width, each as wide as what it holds: the
-	-- enchant lines carry a slot name in front of them and run longest, the
-	-- glyph names run shortest.
-	local function Column(x, width, title)
-		local head=page:CreateFontString(nil,"OVERLAY","GameFontNormal")
-		head:SetPoint("TOPLEFT",x,-4)
-		head:SetText(title)
-
-		local rows={}
-		for index=1,SOCKET_ROWS do
-			local row=CreateFrame("Button",nil,page)
-			row:SetSize(width,18)
-			if index==1 then
-				row:SetPoint("TOPLEFT",head,"BOTTOMLEFT",0,-6)
-			else
-				row:SetPoint("TOPLEFT",rows[index-1],"BOTTOMLEFT",0,-2)
-			end
-
-			-- Lit under the cursor, because a row that responds to a click has
-			-- to look like one. Without this the list read as static text and
-			-- nobody would think to click it.
-			local glow=row:CreateTexture(nil,"HIGHLIGHT")
-			glow:SetAllPoints()
-			glow:SetColorTexture(1,1,1,0.10)
-			row:SetHighlightTexture(glow)
-
-			row.icon=row:CreateTexture(nil,"ARTWORK")
-			row.icon:SetSize(16,16)
-			row.icon:SetPoint("LEFT")
-			row.icon:SetTexCoord(0.07,0.93,0.07,0.93)
-
-			row.text=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-			row.text:SetPoint("LEFT",row.icon,"RIGHT",6,0)
-			row.text:SetPoint("RIGHT")
-			row.text:SetJustifyH("LEFT")
-
-			row:Hide()
-			rows[index]=row
-		end
-
-		-- Kept so a whole column can be taken away, heading and all.
-		rows.head=head
-		return rows
-	end
-
-	page.gems=Column(0,190,L.INSPECT_GEMS)
-	page.enchants=Column(198,250,L.INSPECT_ENCHANTS)
-	page.glyphs=Column(456,176,L.INSPECT_GLYPHS)
-
-	page.hint=page:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
-	page.hint:SetPoint("BOTTOMLEFT",0,4)
-	page.hint:SetText(L.INSPECT_AH_HINT)
-
-	return page
-end
 
 -- Search the auction house for one item, and for as many as they are wearing.
 --
@@ -1702,19 +1646,16 @@ end
 -- the item, so the borders start grey and have to be painted again once it
 -- does.
 local socketGear
-local socketGlyphs
-local socketClass
 local socketTinkers
 local socketWatcher
 
--- What each of the two lists was last filled with, so the item-info
--- watcher below can fill it again once the names arrive.
+-- What the shopping list was last filled with, so the item-info watcher
+-- below can fill it again once the names arrive.
 --
--- Two, and kept apart on purpose: the ladder's panel and the auction
--- house's shopping window can be showing different people at the same
--- moment, and one shared copy of "the gear" would repaint one of them
--- with the other one's items.
-local socketJob
+-- Kept apart from socketGear beside it, which is the same idea for the
+-- paper doll: the two windows can be showing different people at the same
+-- moment, and one shared copy of "the gear" would repaint one of them with
+-- the other one's items.
 local shopJob
 
 -- The shopping window itself, built at the foot of this file. Declared
@@ -1723,9 +1664,8 @@ local shopJob
 local shop
 local LayoutShop
 
--- Fills one of the two lists. The page is passed in rather than looked up
--- because there are now two of them with the same shape: the tab inside the
--- inspect panel, and the standalone window at the auction house.
+-- The page is passed in rather than reached for, because the window that
+-- holds it is built four hundred lines below this.
 local function FillSockets(page,gear,glyphs,class)
 	if not page then return end
 
@@ -2000,45 +1940,47 @@ local function FillSockets(page,gear,glyphs,class)
 		page.glyphs[1]:Show()
 	end
 
-	-- Something is still on its way, always: gem names here, and over on the
-	-- paper doll the item qualities that colour the slot borders. Registered
-	-- while the window is open rather than only when this tab noticed a gap --
-	-- the tab that needs the answer is not always the tab that asked.
-	--
-	-- Unregistered when the window closes, since nothing outside it cares.
-	do
-		if not socketWatcher then
-			socketWatcher=CreateFrame("Frame")
-			socketWatcher:SetScript("OnEvent",function()
-				-- Each list against its own character.
-				if socketJob and frame and frame:IsShown() then
-					FillSockets(frame.pages.sockets,
-						socketJob.gear,socketJob.glyphs,socketJob.class)
-				end
-				if shopJob and shop and shop:IsShown() then
-					FillSockets(shop.page,shopJob.gear,shopJob.glyphs,shopJob.class)
-					-- A name that arrives can be the first thing in its section,
-					-- which moves everything under it and the window's own height.
-					if LayoutShop then LayoutShop() end
-				end
+end
 
-				if not socketGear then return end
+-- Something is still on its way, always: gem names on the shopping list,
+-- and over on the paper doll the item qualities that colour the slot
+-- borders.
+--
+-- Asked for by whichever window opened, rather than by the page that
+-- noticed a gap -- the page that needs the answer is not always the page
+-- that asked. It used to sit at the foot of FillSockets, which worked only
+-- while filling a list was something the inspect panel did; now that the
+-- list has its own window, a panel opened from the ladder would never have
+-- registered it and its slot borders would have stayed grey.
+--
+-- Unregistered when both windows are closed, since nothing else cares.
+local function WatchItems()
+	if not socketWatcher then
+		socketWatcher=CreateFrame("Frame")
+		socketWatcher:SetScript("OnEvent",function()
+			if shopJob and shop and shop:IsShown() then
+				FillSockets(shop.page,shopJob.gear,shopJob.glyphs,shopJob.class)
+				-- A name that arrives can be the first thing in its section,
+				-- which moves everything under it and the window's own height.
+				if LayoutShop then LayoutShop() end
+			end
 
-				-- And the slots, whose borders were grey while the item was
-				-- still on its way.
-				if frame and frame.pages and frame.pages.character then
-					for slotKey,button in pairs(frame.pages.character.slots) do
-						FillSlot(button,socketGear[slotKey],(socketTinkers or {})[slotKey],slotKey)
-					end
+			if not socketGear then return end
+
+			-- And the slots, whose borders were grey while the item was
+			-- still on its way.
+			if frame and frame.pages and frame.pages.character then
+				for slotKey,button in pairs(frame.pages.character.slots) do
+					FillSlot(button,socketGear[slotKey],(socketTinkers or {})[slotKey],slotKey)
 				end
+			end
 
-				-- And the stats page, whose PvP totals are summed from those
-				-- same items and were left blank while they loaded.
-				if statsFor then FillStats(statsFor.v,statsFor.gear) end
-			end)
-		end
-		socketWatcher:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+			-- And the stats page, whose PvP totals are summed from those
+			-- same items and were left blank while they loaded.
+			if statsFor then FillStats(statsFor.v,statsFor.gear) end
+		end)
 	end
+	socketWatcher:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 end
 
 -- ---------------------------------------------------------------- stats
@@ -2395,27 +2337,6 @@ local function ShowPage(which)
 	end
 end
 
--- The shopping list is a tab only where it can be used.
---
--- Every line on it searches the auction house, so away from one the page is a
--- list of things you cannot do anything about -- and a fifth tab that is inert
--- most of the time is worse than a window that grows one when it matters. It
--- appears when the auction house is open, which is also the only way the
--- auction house panel reaches this window in the first place.
---
--- Last in the tab row, so its coming and going leaves no gap in the middle.
-local function ShowShoppingTab()
-	local tab=frame and frame.tabs and frame.tabs.sockets
-	if not tab then return end
-
-	local shopping=AuctionHouseIsOpen()
-	tab:SetShown((shopping and frame.hasData) and true or false)
-
-	-- Walking away from the auctioneer with the list open: back to the paper
-	-- doll, rather than leaving a page up whose every row has stopped working.
-	if not shopping and frame.page=="sockets" then ShowPage("character") end
-end
-
 local function BuildWindow()
 	if frame then return frame end
 
@@ -2551,7 +2472,6 @@ local function BuildWindow()
 		pvp       = BuildPvPPage(frame),
 		talents   = BuildTalentsPage(frame),
 		stats     = BuildStatsPage(frame),
-		sockets   = BuildSocketsPage(frame),
 	}
 
 	-- Tabs along the foot, in Blizzard's order. Their own template if this
@@ -2560,12 +2480,11 @@ local function BuildWindow()
 	-- down with it.
 	frame.tabs={}
 	--
-	-- Stats sits next to the paper doll because it answers the other half of the
-	-- same question, and the shopping list stays last so that its coming and
-	-- going leaves no hole in the middle of the row.
+	-- Stats sits next to the paper doll because it answers the other half of
+	-- the same question. A fifth tab used to follow, the shopping list, shown
+	-- only while the auction house was open; it has its own window now.
 	local order={ { "character", L.INSPECT_TAB_CHARACTER }, { "stats", L.INSPECT_TAB_STATS },
-		{ "pvp", L.INSPECT_TAB_PVP }, { "talents", L.INSPECT_TAB_TALENTS },
-		{ "sockets", L.INSPECT_TAB_SOCKETS } }
+		{ "pvp", L.INSPECT_TAB_PVP }, { "talents", L.INSPECT_TAB_TALENTS } }
 	local previous
 	for index,pair in ipairs(order) do
 		local key,label=pair[1],pair[2]
@@ -2694,22 +2613,6 @@ local function BuildWindow()
 
 		SlotTooltip(owner)
 		lastLines=GameTooltip:NumLines()
-	end)
-
-	-- The auction house opening or closing underneath an open window.
-	local house=CreateFrame("Frame",nil,frame)
-	house:RegisterEvent("AUCTION_HOUSE_SHOW")
-	house:RegisterEvent("AUCTION_HOUSE_CLOSED")
-	house:SetScript("OnEvent",function(_,event)
-		-- The shopping window goes with the house it was hanging off.
-		-- Escape appeared to do this already, but only because that window
-		-- is a UISpecialFrame and Escape hides every one of those; the
-		-- house's own X button is not Escape, and that path left it behind,
-		-- anchored to a shelf hidden underneath it.
-		if event=="AUCTION_HOUSE_CLOSED" and ns.CloseShoppingList then
-			ns.CloseShoppingList()
-		end
-		if frame:IsShown() then ShowShoppingTab() end
 	end)
 
 	return frame
@@ -2863,7 +2766,6 @@ function ns.ShowInspect(entry,region,bracket)
 	-- has anything to draw.
 	frame.hasData=true
 	for _,tab in pairs(frame.tabs) do tab:Show() end
-	ShowShoppingTab()
 
 	-- Where the slot tooltips can reach them, keyed by set.
 	frame.setCounts={}
@@ -2890,8 +2792,6 @@ function ns.ShowInspect(entry,region,bracket)
 	local tinkers=data.k or {}
 	socketTinkers=tinkers
 	socketGear=gear
-	socketGlyphs=data.y
-	socketClass=entry.class
 	for slotKey,button in pairs(frame.pages.character.slots) do
 		FillSlot(button,gear[slotKey],tinkers[slotKey],slotKey)
 	end
@@ -3107,9 +3007,11 @@ function ns.ShowInspect(entry,region,bracket)
 	ShowPage("character")
 	frame:Show()
 
-	socketJob={ gear=gear, glyphs=data.y, class=entry.class }
-	FillSockets(frame.pages.sockets,gear,data.y,entry.class)
 	FillStats(data.v,gear)
+
+	-- Half these items are usually still loading, and the slot borders and the
+	-- PvP totals both depend on them.
+	WatchItems()
 
 	-- After Show, never before: see DressWhenReady.
 	local look={ race=data.r or 0, gender=data.x or 0 }
@@ -3253,7 +3155,11 @@ local function BuildShopWindow()
 	tinsert(UISpecialFrames,"ArenaPlus_InspectShop")
 
 	shop:SetScript("OnHide",function()
-		-- Unless the inspect panel is still up: the same watcher feeds both.
+		-- The row that opened this goes dark with it, whichever way it was
+		-- closed -- its own X, Escape, or the auction house going away.
+		if ns.AuctionPvPClearChoice then ns.AuctionPvPClearChoice() end
+
+		-- The watcher stays unless the inspect panel is up: it feeds both.
 		if frame and frame:IsShown() then return end
 		if socketWatcher then socketWatcher:UnregisterEvent("GET_ITEM_INFO_RECEIVED") end
 	end)
@@ -3472,7 +3378,7 @@ function ns.ShowShoppingList(entry,region)
 	-- it costs nothing to read and closes nothing that was already open.
 	if not data then
 		ns.Print("%s -- %s",who,entry.hidden and L.INSPECT_HIDDEN or L.INSPECT_NOT_COVERED)
-		return
+		return false
 	end
 
 	shop.showing=WhoKey(entry,region)
@@ -3483,13 +3389,19 @@ function ns.ShowShoppingList(entry,region)
 	shopJob={ gear=gear, glyphs=data.y, class=entry.class }
 	FillSockets(shop.page,gear,data.y,entry.class)
 
+	WatchItems()
+
 	-- In this order: the rows decide the height, the height decides the scale,
 	-- and the scale decides whether it fits beside the shelf.
 	LayoutShop()
 	AttachShop()
 	shop:Show()
+	return true
 end
 
+-- Answers with whether the window is open afterwards, which is not the same
+-- as whether it did anything: the row that opened it lights up on the way
+-- back, and a hidden profile has nothing to show and nothing to light.
 function ns.ToggleShoppingList(entry,region)
 	-- Only the same person again closes it. Clicking a different row means
 	-- "show me them instead", which closing and reopening would achieve and
@@ -3497,9 +3409,9 @@ function ns.ToggleShoppingList(entry,region)
 	if shop and shop:IsShown() and shop.showing
 		and shop.showing==WhoKey(entry,region) then
 		shop:Hide()
-		return
+		return false
 	end
-	ns.ShowShoppingList(entry,region)
+	return ns.ShowShoppingList(entry,region) and true or false
 end
 
 -- Open on a particular tab.
