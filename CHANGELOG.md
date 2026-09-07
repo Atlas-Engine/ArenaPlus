@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 1.5b
+
+- Fixes and improvements in Shared code, Match history, Ladder window, Auction house, Inspect panel.
+
 ## 1.5a
 
 - Clicking a player in the Top PvP gear list now lights up their row, so it is clear whose shopping list is open. Changing spec, bracket or region closes it.
@@ -91,6 +95,7 @@
 - Fixed characters with the same name on different realms showing each other's rank and rating.
 - Press Enter in the ladder search to step between characters sharing a name.
 - Changing page in the ladder now returns to the top of the list.
+
 
 
 
