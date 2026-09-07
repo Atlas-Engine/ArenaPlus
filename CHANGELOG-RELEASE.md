@@ -1,1 +1,1 @@
-﻿- Added cutoffs for TBC, fixed bunch of stuff.
+﻿- Fixes and improvements in Auction house, shopping panel.
