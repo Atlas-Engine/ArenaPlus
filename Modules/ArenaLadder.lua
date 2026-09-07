@@ -1908,7 +1908,7 @@ local function CreateWindow()
 	end
 
 
-	local close=CreateFrame("Button",nil,frame,"UIPanelCloseButton")
+	local close=ns.CloseButton(frame)
 	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0)
 
 	-- Find somebody the same way the window finds you: bring their row to the
@@ -2526,6 +2526,16 @@ function ns.ToggleLadder()
 	-- they are both centred on the screen, so without this they simply stack on
 	-- top of each other.
 	if ns.CloseArenaHistory then ns.CloseArenaHistory() end
+
+	-- Opens on 2v2, whatever you last played.
+	--
+	-- With nothing chosen, ViewBracket falls back to your last game. That is
+	-- right for the match history, where the games are yours, and wrong here:
+	-- a leaderboard is not about you, and 2v2 is where one starts. Written as
+	-- a choice rather than changed in the fallback, so the history keeps it.
+	--
+	-- After the history is closed, since its own OnHide clears the choice.
+	if ns.SetViewBracket then ns.SetViewBracket(1) end
 
 	Anchor(frame)
 	frame:Show()

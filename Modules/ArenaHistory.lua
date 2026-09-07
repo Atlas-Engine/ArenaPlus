@@ -2567,7 +2567,7 @@ local function CreateWindow()
 	frame.today:SetTextColor(0.75,0.75,0.75)
 	frame.today:Hide()
 
-	local close=CreateFrame("Button",nil,frame,"UIPanelCloseButton")
+	local close=ns.CloseButton(frame)
 	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0)
 
 	-- To the ladder, keeping the bracket. The mirror of the button on the other

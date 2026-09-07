@@ -264,7 +264,7 @@ local function BuildPanel()
 	panel.title:SetPoint("TOP", 0, -14)
 	panel.title:SetText(L.AH_PVP_TITLE)
 
-	local close = CreateFrame("Button", nil, panel, "UIPanelCloseButton")
+	local close = ns.CloseButton(panel)
 	close:SetPoint("TOPRIGHT", -4, -4)
 
 	-- Filled in by RefreshSpecs, which runs every time the window opens rather

@@ -1206,6 +1206,33 @@ function ns.StyleAsPanel(frame)
 	tint:SetBackdropBorderColor(TOOLTIP_DEFAULT_COLOR.r,TOOLTIP_DEFAULT_COLOR.g,TOOLTIP_DEFAULT_COLOR.b)
 end
 
+-- The X in the corner.
+--
+-- Reported on Anniversary: the inspect panel could not be closed in combat.
+-- Out of combat the same X worked, so it is not the button.
+--
+-- Blizzard's template does not hide its parent, it calls HideUIPanel -- which
+-- is the panel manager, deals in attributes and layout, and has its own reasons
+-- for declining to act while the doors are locked. Rather than work out which
+-- of them applied on that client, the manager is left out of it: none of these
+-- windows is registered in UIPanelWindows, so hiding the frame is what
+-- HideUIPanel would have arrived at anyway.
+--
+-- Every window here shares this, because every one of them had the same button.
+--
+-- SetScript rather than HookScript: the template's own click is the thing being
+-- replaced, and a hook would leave it running as well.
+function ns.CloseButton(parent)
+	local close=CreateFrame("Button",nil,parent,"UIPanelCloseButton")
+	close:SetScript("OnClick",function(self)
+		if PlaySound and SOUNDKIT and SOUNDKIT.IG_MAINMENU_CLOSE then
+			PlaySound(SOUNDKIT.IG_MAINMENU_CLOSE)
+		end
+		self:GetParent():Hide()
+	end)
+	return close
+end
+
 
 ----------------------------------------------------------------
 -- Settings
@@ -1248,7 +1275,7 @@ local function CreateConfig()
 	title:SetPoint("TOPLEFT",frame,"TOPLEFT",16,-14)
 	title:SetText(L.WINDOW_TITLE)
 
-	local close=CreateFrame("Button",nil,frame,"UIPanelCloseButton")
+	local close=ns.CloseButton(frame)
 	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0)
 
 	local y=44

@@ -2434,7 +2434,7 @@ local function BuildWindow()
 	frame.subtitle:SetPoint("TOPLEFT",frame.title,"BOTTOMLEFT",0,-4)
 	frame.subtitle:SetTextColor(0.55,0.55,0.55)
 
-	local close=CreateFrame("Button",nil,frame,"UIPanelCloseButton")
+	local close=ns.CloseButton(frame)
 	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0)
 
 	-- Professions, up beside the name rather than down among the gear: it is a
@@ -3208,7 +3208,7 @@ local function BuildShopWindow()
 	shop.specLine:SetPoint("TOPLEFT",shop.title,"BOTTOMLEFT",0,-2)
 	shop.specLine:SetJustifyH("LEFT")
 
-	local close=CreateFrame("Button",nil,shop,"UIPanelCloseButton")
+	local close=ns.CloseButton(shop)
 	close:SetPoint("TOPRIGHT",shop,"TOPRIGHT",0,0)
 
 	local list=CreateFrame("Frame",nil,shop)
