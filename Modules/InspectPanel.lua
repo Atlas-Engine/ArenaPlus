@@ -1707,13 +1707,27 @@ local socketClass
 local socketTinkers
 local socketWatcher
 
-local function FillSockets(gear,glyphs,class)
-	local page=frame and frame.pages and frame.pages.sockets
-	if not page then return end
+-- What each of the two lists was last filled with, so the item-info
+-- watcher below can fill it again once the names arrive.
+--
+-- Two, and kept apart on purpose: the ladder's panel and the auction
+-- house's shopping window can be showing different people at the same
+-- moment, and one shared copy of "the gear" would repaint one of them
+-- with the other one's items.
+local socketJob
+local shopJob
 
-	socketGear=gear
-	socketGlyphs=glyphs
-	socketClass=class
+-- The shopping window itself, built at the foot of this file. Declared
+-- here because the watcher closes over both, and a local declared later is
+-- not the same name -- the closure would read a nil global instead.
+local shop
+local LayoutShop
+
+-- Fills one of the two lists. The page is passed in rather than looked up
+-- because there are now two of them with the same shape: the tab inside the
+-- inspect panel, and the standalone window at the auction house.
+local function FillSockets(page,gear,glyphs,class)
+	if not page then return end
 
 	-- Set here rather than when the page was built: Auctionator can be
 	-- disabled between sessions, and a line promising a search that cannot
@@ -1996,9 +2010,19 @@ local function FillSockets(gear,glyphs,class)
 		if not socketWatcher then
 			socketWatcher=CreateFrame("Frame")
 			socketWatcher:SetScript("OnEvent",function()
-				if not socketGear then return end
+				-- Each list against its own character.
+				if socketJob and frame and frame:IsShown() then
+					FillSockets(frame.pages.sockets,
+						socketJob.gear,socketJob.glyphs,socketJob.class)
+				end
+				if shopJob and shop and shop:IsShown() then
+					FillSockets(shop.page,shopJob.gear,shopJob.glyphs,shopJob.class)
+					-- A name that arrives can be the first thing in its section,
+					-- which moves everything under it and the window's own height.
+					if LayoutShop then LayoutShop() end
+				end
 
-				FillSockets(socketGear,socketGlyphs,socketClass)
+				if not socketGear then return end
 
 				-- And the slots, whose borders were grey while the item was
 				-- still on its way.
@@ -2441,6 +2465,9 @@ local function BuildWindow()
 
 	-- Nothing outside this window cares what items have finished loading.
 	frame:SetScript("OnHide",function()
+		-- Unless the shopping window is still up: it is fed by the same
+		-- watcher, and would stop filling in gem names halfway.
+		if shop and shop:IsShown() then return end
 		if socketWatcher then socketWatcher:UnregisterEvent("GET_ITEM_INFO_RECEIVED") end
 	end)
 
@@ -2670,10 +2697,18 @@ local function BuildWindow()
 	end)
 
 	-- The auction house opening or closing underneath an open window.
-	local shop=CreateFrame("Frame",nil,frame)
-	shop:RegisterEvent("AUCTION_HOUSE_SHOW")
-	shop:RegisterEvent("AUCTION_HOUSE_CLOSED")
-	shop:SetScript("OnEvent",function()
+	local house=CreateFrame("Frame",nil,frame)
+	house:RegisterEvent("AUCTION_HOUSE_SHOW")
+	house:RegisterEvent("AUCTION_HOUSE_CLOSED")
+	house:SetScript("OnEvent",function(_,event)
+		-- The shopping window goes with the house it was hanging off.
+		-- Escape appeared to do this already, but only because that window
+		-- is a UISpecialFrame and Escape hides every one of those; the
+		-- house's own X button is not Escape, and that path left it behind,
+		-- anchored to a shelf hidden underneath it.
+		if event=="AUCTION_HOUSE_CLOSED" and ns.CloseShoppingList then
+			ns.CloseShoppingList()
+		end
 		if frame:IsShown() then ShowShoppingTab() end
 	end)
 
@@ -2730,6 +2765,51 @@ local function WhoKey(entry,region)
 	return plain(entry.name).."-"..plain(realm).."|"..(region or "")
 end
 
+-- "Shadow Priest", in the class's colour.
+--
+-- On TBC the spec comes off the tree list, whose first entry is the deepest
+-- -- the scraper sorts them that way, so it is simply the front of it. On
+-- Mists the ladder row already carries a spec slug.
+--
+-- Both windows say this, which is why it is a function rather than a dozen
+-- lines in the middle of one of them.
+local function SpecMarkup(data,entry)
+	local specName
+	if type(data.d)=="table" and data.d[1] then
+		specName=tostring(data.d[1])
+	elseif entry.spec and entry.spec~="" and entry.spec~="null" then
+		specName=Titled(entry.spec)
+	end
+
+	local classToken=entry.class and entry.class~="" and entry.class~="null"
+		and (entry.class:upper():gsub("%-","")) or nil
+	local className=classToken
+		and ((LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[classToken])
+			or Titled(entry.class))
+		or nil
+
+	-- A hidden profile publishes neither, and half of "Rogue" on its own
+	-- says less than nothing.
+	if not (specName and className) then return "" end
+
+	local colour=classToken and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken]
+	local text=specName.." "..className
+
+	-- colorStr is the game's own "ffRRGGBB" for the class. Preferred to
+	-- formatting r/g/b: those are floats, and %x on a float is a thing Lua 5.1
+	-- handles by truncating rather than by refusing, which is the kind of
+	-- nearly-right that shows up as an off-by-one colour.
+	if colour and colour.colorStr then
+		return ("|c%s%s|r"):format(colour.colorStr,text)
+	elseif colour then
+		return ("|cff%02x%02x%02x%s|r"):format(
+			math.floor(colour.r*255+0.5),math.floor(colour.g*255+0.5),
+			math.floor(colour.b*255+0.5),text)
+	end
+
+	return text
+end
+
 function ns.ShowInspect(entry,region,bracket)
 	if type(entry)~="table" or not entry.name then return end
 
@@ -2755,46 +2835,7 @@ function ns.ShowInspect(entry,region,bracket)
 	frame.showing=WhoKey(entry,region)
 	frame.title:SetText(who)
 
-	-- The spec, then the class.
-	--
-	-- On TBC it comes off the tree list, whose first entry is the deepest --
-	-- the scraper sorts them that way, so the spec is simply the front of it.
-	-- On Mists the ladder row already carries a spec slug.
-	local specName
-	if type(data.d)=="table" and data.d[1] then
-		specName=tostring(data.d[1])
-	elseif entry.spec and entry.spec~="" and entry.spec~="null" then
-		specName=Titled(entry.spec)
-	end
-
-	local classToken=entry.class and entry.class~="" and entry.class~="null"
-		and (entry.class:upper():gsub("%-","")) or nil
-	local className=classToken
-		and ((LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[classToken])
-			or Titled(entry.class))
-		or nil
-
-	if specName and className then
-		local colour=classToken and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken]
-		local text=specName.." "..className
-		-- colorStr is the game's own "ffRRGGBB" for the class. Preferred to
-		-- formatting r/g/b: those are floats, and %x on a float is a thing Lua
-		-- 5.1 handles by truncating rather than by refusing, which is the kind
-		-- of nearly-right that shows up as an off-by-one colour.
-		if colour and colour.colorStr then
-			frame.specLine:SetText(("|c%s%s|r"):format(colour.colorStr,text))
-		elseif colour then
-			frame.specLine:SetText(("|cff%02x%02x%02x%s|r"):format(
-				math.floor(colour.r*255+0.5),math.floor(colour.g*255+0.5),
-				math.floor(colour.b*255+0.5),text))
-		else
-			frame.specLine:SetText(text)
-		end
-	else
-		-- A hidden profile publishes neither, and half of "Rogue" on its own
-		-- says less than nothing.
-		frame.specLine:SetText("")
-	end
+	frame.specLine:SetText(SpecMarkup(data,entry))
 
 	-- Coloured by the cutoffs, the same as on the ladder, so a gladiator rating
 	-- reads as one here too. Only when the caller said which bracket these
@@ -2848,6 +2889,9 @@ function ns.ShowInspect(entry,region,bracket)
 	end
 	local tinkers=data.k or {}
 	socketTinkers=tinkers
+	socketGear=gear
+	socketGlyphs=data.y
+	socketClass=entry.class
 	for slotKey,button in pairs(frame.pages.character.slots) do
 		FillSlot(button,gear[slotKey],tinkers[slotKey],slotKey)
 	end
@@ -3055,23 +3099,16 @@ function ns.ShowInspect(entry,region,bracket)
 	-- Always opens on the paper doll, whatever tab was left showing last time:
 	-- the row that was clicked is a person, and the gear is what "look at them"
 	-- means.
-	-- Where it opens depends on what opened it, and this is the only place that
-	-- decides. Against the auction house's panel when that panel is up -- the
-	-- third in a row of three -- and a free window in the middle otherwise.
 	--
-	-- Only detaches if it was attached, so a window dragged somewhere while
-	-- reading the ladder stays where it was put.
-	local shelf=_G.ArenaPlus_AuctionPvP
-	if shelf and shelf:IsShown() then
-		if ns.InspectAttachToAuction then ns.InspectAttachToAuction() end
-	elseif frame.attached and ns.InspectDetachFromAuction then
-		ns.InspectDetachFromAuction()
-	end
-
+	-- Always a window of its own, wherever it was last dragged. This used to
+	-- hang off the auction house's panel when that panel was up, which is what
+	-- the auction house's own shopping window does now -- at a third of the
+	-- width, because it holds a list rather than a paper doll.
 	ShowPage("character")
 	frame:Show()
 
-	FillSockets(gear,data.y,entry.class)
+	socketJob={ gear=gear, glyphs=data.y, class=entry.class }
+	FillSockets(frame.pages.sockets,gear,data.y,entry.class)
 	FillStats(data.v,gear)
 
 	-- After Show, never before: see DressWhenReady.
@@ -3102,6 +3139,9 @@ end
 -- parented to the auction house frame, which carries its own effective
 -- scale, and comparing a raw GetRight() against UIParent:GetWidth() would
 -- silently mix the two coordinate spaces.
+--
+-- The room on the far side is measured too, because on a cramped UI there
+-- is more of it: see AttachedPlacement below.
 local function RoomBeside(shelf)
 	if not (UIParent and shelf and shelf.GetRight) then return nil end
 
@@ -3109,61 +3149,357 @@ local function RoomBeside(shelf)
 	local theirs=shelf:GetEffectiveScale()
 	if not (ours and theirs and ours>0) then return nil end
 
-	local right,top=shelf:GetRight(),shelf:GetTop()
-	if not (right and top) then return nil end
+	local left,right,top=shelf:GetLeft(),shelf:GetRight(),shelf:GetTop()
+	if not (left and right and top) then return nil end
 
 	-- The 11 is the border overlap the anchor below takes back.
-	return UIParent:GetWidth()-(right*theirs/ours)+11,top*theirs/ours
+	local factor=theirs/ours
+	return UIParent:GetWidth()-(right*factor)+11,top*factor,(left*factor)+11
 end
 
-local function AttachedScale(shelf)
-	local standalone=(ns.FitScale and ns.FitScale(WIDTH,HEIGHT,1)) or 1
+-- Which side of the shelf, how big, and how far back onto the screen --
+-- three answers that depend on each other, so they are worked out together.
+--
+-- Right of the shelf is where this belongs: house, top players, their gems.
+-- But UI Scale decides how much screen there is in UI units, not the
+-- monitor, and at a high setting the house alone is most of it. A friend at
+-- 2560x1440 had the gems and the whole tab row off the right-hand edge,
+-- because a scale that does not fit still gets drawn at that scale.
+--
+-- So when the row will not fit, the panel goes on the far side of the shelf
+-- instead. That covers the auction list rather than cutting this window in
+-- half, and it leaves the shelf itself clickable, which is what picks the
+-- next player.
+local function AttachedPlacement(shelf,width,height)
+	local standalone=(ns.FitScale and ns.FitScale(width,height,1)) or 1
 
-	local across,down=RoomBeside(shelf)
-	if not across then return standalone end
+	local across,down,back=RoomBeside(shelf)
+	if not across then return "right",standalone,0,0 end
+
+	local side,room="right",across
+	if across<width*standalone and back and back>across then
+		side,room="left",back
+	end
 
 	-- Never larger than it would be on its own: attaching can only ever take
 	-- room away.
-	local fits=math.min(across/WIDTH,down/HEIGHT,standalone)
+	local fits=math.min(room/width,down/height,standalone)
 
-	-- The same floor ns.FitScale uses. Below this it cannot be read, and an
-	-- unreadable panel is no better than one off the edge -- but this one is
-	-- clamped to the screen, so it stays reachable either way.
-	return math.max(fits,0.65)
+	-- A floor, because past a point the gem names cannot be read and an
+	-- unreadable panel is no better than one off the edge. Lower than the
+	-- standalone floor ns.FitScale uses: a window in the middle of the screen
+	-- has the whole screen to fit in, and this one has whatever the auction
+	-- house left over.
+	local scale=math.max(fits,0.55)
+
+	-- Whatever the floor could not fix is moved rather than shrunk, so the
+	-- edge of the screen is the one thing that never cuts this window. The
+	-- offsets are in the panel's own units, which is why they are divided by
+	-- its scale.
+	local x,y=0,0
+	local over=width*scale-room
+	if over>0 then x=(side=="left" and over or -over)/scale end
+
+	local under=height*scale-down
+	if under>0 then y=under/scale end
+
+	return side,scale,x,y
 end
 
-function ns.InspectAttachToAuction()
-	local shelf=_G.ArenaPlus_AuctionPvP
-	if not (frame and shelf) then return false end
+-- ------------------------------------------------------- shopping window
 
-	frame.attached=true
-	frame:ClearAllPoints()
-	-- The same eleven as everywhere else: our opaque layer starts that far in,
+-- The gems, enchants and glyphs on their own, beside the auction house.
+--
+-- This was the inspect panel opened on its shopping tab. That panel is 660
+-- points wide because it also holds a paper doll and a talent tree, and
+-- three windows that wide do not fit across a screen -- the house, the list
+-- of top players, and this. How much screen there is is measured in UI
+-- units, which UI Scale decides rather than the monitor, so the third window
+-- either ran off the edge or covered the auction house it was shopping from.
+-- Both were reported within a day of each other.
+--
+-- Nobody at an auctioneer is admiring a transmog. They want four gem names
+-- and somewhere to click them, so this is that and nothing else: one column,
+-- as tall as the list happens to be, at under half the width.
+local SHOP_WIDTH   = 300
+local SHOP_TOP     = -62         -- under the name and the spec
+local SHOP_ROW     = 18
+local SHOP_GAP     = 2           -- between rows
+local SHOP_HEAD    = 22          -- a heading and the air under it
+local SHOP_SECTION = 10          -- between one section and the next
+local SHOP_FOOT    = 14          -- the hint's own inset from the bottom
+
+local function BuildShopWindow()
+	if shop then return shop end
+
+	shop=CreateFrame("Frame","ArenaPlus_InspectShop",UIParent,"BackdropTemplate")
+	shop:Hide()
+	shop:SetSize(SHOP_WIDTH,240)
+	-- The same strata as the inspect panel, and above the auction house for
+	-- the same reason: at HIGH it sat behind the house and read as
+	-- transparent when it was simply covered.
+	shop:SetFrameStrata("FULLSCREEN_DIALOG")
+	shop:SetToplevel(true)
+	shop:EnableMouse(true)
+	shop:SetClampedToScreen(true)
+	shop:SetPoint("CENTER")
+	ns.StyleAsPanel(shop)
+
+	local solid=shop:CreateTexture(nil,"BACKGROUND",nil,-7)
+	solid:SetPoint("TOPLEFT",shop,"TOPLEFT",11,-12)
+	solid:SetPoint("BOTTOMRIGHT",shop,"BOTTOMRIGHT",-12,11)
+	solid:SetColorTexture(0.04,0.04,0.05,1)
+
+	tinsert(UISpecialFrames,"ArenaPlus_InspectShop")
+
+	shop:SetScript("OnHide",function()
+		-- Unless the inspect panel is still up: the same watcher feeds both.
+		if frame and frame:IsShown() then return end
+		if socketWatcher then socketWatcher:UnregisterEvent("GET_ITEM_INFO_RECEIVED") end
+	end)
+
+	-- Draggable only when it is not hanging off the shelf, the same rule the
+	-- inspect panel used to follow: a row of windows you can pull one piece
+	-- out of is a row that ends up wrong.
+	shop:SetMovable(true)
+	shop:RegisterForDrag("LeftButton")
+	shop:SetScript("OnDragStart",function(self)
+		if self.attached then return end
+		self:StartMoving()
+	end)
+	shop:SetScript("OnDragStop",shop.StopMovingOrSizing)
+
+	-- A shorter band than the inspect panel's, holding a name and a spec
+	-- rather than a name, a rating, a rank and a row of professions.
+	local band=shop:CreateTexture(nil,"BORDER")
+	band:SetPoint("TOPLEFT",shop,"TOPLEFT",11,-BAND_INSET)
+	band:SetPoint("TOPRIGHT",shop,"TOPRIGHT",-12,-BAND_INSET)
+	band:SetHeight(40)
+
+	local shaded=false
+	if band.SetGradient and CreateColor then
+		shaded=pcall(band.SetGradient,band,"VERTICAL",
+			CreateColor(0.06,0.07,0.10,1),CreateColor(0.14,0.16,0.22,1))
+	end
+	if not shaded and band.SetGradientAlpha then
+		shaded=pcall(band.SetGradientAlpha,band,"VERTICAL",
+			0.06,0.07,0.10,1,0.14,0.16,0.22,1)
+	end
+	if not shaded then band:SetColorTexture(0.10,0.11,0.15,1) end
+
+	local underline=shop:CreateTexture(nil,"ARTWORK")
+	underline:SetPoint("TOPLEFT",band,"BOTTOMLEFT",0,0)
+	underline:SetPoint("TOPRIGHT",band,"BOTTOMRIGHT",0,0)
+	underline:SetHeight(1)
+	underline:SetColorTexture(1,0.82,0,0.35)
+
+	shop.title=shop:CreateFontString(nil,"OVERLAY","GameFontHighlight")
+	shop.title:SetPoint("TOPLEFT",16,-17)
+	shop.title:SetPoint("RIGHT",shop,"RIGHT",-30,0)
+	shop.title:SetJustifyH("LEFT")
+
+	shop.specLine=shop:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+	shop.specLine:SetPoint("TOPLEFT",shop.title,"BOTTOMLEFT",0,-2)
+	shop.specLine:SetJustifyH("LEFT")
+
+	local close=CreateFrame("Button",nil,shop,"UIPanelCloseButton")
+	close:SetPoint("TOPRIGHT",shop,"TOPRIGHT",0,0)
+
+	local list=CreateFrame("Frame",nil,shop)
+	list:SetPoint("TOPLEFT",shop,"TOPLEFT",16,SHOP_TOP)
+	list:SetPoint("TOPRIGHT",shop,"TOPRIGHT",-16,SHOP_TOP)
+	list:SetHeight(1)
+	shop.list=list
+
+	-- The same row shape the inspect panel's three columns use, because the
+	-- same FillSockets fills both. Unanchored on purpose: stacked in one
+	-- column, a hidden row would leave a hole rather than an unused slot, so
+	-- LayoutShop places every shown row after each fill.
+	local function Section(title)
+		local rows={}
+
+		rows.head=list:CreateFontString(nil,"OVERLAY","GameFontNormal")
+		rows.head:SetText(title)
+
+		for index=1,SOCKET_ROWS do
+			local row=CreateFrame("Button",nil,list)
+			row:SetHeight(SHOP_ROW)
+
+			local glow=row:CreateTexture(nil,"HIGHLIGHT")
+			glow:SetAllPoints()
+			glow:SetColorTexture(1,1,1,0.10)
+			row:SetHighlightTexture(glow)
+
+			row.icon=row:CreateTexture(nil,"ARTWORK")
+			row.icon:SetSize(16,16)
+			row.icon:SetPoint("LEFT")
+			row.icon:SetTexCoord(0.07,0.93,0.07,0.93)
+
+			row.text=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+			row.text:SetPoint("LEFT",row.icon,"RIGHT",6,0)
+			row.text:SetPoint("RIGHT")
+			row.text:SetJustifyH("LEFT")
+			-- One line, whatever the enchant is called. Left to wrap, a long
+			-- name would spill into the row under it and out of the window's
+			-- measured height.
+			row.text:SetWordWrap(false)
+
+			row:Hide()
+			rows[index]=row
+		end
+
+		return rows
+	end
+
+	shop.page={
+		gems     = Section(L.INSPECT_GEMS),
+		enchants = Section(L.INSPECT_ENCHANTS),
+		glyphs   = Section(L.INSPECT_GLYPHS),
+	}
+
+	shop.page.hint=shop:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
+	shop.page.hint:SetPoint("BOTTOMLEFT",shop,"BOTTOMLEFT",16,SHOP_FOOT)
+	shop.page.hint:SetPoint("BOTTOMRIGHT",shop,"BOTTOMRIGHT",-16,SHOP_FOOT)
+	shop.page.hint:SetJustifyH("LEFT")
+
+	return shop
+end
+
+-- One column, and a window as tall as what is in it.
+--
+-- Assigns the local declared at the top of the file rather than making a new
+-- one, so the item-info watcher up there calls this one.
+function LayoutShop()
+	if not (shop and shop.page) then return end
+
+	local y=0
+	local sections={ shop.page.gems, shop.page.enchants, shop.page.glyphs }
+
+	for _,rows in ipairs(sections) do
+		-- Never hidden here, only read: FillSockets takes the glyph heading
+		-- away on Anniversary, where glyphs do not exist, and an empty section
+		-- otherwise carries its own "no gems" row.
+		if rows.head:IsShown() then
+			rows.head:ClearAllPoints()
+			rows.head:SetPoint("TOPLEFT",shop.list,"TOPLEFT",0,-y)
+			y=y+SHOP_HEAD
+
+			for _,row in ipairs(rows) do
+				if row:IsShown() then
+					row:ClearAllPoints()
+					row:SetPoint("TOPLEFT",shop.list,"TOPLEFT",0,-y)
+					row:SetPoint("RIGHT",shop.list,"RIGHT",0,0)
+					y=y+SHOP_ROW+SHOP_GAP
+				end
+			end
+
+			y=y+SHOP_SECTION
+		end
+	end
+
+	-- No trailing gap under the last section.
+	if y>0 then y=y-SHOP_SECTION end
+
+	-- The hint wraps to two lines when Auctionator is missing and it has more
+	-- to say, so it is measured rather than assumed.
+	local hint=math.ceil((shop.page.hint:GetStringHeight() or 12)+0.5)
+
+	shop:SetHeight(math.max(200,-SHOP_TOP+y+12+hint+SHOP_FOOT))
+end
+
+-- Third in the row, against the auction house's panel of top players.
+--
+-- Anchored, not merely placed: that panel is itself a child of the house, so
+-- following it keeps all three lined up whatever the UI Scale is.
+local function AttachShop()
+	if not shop then return false end
+
+	local shelf=_G.ArenaPlus_AuctionPvP
+
+	-- Opened with no house to hang off. It cannot happen from the shelf's own
+	-- rows, which is the only way in today, but a window with no anchor at all
+	-- would be a window nobody can find.
+	if not (shelf and shelf:IsShown()) then
+		shop.attached=nil
+		shop:ClearAllPoints()
+		shop:SetPoint("CENTER")
+		if ns.FitScale then shop:SetScale(ns.FitScale(SHOP_WIDTH,shop:GetHeight(),1)) end
+		return false
+	end
+
+	local side,scale,x,y=AttachedPlacement(shelf,SHOP_WIDTH,shop:GetHeight())
+
+	shop.attached=true
+	shop:SetScale(scale)
+	shop:ClearAllPoints()
+	-- The same eleven as everywhere else: the opaque layer starts that far in,
 	-- so butting the frames together at zero leaves the width of two borders
 	-- between them.
-	frame:SetPoint("TOPLEFT",shelf,"TOPRIGHT",-11,0)
-	frame:SetScale(AttachedScale(shelf))
+	if side=="left" then
+		shop:SetPoint("TOPRIGHT",shelf,"TOPLEFT",11+x,y)
+	else
+		shop:SetPoint("TOPLEFT",shelf,"TOPRIGHT",-11+x,y)
+	end
 	return true
 end
 
--- Follow the panel when it moves, but only if we were already following it.
+-- Follow the shelf when it moves, but only if we were already following it.
 --
--- Called when the auction house panel re-anchors itself. Without the guard this
--- would drag a window opened from the ladder across the screen the moment
--- somebody opened the auction house.
+-- Called when the auction house panel re-anchors itself. Without the guard a
+-- window dragged somewhere would jump back the moment the house was opened.
 function ns.InspectReanchor()
-	if frame and frame.attached then ns.InspectAttachToAuction() end
+	if shop and shop:IsShown() and shop.attached then AttachShop() end
 end
 
--- Back to being a window of its own.
-function ns.InspectDetachFromAuction()
-	if not frame then return end
-	frame.attached=nil
-	frame:ClearAllPoints()
-	frame:SetPoint("CENTER")
-	-- Back to the standalone answer: it was shrunk to fit beside the auction
-	-- house, and in the middle of the screen it has the whole screen again.
-	if ns.FitScale then frame:SetScale(ns.FitScale(WIDTH,HEIGHT,1)) end
+-- Gone with the shelf it hangs off, whichever way that shelf went: the
+-- auction house's X button, Escape, or the PvP button toggled off.
+function ns.CloseShoppingList()
+	if shop and shop:IsShown() then shop:Hide() end
+end
+
+function ns.ShowShoppingList(entry,region)
+	if type(entry)~="table" or not entry.name then return end
+
+	BuildShopWindow()
+	region=region or ns.PlayerRegion() or "us"
+
+	local data=InspectData(entry.name,entry.realm,region)
+
+	local who=entry.name
+	if entry.realm and entry.realm~="" then who=who.."-"..entry.realm end
+
+	-- Nobody to look at, so nothing to open. The reason goes to chat, where
+	-- it costs nothing to read and closes nothing that was already open.
+	if not data then
+		ns.Print("%s -- %s",who,entry.hidden and L.INSPECT_HIDDEN or L.INSPECT_NOT_COVERED)
+		return
+	end
+
+	shop.showing=WhoKey(entry,region)
+	shop.title:SetText(who)
+	shop.specLine:SetText(SpecMarkup(data,entry))
+
+	local gear=data.g or {}
+	shopJob={ gear=gear, glyphs=data.y, class=entry.class }
+	FillSockets(shop.page,gear,data.y,entry.class)
+
+	-- In this order: the rows decide the height, the height decides the scale,
+	-- and the scale decides whether it fits beside the shelf.
+	LayoutShop()
+	AttachShop()
+	shop:Show()
+end
+
+function ns.ToggleShoppingList(entry,region)
+	-- Only the same person again closes it. Clicking a different row means
+	-- "show me them instead", which closing and reopening would achieve and
+	-- would look like a flicker.
+	if shop and shop:IsShown() and shop.showing
+		and shop.showing==WhoKey(entry,region) then
+		shop:Hide()
+		return
+	end
+	ns.ShowShoppingList(entry,region)
 end
 
 -- Open on a particular tab.

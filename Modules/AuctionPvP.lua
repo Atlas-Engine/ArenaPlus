@@ -204,6 +204,14 @@ local function BuildPanel()
 	panel:SetSize(PANEL_WIDTH, PANEL_HEIGHT)
 	panel:Hide()
 
+	-- The shopping window hangs off this one, so it has to go when this goes
+	-- -- otherwise it is left anchored to a panel no longer on screen.
+	-- Every way out of here ends up here: the auction house's X button, the
+	-- PvP button toggled off, and the house closing underneath both.
+	panel:HookScript("OnHide", function()
+		if ns.CloseShoppingList then ns.CloseShoppingList() end
+	end)
+
 	-- Above the auction house, which is a high strata of its own: at HIGH this
 	-- panel sat behind it and read as transparent when it was simply covered.
 	panel:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -357,9 +365,15 @@ local function BuildPanel()
 			-- showed up on Anniversary.
 			local region = LadderKey(panel.region)
 
-			-- Straight to the gems, because that is what this window is for.
-			if ns.ShowInspect then ns.ShowInspect(self.entry, region, panel.bracket) end
-			if ns.InspectShowPage then ns.InspectShowPage("sockets") end
+			-- The gems and nothing else, because that is what this window is
+			-- for. It used to open the whole inspect panel on its shopping tab,
+			-- which is a 660 point window carrying a paper doll nobody at an
+			-- auctioneer is looking at -- and which, on a UI where three windows
+			-- that wide do not fit across the screen, covered the auction house
+			-- itself.
+			if ns.ToggleShoppingList then
+				ns.ToggleShoppingList(self.entry, region)
+			end
 		end)
 
 		row:Hide()
