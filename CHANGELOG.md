@@ -1,15 +1,15 @@
 ﻿# Changelog
 
+## 1.5c
+
+- New on the inspect panel's PvP tab: the titles a player has earned. Gladiator, Duelist, Rival or Challenger, with the rating milestones behind them, in the colour that title is worth. Only the highest is shown, since every Gladiator is also a Duelist. Mists only -- Blizzard does not publish achievements for Anniversary.
+- The weapons under the inspect model sit together and centred again, each enchant beside the weapon it belongs to, with the thrown weapon or bow out to their right.
+- The model shows a player's main hand rather than their off hand. It can only wear what your own character could wear, which the line underneath now says.
+- A long name in the match history is no longer cut short by the rating column beside it, which was holding room it rarely used. The MVP tag fits again.
+
 ## 1.5b
 
 - Fixes and improvements in Shared code, Match history, Ladder window, Auction house, Inspect panel.
-
-## 1.5a
-
-- Clicking a player in the Top PvP gear list now lights up their row, so it is clear whose shopping list is open. Changing spec, bracket or region closes it.
-- The shopping list is no longer a tab in the inspect panel as well. It has its own window beside the auction house.
-- The ladder heading is now a fixed width, so the buttons and flags beside it stop moving when you switch bracket.
-- The alts view is headed "My alts" rather than repeating the bracket you are already in.
 
 ## 1.5a
 

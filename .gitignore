@@ -15,10 +15,18 @@ tools/blizzard-credentials.txt
 #   LiveCache-*   each character's last self-report, for conditional requests
 #   SpecsSeen-*   every character ever asked about, so the rolling slice works
 #   InspectSeen-* games played when gear was last read, for carry-forward
+#   TitlesSeen-*  which achievements each character had, and when asked
+#   Best-*        the highest rating seen per character this season
+#   LastPoll-*    where everybody stood one poll ago, for the activity diff
+#   Activity-*    what moved between polls; a log, one file per month
 tools/Baseline-*.txt
 tools/LiveCache-*.txt
 tools/SpecsSeen-*.txt
 tools/InspectSeen-*.txt
+tools/TitlesSeen-*.txt
+tools/Best-*.txt
+tools/LastPoll-*.txt
+tools/Activity-*.tsv
 tools/SnapshotHistory.txt
 
 # One run's claim on a region. Holds a pid, and a stale one from somebody else's
