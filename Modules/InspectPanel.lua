@@ -21,6 +21,9 @@ local L = ns.L
 local WIDTH, HEIGHT = 660, 560
 local SLOT_SIZE     = 40
 local SLOT_GAP      = 6
+-- How much room an enchant line gets beside its slot. Named because the
+-- weapon row has to leave exactly this much between the two hands.
+local ENCHANT_W     = 132
 -- The band across the top of the window, and where content begins under it.
 --
 -- TOP is derived rather than chosen. Every page places its contents from TOP,
@@ -184,14 +187,18 @@ local BOTTOM_SLOTS = { "main_hand", "off_hand" }
 -- folded ranged weapons into the main hand and stopped drawing a third weapon.
 -- So it is added rather than declared: a permanently empty slot under the Mists
 -- model would be worse than the missing one was here.
--- Between the two weapons rather than after them.
+-- After the two hands, not between them.
 --
--- Appended, it took the right-hand end, which pushed the off hand into the
--- middle -- and the off hand's enchant is written to its right, so "Mongoose"
--- landed on top of the bow. Each weapon's enchant runs outwards from the pair
--- it belongs to, so the pair has to stay on the outside.
+-- It sat in the middle for a while, because appending it put it directly
+-- under the off hand's enchant line and "Mongoose" landed on top of the bow.
+-- That cured the collision by causing a worse one: the pair of hands is what
+-- a weapon row is, and splitting it left the middle slot unable to write its
+-- own line at all.
+--
+-- Appended again, with the room the enchant needs left in front of it -- see
+-- GAP_BEFORE, where the two hands stay together and the bow stands clear.
 if (ns.ClientVersion and ns.ClientVersion()) == "tbc" then
-	table.insert(BOTTOM_SLOTS, 2, "ranged")
+	table.insert(BOTTOM_SLOTS, "ranged")
 end
 
 local frame
@@ -505,7 +512,7 @@ local function CreateSlot(parent,side)
 	-- so a missing one is read at a glance rather than found by hovering
 	-- seventeen slots in turn. Text runs away from the model on both sides.
 	button.enchantText=button:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-	button.enchantText:SetWidth(132)
+	button.enchantText:SetWidth(ENCHANT_W)
 	button.enchantText:SetTextColor(0.1,0.9,0.1)
 	if side=="right" then
 		button.enchantText:SetPoint("RIGHT",button,"LEFT",-6,0)
@@ -708,10 +715,29 @@ local function Dress(gear,look)
 
 	if type(gear)~="table" then return end
 
-	-- Weapons have to name their slot. Without it both daggers are offered to
-	-- the main hand, the second replaces the first, and a dual wielder shows up
-	-- holding one.
+	-- Which hand a weapon is meant for.
+	--
+	-- The model is your own body -- see SetUnit above -- and a body will only
+	-- hold what it could hold. A priest inspecting a rogue gets one weapon on
+	-- the model however the slot is named, because priests do not dual wield;
+	-- the rogue's thrown weapon is refused for the same reason. Neither is a
+	-- fault in this code and neither can be fixed from here: the alternative
+	-- is drawing their real body, which this client renders as a white
+	-- silhouette. The hint under the model says whose body it is.
+	--
+	-- So the name is passed and believed. It costs nothing where the viewer
+	-- can hold both, and there is no second spelling that would change a
+	-- refusal -- a TryOn the model declines returns exactly like one it
+	-- accepted, so a diagnostic here can only report that the call was made.
 	local MODEL_SLOT={ main_hand="MAINHANDSLOT", off_hand="SECONDARYHANDSLOT", ranged="RANGEDSLOT" }
+
+	-- The order they go on in, for the body that cannot hold them all.
+	--
+	-- Its own list rather than BOTTOM_SLOTS, which is the order the buttons are
+	-- drawn in -- main hand, off hand, ranged -- and is about the panel rather
+	-- than the model. Put on backwards, so that where your own body can hold
+	-- only one of them, the one it keeps is the main hand.
+	local WEAPON_ORDER={ "off_hand", "ranged", "main_hand" }
 
 	local function Wear(list)
 		for _,slotKey in ipairs(list) do
@@ -730,7 +756,7 @@ local function Dress(gear,look)
 
 	Wear(LEFT_SLOTS)
 	Wear(RIGHT_SLOTS)
-	Wear(BOTTOM_SLOTS)
+	Wear(WEAPON_ORDER)
 end
 
 -- What the model is currently wearing, so it can be put back on.
@@ -796,25 +822,46 @@ local function BuildCharacterPage(parent)
 	Column(RIGHT_SLOTS,"TOPRIGHT",-16-SLOT_SIZE)
 
 	-- Centred under the model, the way the character sheet has them, with each
-	-- weapon's enchant running outwards so the two cannot collide.
-	local weaponSide={ main_hand="right", off_hand="left", ranged="right" }
+	-- weapon's enchant running outwards from the pair so the two cannot collide.
+	local weaponSide={ main_hand="right", off_hand="left", ranged="left" }
 
-	-- Centred from the row's own width rather than from a hand-picked offset,
-	-- so two weapons and three both sit under the middle of the model. The old
-	-- half-a-gap nudge was the two-slot answer written out longhand.
-	local wide=#BOTTOM_SLOTS*SLOT_SIZE+(#BOTTOM_SLOTS-1)*SLOT_GAP
+	-- What has to be left in front of a slot, where the slot in front of it
+	-- writes its enchant that way.
+	--
+	-- Only the ranged slot, and only because the off hand's line runs right
+	-- into it. The twelve is the six CreateSlot offsets the text by at each
+	-- end, so a full-width name clears both icons.
+	local GAP_BEFORE={ ranged=ENCHANT_W+12 }
+
+	-- Centred on the two hands, not on the whole row.
+	--
+	-- The hands are what the eye reads as the weapon row; the bow is a third
+	-- thing off to the side. Centring the row as a whole counted the name's
+	-- width between them, which dragged the pair well left of the model it is
+	-- supposed to sit under and left the bow nearer the middle than they were.
+	--
+	-- Measured rather than written as 2, so the day a fourth weapon slot turns
+	-- up this still means "the run of slots before the first wide gap".
+	local pair=0
+	for _,slotKey in ipairs(BOTTOM_SLOTS) do
+		if GAP_BEFORE[slotKey] then break end
+		pair=pair+1
+	end
+	local wide=pair*SLOT_SIZE+(pair-1)*SLOT_GAP
 
 	local previous
 	for index,slotKey in ipairs(BOTTOM_SLOTS) do
 		local button=CreateSlot(page,weaponSide[slotKey] or "left")
 
-		-- The middle slot writes no enchant beside itself: there is a weapon on
-		-- either side of it and nowhere for the text to go that is not on top of
-		-- one of them. A scope still shows as the green pip and in the tooltip.
+		-- The ranged slot writes no enchant beside itself. Its own side is
+		-- taken by the off hand's line, and the far side is where the panel
+		-- ends -- there is no room for another 132 points out there once the
+		-- hands are centred. A scope still shows as the green pip and in the
+		-- tooltip.
 		if slotKey=="ranged" then button.enchantText:Hide() end
 
 		if previous then
-			button:SetPoint("LEFT",previous,"RIGHT",SLOT_GAP,0)
+			button:SetPoint("LEFT",previous,"RIGHT",GAP_BEFORE[slotKey] or SLOT_GAP,0)
 		else
 			button:SetPoint("BOTTOMLEFT",page,"BOTTOM",-math.floor(wide/2),FOOT+46)
 		end
@@ -1201,6 +1248,31 @@ local function BuildPvPPage(parent)
 
 		y=y-PVP_GROUP_GAP
 	end
+
+	-- What they have earned, under what they are rated.
+	--
+	-- Two lines rather than one list. The four season titles are the part
+	-- anybody is looking for and they go in gold; the rating milestones are
+	-- supporting evidence -- a peak they reached once -- and they go quieter
+	-- underneath. Both wrap, because a decorated character has a dozen.
+	page.titlesHeading=page:CreateFontString(nil,"OVERLAY","GameFontNormal")
+	page.titlesHeading:SetPoint("TOPLEFT",page,"TOPLEFT",24,y)
+	page.titlesHeading:SetText(L.INSPECT_PVP_TITLES)
+	page.titlesHeading:SetTextColor(1,0.82,0)
+
+	y=y-22
+
+	page.titles=page:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+	page.titles:SetPoint("TOPLEFT",page,"TOPLEFT",24,y)
+	page.titles:SetPoint("RIGHT",page,"RIGHT",-24,0)
+	page.titles:SetJustifyH("LEFT")
+	page.titles:SetTextColor(1,0.82,0)
+
+	page.milestones=page:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+	page.milestones:SetPoint("TOPLEFT",page.titles,"BOTTOMLEFT",0,-6)
+	page.milestones:SetPoint("RIGHT",page,"RIGHT",-24,0)
+	page.milestones:SetJustifyH("LEFT")
+	page.milestones:SetTextColor(0.55,0.55,0.55)
 
 	return page
 end
@@ -2620,6 +2692,145 @@ end
 
 -- ---------------------------------------------------------------- show
 
+-- The titles they have earned, split into the two kinds.
+--
+-- A milestone names its rating -- "Three's Company: 2700" -- and a season
+-- title does not, which is the whole test. Derived from the name rather than
+-- from a list of which ids are which: the generated file carries the names
+-- exactly as Blizzard gives them, and a list here would be a second opinion
+-- about that, wrong the first time a milestone is added.
+--
+-- Milestones come back highest first, because the highest is the only one
+-- anybody reads. Season titles are alphabetical -- putting them in order of
+-- prestige would mean writing that order down, and Challenger before
+-- Gladiator is a smaller fault than a table nobody maintains.
+local function TitlesOf(entry,region)
+	local names=ns.PVP_TITLE_NAMES
+	local byRegion=ns.TITLES_BY_REGION and ns.TITLES_BY_REGION[region]
+	if not (names and byRegion) then return nil,nil end
+
+	-- The same key AttachSpec builds, character for character: the whole
+	-- concatenation lowered, and the realm always appended even when it is
+	-- empty. The generator writes it that way and every other reader of a
+	-- generated table reads it that way; a key assembled differently here
+	-- would simply never match and the section would be empty for everybody.
+	local who=(entry.name.."-"..(entry.realm or "")):lower()
+
+	local ids=byRegion[who]
+	if not ids or ids=="" then return {},{} end
+
+	local titles,milestones={},{}
+	for piece in ids:gmatch("[^,]+") do
+		local name=names[tonumber(piece)]
+		if name then
+			local rating=name:match(":%s*(%d+)%s*$")
+			if rating then
+				milestones[#milestones+1]={ text=name, rating=tonumber(rating) }
+			else
+				titles[#titles+1]=name
+			end
+		end
+	end
+
+	table.sort(titles)
+	table.sort(milestones,function(a,b) return a.rating>b.rating end)
+
+	return titles,milestones
+end
+
+-- Which tier a season title is, and so which colour it wears.
+--
+-- Matched by name against the tier keys the rest of the addon already
+-- colours by: "Gladiator" is the gladiator tier. No table of its own and no
+-- second opinion about what purple means -- if the ladder's colours change,
+-- these change with them.
+--
+-- ns.TIERS is ordered best first, so the index it comes back at doubles as
+-- prestige and the caller needs no ranking of its own.
+local function TierOfTitle(name)
+	local want=name:lower()
+	for index,tier in ipairs(ns.TIERS or {}) do
+		if tier.key==want then return index,tier end
+	end
+end
+
+local function FillTitles(entry,region)
+	local page=frame and frame.pages and frame.pages.pvp
+	if not (page and page.titles) then return end
+
+	-- Anniversary publishes none of this, and an empty section there would
+	-- read as a character with nothing rather than as a game with nothing.
+	if (ns.ClientVersion and ns.ClientVersion())=="tbc" then
+		page.titles:SetText(L.INSPECT_PVP_TITLES_NONE_TBC)
+		page.titles:SetTextColor(0.45,0.45,0.45)
+		page.milestones:SetText("")
+		return
+	end
+
+	local titles,milestones=TitlesOf(entry,region)
+
+	-- No data at all is not the same as "no titles". The first is a file
+	-- this character has not been reached by yet, the second is a fact about
+	-- them -- but both read the same to somebody looking at the panel, so
+	-- both get the same quiet line rather than a claim either way.
+	if not titles or (#titles==0 and #milestones==0) then
+		page.titles:SetText(L.INSPECT_PVP_NO_TITLES)
+		page.titles:SetTextColor(0.45,0.45,0.45)
+		page.milestones:SetText("")
+		return
+	end
+
+	-- The best season title only.
+	--
+	-- Every Gladiator is also a Duelist, a Rival and a Challenger: they are
+	-- awarded on the way up and never taken back, so all four together say
+	-- one thing four times and push the part worth reading off the end of
+	-- the line. Anything that is not a tier -- The Arena Master -- is not
+	-- part of that ladder and is kept.
+	local best,bestTier
+	local shown={}
+
+	for _,name in ipairs(titles) do
+		local index,tier=TierOfTitle(name)
+		if index then
+			if not best or index<best then best,bestTier=index,tier end
+		else
+			shown[#shown+1]=name
+		end
+	end
+
+	-- Found again by name rather than carried through the loop: TIERS holds
+	-- the key and the colour, not the achievement's own wording, and the
+	-- wording is what Blizzard gave us and what should be on screen.
+	if bestTier then
+		for _,name in ipairs(titles) do
+			if name:lower()==bestTier.key then table.insert(shown,1,name) break end
+		end
+	end
+
+	page.titles:SetText(table.concat(shown,"   "))
+
+	local said={}
+	for _,it in ipairs(milestones) do said[#said+1]=it.text end
+	page.milestones:SetText(table.concat(said,"   "))
+
+	-- Both lines in the colour of the standing they describe, which is the
+	-- same purple, blue or green the ladder paints a rank in. The ratings
+	-- underneath are evidence for that standing rather than a separate kind
+	-- of fact, so they are not greyed off from it any more.
+	--
+	-- Nothing to go on -- milestones but no title -- stays quiet rather than
+	-- borrowing a colour that would claim a tier they have not earned.
+	if bestTier and ns.HexToRGB then
+		local r,g,b=ns.HexToRGB(bestTier.hex)
+		page.titles:SetTextColor(r,g,b)
+		page.milestones:SetTextColor(r,g,b)
+	else
+		page.titles:SetTextColor(0.55,0.55,0.55)
+		page.milestones:SetTextColor(0.55,0.55,0.55)
+	end
+end
+
 local function FillPvP(entry,region)
 	local page=frame.pages.pvp
 
@@ -2655,6 +2866,8 @@ local function FillPvP(entry,region)
 			row.fill:SetColorTexture(0.04,0.04,0.05,0.9)
 		end
 	end
+
+	FillTitles(entry,region)
 end
 
 -- One person, named the same way every time, so two clicks on one row produce

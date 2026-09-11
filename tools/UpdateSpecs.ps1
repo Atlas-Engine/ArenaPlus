@@ -71,6 +71,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Dot-sourced here rather than beside Copy-ToOtherClients at the foot of
+# the file, because Write-DataFile is needed long before that -- every
+# shipped table goes through it.
+. (Join-Path $PSScriptRoot "DataClients.ps1")
+
 $apiRegion = $Region
 if ($Version -ne "mop") { $Region = $Version + "-" + $Region }
 
@@ -877,12 +882,11 @@ $rowBody
 }
 "@
 
-Set-Content -Path $specFile -Value $out -Encoding utf8
+Write-DataFile -Path $specFile -Value $out
 $note = if ($full) { " full pass," } else { "" }
 Write-Log ("{0}:{1} asked {2}, found {3}, missing {4}. {5} characters written, {6} remembered. requests={7}" -f `
     $Region.ToUpper(), $note, $asked, $found, $missing, $rows.Count, ($cacheLines.Count - 3), ($asked * $perItem + 1))
 
 # Every other installed client gets the same files, so Anniversary is as fresh
 # as Mists instead of waiting on the next CurseForge publish.
-. (Join-Path $PSScriptRoot "DataClients.ps1")
 Copy-ToOtherClients -Primary $data -Files @($specFile) -Say ${function:Write-Log}

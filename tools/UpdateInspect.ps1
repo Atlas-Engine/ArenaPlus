@@ -42,6 +42,19 @@ param(
     # Measured 2026-08-22 at five apiece: 372 characters US, 370 EU, against 343
     # and 295 for the old rule. So this is not cheaper -- slightly dearer, and
     # much better spread.
+    # Five, alongside the rank one range below rather than instead of it.
+    #
+    # Briefly three, on the reasoning that the r1 range was doing the work
+    # now and this only had to be a floor under it. Measured, that was wrong
+    # in both directions: the r1 range adds just NINE characters on US -- a
+    # rank one is nearly always already the top of their spec, so the quota
+    # was catching them anyway -- while three instead of five costs about a
+    # hundred and twenty. Coverage went down, 385 to 269, for a rule meant to
+    # widen it.
+    #
+    # So the two rules stack: five of every spec as before, and the r1 range
+    # on top to guarantee that nobody at the very top is missed for sharing a
+    # spec with somebody higher.
     [int]$PerSpec = 5,
     [int]$DelayMs = 50,
     # Skip entirely if the file was written more recently than this.
@@ -64,6 +77,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# Dot-sourced here rather than beside Copy-ToOtherClients at the foot of
+# the file, because Write-DataFile is needed long before that -- every
+# shipped table goes through it.
+. (Join-Path $PSScriptRoot "DataClients.ps1")
 
 $apiRegion = $Region
 if ($Version -ne "mop") { $Region = $Version + "-" + $Region }
@@ -181,11 +199,53 @@ if ($specOf.Count -eq 0) {
     return
 }
 
+# Where the rank one range starts, per bracket.
+#
+# Everybody at or above it is worth being able to open, whatever they play:
+# these are the twenty or thirty people per bracket whose build is the reason
+# somebody opens a leaderboard at all, and a spec quota can miss them. Two
+# rank ones of the same spec used to mean the second was not covered.
+#
+# Dynamic because it is read from the cutoffs file the ladder pass rewrites
+# every run, not from a number here. When the r1 line moves, this moves with
+# it -- and it moves all season.
+#
+# Measured 2026-09-11: r1 is 28 places in 2v2, 23 in 3v3, 15 in 5v5 and 3 in
+# rated battlegrounds on US, so the whole range is about seventy characters.
+# Both games publish the field; Anniversary has no fourth bracket and simply
+# has no entry for it.
+#
+# A missing file is not fatal. Without it this pass does what it always did
+# -- the spec quota alone -- and says so, rather than covering nobody.
+$cutoffFile = Join-Path $data ("Cutoffs-" + $Region + ".lua")
+$r1 = New-Object 'System.Collections.Generic.Dictionary[int,int]'
+
+if (Test-Path $cutoffFile) {
+    foreach ($line in Get-Content $cutoffFile) {
+        # Only the cutoff table, not the slot-count table below it, which has
+        # the same row shape and an r1 that is a NUMBER OF PLACES rather than
+        # a rating. Reading that one would put the threshold at 28.
+        if ($line -match '^\s*\[(\d)\] = \{ r1=(\d+), (gladiator|duelist)=') {
+            $value = [int]$Matches[2]
+            # A rating, not a count. Anything under a few hundred is the
+            # other table however the line is shaped.
+            if ($value -gt 500) { $r1[[int]$Matches[1]] = $value }
+        }
+    }
+}
+
+if ($r1.Count -gt 0) {
+    Write-Host ("Rank one starts at: " + (($r1.Keys | Sort-Object | ForEach-Object { "[$_] $($r1[$_])" }) -join ", "))
+} else {
+    Write-Host "No r1 cutoffs readable -- covering the spec quota only."
+}
+
 # Rows arrive in rank order within a bracket, so the first few of a spec are the
 # best few of it and no sorting is needed.
 $filled = New-Object 'System.Collections.Generic.Dictionary[string,int]' ([System.StringComparer]::Ordinal)
 $bracket = 0
 $noSpec = 0
+$viaR1 = 0
 
 foreach ($line in Get-Content $ladderFile) {
     # Which bracket's block we are in. The rows themselves do not say.
@@ -204,11 +264,21 @@ foreach ($line in Get-Content $ladderFile) {
     # specs pass has met them.
     if (-not $specOf.ContainsKey($key)) { $noSpec++; continue }
 
+    # Either reason is enough, and they are independent: the rank one range
+    # regardless of spec, and the top of each spec regardless of rating.
+    $rating = [int]$m.Groups[4].Value
+    $inR1 = $r1.ContainsKey($bracket) -and $rating -ge $r1[$bracket]
+
     $bucket = "{0}|{1}" -f $bracket, $specOf[$key].Slug
     $have = 0
     if ($filled.ContainsKey($bucket)) { $have = $filled[$bucket] }
-    if ($have -ge $PerSpec) { continue }
-    $filled[$bucket] = $have + 1
+
+    if (-not $inR1 -and $have -ge $PerSpec) { continue }
+
+    # A rank one still takes their spec slot when there is one going, so the
+    # quota is not spent twice on the same person.
+    if ($have -lt $PerSpec) { $filled[$bucket] = $have + 1 }
+    elseif ($inR1) { $viaR1++ }
 
     if (-not $wanted.Contains($key)) {
         $wanted[$key] = @{ Name = $m.Groups[2].Value; Realm = $m.Groups[3].Value; Games = 0 }
@@ -219,8 +289,8 @@ foreach ($line in Get-Content $ladderFile) {
     $wanted[$key].Games += [int]$m.Groups[5].Value + [int]$m.Groups[6].Value
 }
 
-Write-Host ("{0} distinct characters: the top {1} of each spec in each {2} bracket, {3} buckets filled." -f `
-    $wanted.Count, $PerSpec, $Region.ToUpper(), $filled.Count)
+Write-Host ("{0} distinct characters on {1}: the top {2} of each spec in each bracket ({3} buckets), plus {4} more for being in the rank one range." -f `
+    $wanted.Count, $Region.ToUpper(), $PerSpec, $filled.Count, $viaR1)
 if ($noSpec -gt 0) {
     Write-Host ("  {0} ladder rows skipped for having no spec on file yet." -f $noSpec)
 }
@@ -1232,7 +1302,7 @@ foreach ($table in $expected) {
     if ($table.Count -eq 0) { Write-Host ("  WARNING: {0} came out empty" -f $table.Name) }
 }
 
-Set-Content -Path $outFile -Value $out -Encoding utf8
+Write-DataFile -Path $outFile -Value $out
 
 # What everybody had played this run, so the next one can tell who moved.
 # Written for the whole selection, fetched or carried, so a character who is
@@ -1252,5 +1322,4 @@ if ($wrong -gt 0) { Write-Host ("  {0} tiers did not come out clean." -f $wrong)
 
 # Every other installed client gets the same files, so Anniversary is as fresh
 # as Mists instead of waiting on the next CurseForge publish.
-. (Join-Path $PSScriptRoot "DataClients.ps1")
 Copy-ToOtherClients -Primary $data -Files @($outFile) -Say ${function:Write-Log}

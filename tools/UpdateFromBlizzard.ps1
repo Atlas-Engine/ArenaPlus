@@ -75,6 +75,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Dot-sourced here rather than beside Copy-ToOtherClients at the foot of
+# the file, because Write-DataFile is needed long before that -- every
+# shipped table goes through it.
+. (Join-Path $PSScriptRoot "DataClients.ps1")
+
 # The region as Blizzard addresses it -- the API host and the namespace suffix
 # are always the bare "us"/"eu", whichever game this is.
 $apiRegion = $Region
@@ -497,8 +502,18 @@ if ($Live) {
             if ($keep) { $hot.Add($item) } else { $cold++ }
         }
 
+        # Logged, not just printed.
+        #
+        # This one line decides the size of the run -- everything else the
+        # pass does costs six requests -- and it was Write-Host only, which
+        # in a scheduled run means nowhere: RunHidden.vbs gives it no
+        # console. So the log recorded a total with no way to see what drove
+        # it, and an audit done from the log alone read the budget wrong by
+        # a factor of three.
         Write-Host ("{0} of {1} characters played in the last {2} days; {3} skipped." -f `
             $hot.Count, $work.Count, $ActiveDays, $cold)
+        Write-Log ("{0}: {1} of {2} characters hot within {3}d, {4} skipped." -f `
+            $Region.ToUpper(), $hot.Count, $work.Count, $ActiveDays, $cold)
 
         # Whatever is skipped keeps the reading it already had, so the addon
         # still shows a live figure for them -- just an older one.
@@ -834,7 +849,7 @@ $slotBody
 }
 "@
 
-Set-Content -Path $cutoffFile -Value $cutoffOut -Encoding utf8
+Write-DataFile -Path $cutoffFile -Value $cutoffOut
 
 # Last week's standing, for the change columns.
 #
@@ -921,6 +936,54 @@ $activity = New-Object System.Collections.Generic.List[string]
 # [double]::Parse reads it in the current culture -- on a machine whose
 # decimal separator is a comma that either throws or silently misreads, and
 # this runs unattended where nobody would see either.
+
+# ---------------------------------------------------------------- best
+#
+# The highest rating we have ever seen each character at, this season.
+#
+# Blizzard does not publish one. Verified 2026-09-11 against
+# profile-classic-us: the character pvp-bracket document carries `rating`,
+# `season_match_statistics` and `weekly_match_statistics` and nothing
+# season-best shaped. Its `tier` object looks promising and is not -- tier.id
+# comes back 0 for a 2641-rated player and /data/wow/pvp-tier/{id} is 404 on
+# every Classic namespace, so the field is present but unpopulated.
+#
+# So it is remembered rather than asked for: each run compares the rating it
+# already has against the highest previously recorded. That costs no requests
+# at all, which matters -- the alternative discussed was a second call per
+# character, and there are six thousand of them.
+#
+# Its own file rather than a column in LiveCache-*.txt, for two reasons. That
+# file says on its first line that it is safe to delete at the cost of one
+# cold pass, and that has to stay true -- a season of history is not one cold
+# pass. And it only holds characters the live pass asked about, while this
+# needs every row on the ladder, including the four fifths that -ActiveDays
+# skips.
+#
+# Keyed by season, and dropped wholesale when the season turns: a best from
+# season 13 is not a fact about season 14, and carrying it over would show
+# every returning player a peak they cannot match yet.
+$bestFile = Join-Path $PSScriptRoot ("Best-" + $Region + ".txt")
+$best = @{}
+$bestSeason = 0
+
+if (Test-Path $bestFile) {
+    foreach ($line in Get-Content $bestFile) {
+        if ($line.StartsWith("#")) {
+            if ($line -match '^#\s*season\s*=\s*(\d+)') { $bestSeason = [int]$Matches[1] }
+            continue
+        }
+        $bits = $line -split "`t"
+        if ($bits.Count -ge 2) { $best[$bits[0]] = [int]$bits[1] }
+    }
+}
+
+if ($bestSeason -ne $season) {
+    if ($bestSeason -gt 0) {
+        Write-Host ("Season {0} replaces {1}: starting the best-rating history again." -f $season, $bestSeason)
+    }
+    $best = @{}
+}
 
 foreach ($bracket in $brackets) {
     $info = $fetched[$bracket.Index]
@@ -1015,16 +1078,61 @@ foreach ($bracket in $brackets) {
         # first sighting of a character writes nothing: there is no previous
         # poll to have moved from, and treating their whole season as one
         # window would be a lie about when it happened.
+        # Columns, since the file has no header: when, bracket, character,
+        # rating now, rating change, games won since, games lost since, and
+        # the WON THIS DIFFED AGAINST.
+        #
+        # That last one is an instrument, not data anybody wants.
+        #
+        # Measured 2026-09-11 across 46,644 rows: about 57 characters emit a
+        # repeated row -- the identical delta written every poll while the
+        # rating sits still. One had 94 of them and summed to +13,574 of
+        # movement for a character who never left 2033.
+        #
+        # Two explanations were ruled out by the rows themselves. Blizzard
+        # serving inconsistent snapshots would alternate the sign, and there
+        # are 5 negatives in 46,644. A run dying between the activity append
+        # and the baseline write below would leave exactly this trail, and the
+        # log has no failed run in it at all.
+        #
+        # What is left has to explain all three of: the baseline file is
+        # correct right now, the write and this diff use the same $row.Won one
+        # line apart, and yet the deltas SHRINK over successive polls -- which
+        # means the stored baseline is climbing while the row stands still.
+        # Nothing accounts for all three from outside the run.
+        #
+        # So the baseline it read goes in the row. Next time it happens, the
+        # file says whether the read was stale or $row.Won disagreed with what
+        # was written, and those are the two candidates. $row.Won itself is not
+        # stored because it is recoverable: won = dw + this column.
+        #
+        # Appended as an eighth column, so the seven-column rows already on
+        # disk stay readable and anything reading them must tolerate both
+        # widths.
         $before = $lastPoll[$pollKey]
         if ($Live -and $before) {
             $dw = $row.Won - $before.Won
             $dl = $row.Lost - $before.Lost
             if ($dw -ne 0 -or $dl -ne 0) {
-                $null = $activity.Add(("{0}`t{1}`t{2}`t{3}`t{4}`t{5}`t{6}" -f `
+                $null = $activity.Add(("{0}`t{1}`t{2}`t{3}`t{4}`t{5}`t{6}`t{7}" -f `
                     $nowEpoch, $bracket.Api, $row.Key, $row.Rating,
-                    ($row.Rating - $before.Rating), $dw, $dl))
+                    ($row.Rating - $before.Rating), $dw, $dl, $before.Won))
             }
         }
+
+        # Raised here rather than where the live answers land, because this is
+        # the merged figure -- whichever of the character's own record and the
+        # snapshot came later. Raising it from either source alone would let a
+        # month-old reading set a peak.
+        #
+        # Written on the row only when it beats what they are on now. Equal is
+        # the common case by far -- anybody at their season high -- and "max
+        # 2641" beside "2641" is a column of noise.
+        $peak = $best[$row.Key]
+        if (-not $peak -or $row.Rating -gt $peak) { $peak = $row.Rating }
+        $best[$row.Key] = $peak
+
+        $top = if ($peak -gt $row.Rating) { ", mr=$peak" } else { "" }
 
         # The week's movement, when there is a week to compare against.
         $change = ""
@@ -1036,7 +1144,7 @@ foreach ($bracket in $brackets) {
             $change = ", dr={0}, dk={1}" -f ($row.Rating - $was.Rating), ($row.Rank - $was.Rank)
         }
 
-        $rows.Add(("`t`t{{ rank={0}, name=""{1}"", realm=""{2}"", rating={3}, won={4}, lost={5}, faction=""{6}""{7} }}," -f `
+        $rows.Add(("`t`t{{ rank={0}, name=""{1}"", realm=""{2}"", rating={3}, won={4}, lost={5}, faction=""{6}""{7}{8} }}," -f `
             $row.Rank,
             (Escape-Lua $row.Name),
             (Escape-Lua $row.Realm),
@@ -1044,6 +1152,7 @@ foreach ($bracket in $brackets) {
             $row.Won,
             $row.Lost,
             (Escape-Lua $row.Faction),
+            $top,
             $change))
     }
     $rows.Add("`t},")
@@ -1129,7 +1238,24 @@ $($rows -join "`n")
 }
 "@
 
-Set-Content -Path $ladderFile -Value $ladderOut -Encoding utf8
+Write-DataFile -Path $ladderFile -Value $ladderOut
+
+# The peaks, for the next run to compare against.
+#
+# After the ladder is written, not before: if this pass dies between the two,
+# the worst case should be a best-rating file one run behind rather than one
+# claiming a peak for a ladder nobody ever saw.
+#
+# Not shipped. It is the working memory behind the mr= field, and the field
+# itself is in the ladder file.
+$bestLines = New-Object System.Collections.Generic.List[string]
+$null = $bestLines.Add("# The highest rating seen for each character this season, one per line.")
+$null = $bestLines.Add("# Not shipped. Deleting it loses the history and starts again from today.")
+$null = $bestLines.Add("# season = $season")
+foreach ($key in ($best.Keys | Sort-Object)) {
+    $null = $bestLines.Add(("{0}`t{1}" -f $key, $best[$key]))
+}
+Set-Content -Path $bestFile -Value ($bestLines -join "`n") -Encoding utf8
 
 if ($refused -gt 0) {
     Write-Host ("Kept the ladder's own figure for {0} rows whose character reported fewer games than the ladder." -f $refused)
@@ -1209,5 +1335,4 @@ if ($stamp -eq $now) {
 
 # Every other installed client gets the same files, so Anniversary is as fresh
 # as Mists instead of waiting on the next CurseForge publish.
-. (Join-Path $PSScriptRoot "DataClients.ps1")
 Copy-ToOtherClients -Primary $data -Files @($ladderFile, $cutoffFile) -Say ${function:Write-Log}

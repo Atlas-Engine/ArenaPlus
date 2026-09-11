@@ -17,6 +17,7 @@
 // what Get-ScheduledTask itself talks to. Shelling out to schtasks.exe and
 // parsing its output would have meant parsing localised text.
 
+using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -49,8 +50,18 @@ static class Program
     static readonly IntPtr Broadcast = (IntPtr)0xFFFF;
 
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
+        // Windows starts this with -startup, and nothing else does. It means
+        // "you were not asked for, go to the notification area" -- a window in
+        // front of everything at every login is how an autostart earns itself
+        // being switched off.
+        bool fromStartup = false;
+        foreach (string a in args)
+        {
+            if (string.Equals(a, "-startup", StringComparison.OrdinalIgnoreCase)) fromStartup = true;
+        }
+
         bool mine;
         only = new Mutex(true, "ArenaPlusDashboardSingleInstance", out mine);
 
@@ -66,7 +77,7 @@ static class Program
 
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        Application.Run(new Dashboard());
+        Application.Run(new Dashboard(fromStartup));
 
         GC.KeepAlive(only);
     }
@@ -259,7 +270,11 @@ class Dashboard : Form
     readonly Dictionary<string, string> spendText = new Dictionary<string, string>();
     bool settingUp;   // true while the pickers are being filled in
     CheckBox trayOption;
+    CheckBox startupOption;
     NotifyIcon tray;
+
+    // Launched by Windows at login rather than by a person double clicking.
+    readonly bool startedByWindows;
     bool toldWhereItWent;   // the balloon is shown once, not every minimise
 
     // Re-read only when the files themselves change: see UpdateSummary.
@@ -281,8 +296,11 @@ class Dashboard : Form
 
     object scheduler;
 
-    public Dashboard()
+    public Dashboard() : this(false) { }
+
+    public Dashboard(bool fromStartup)
     {
+        startedByWindows = fromStartup;
         tools = Path.GetDirectoryName(Application.ExecutablePath);
 
         // Where the ladder and the specs are read from for the summary at the
@@ -314,6 +332,24 @@ class Dashboard : Form
 
         BuildLayout();
         BuildTray();
+
+        // Straight to the notification area when Windows started it.
+        //
+        // Only when the tray option is on: with it off there is nowhere to go
+        // and hiding would leave a running window nobody can reach. Somebody
+        // who wants it at login and wants to see it at login gets exactly
+        // that.
+        //
+        // Deferred to Shown rather than done here: Hide() before the form has
+        // ever been shown leaves it in a state where the tray icon's restore
+        // brings up a window that has not finished laying itself out.
+        if (startedByWindows)
+        {
+            Shown += delegate
+            {
+                if (trayOption.Checked) HideToTray();
+            };
+        }
 
         // Fully qualified: System.Threading is now in scope for the mutex, and
         // its Timer is not this one.
@@ -1670,6 +1706,24 @@ class Dashboard : Form
         };
         Controls.Add(trayOption);
 
+        // Beside the tray option, because the two belong together: starting
+        // with Windows is most of the reason to want the notification area.
+        startupOption = new CheckBox();
+        startupOption.Text = "Start with Windows";
+        startupOption.Location = new Point(304, y);
+        startupOption.Size = new Size(200, 22);
+        startupOption.ForeColor = FADED;
+
+        // Read from the registry, not from dashboard-settings.txt.
+        //
+        // The registry IS the setting here -- a copy of it in the settings
+        // file would be a second answer to the same question, and the two
+        // disagree the moment somebody turns the entry off in Task Manager's
+        // Startup tab, which is where Windows invites them to.
+        startupOption.Checked = StartsWithWindows();
+        startupOption.CheckedChanged += delegate { ApplyStartWithWindows(); };
+        Controls.Add(startupOption);
+
         footer = AddLabel("", 16, y + 26, 600, 20, false, true);
 
         // Four rows a section instead of two made this about 140px taller, and
@@ -1806,6 +1860,82 @@ class Dashboard : Form
             tray.BalloonTipTitle = "ArenaPlus data";
             tray.BalloonTipText = "Could not start " + taskName + ": " + e.Message;
             tray.ShowBalloonTip(4000);
+        }
+    }
+
+    // ------------------------------------------------------- start with windows
+
+    // HKCU\...\Run, and the reasoning for it over the alternatives.
+    //
+    // A Startup-folder shortcut needs COM to write a .lnk, and a logon-
+    // triggered scheduled task -- which this window already has the plumbing
+    // for -- would put a ninth ArenaPlus task in a list of eight that are all
+    // about fetching data, next to a Pause button that does not mean it.
+    //
+    // The Run key is one value, needs no elevation, and is the one place
+    // Windows itself shows the user: Task Manager's Startup tab lists it and
+    // offers to disable it. That last part is the reason the checkbox reads
+    // the registry every time it is built rather than trusting a saved copy.
+    //
+    // HKCU, never HKLM: this is one user's preference about one user's
+    // window, and HKLM would need admin to set and would start it for
+    // everybody who logs in.
+    const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    const string RunName = "ArenaPlus data";
+
+    // Quoted, because the path has spaces in it -- Program Files (x86) -- and
+    // an unquoted Run value is read up to the first space. -startup is what
+    // tells the copy Windows launches to go straight to the tray.
+    string RunValue()
+    {
+        return "\"" + Application.ExecutablePath + "\" -startup";
+    }
+
+    bool StartsWithWindows()
+    {
+        try
+        {
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RunKey, false))
+            {
+                if (key == null) return false;
+                string have = key.GetValue(RunName) as string;
+                if (string.IsNullOrEmpty(have)) return false;
+
+                // Compared on the path inside the quotes rather than on the
+                // whole string: an entry written by an older version, or
+                // pointing at a copy that has since been moved, should read as
+                // "on but stale" rather than as off -- ticking the box then
+                // rewrites it to this exe.
+                return have.IndexOf(Application.ExecutablePath, StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+        }
+        catch { return false; }
+    }
+
+    void ApplyStartWithWindows()
+    {
+        try
+        {
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RunKey, true))
+            {
+                if (key == null) { Complain("Start with Windows", new Exception("No Run key to write to.")); return; }
+
+                if (startupOption.Checked) key.SetValue(RunName, RunValue(), RegistryValueKind.String);
+                else                       key.DeleteValue(RunName, false);
+            }
+        }
+        catch (Exception e)
+        {
+            Complain("Start with Windows", e);
+
+            // Put the box back where the registry actually is, so a failure
+            // does not leave a tick claiming something that did not happen.
+            bool real = StartsWithWindows();
+            if (startupOption.Checked != real)
+            {
+                startupOption.CheckedChanged -= delegate { ApplyStartWithWindows(); };
+                startupOption.Checked = real;
+            }
         }
     }
 

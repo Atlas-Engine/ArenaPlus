@@ -211,7 +211,7 @@ L.INSPECT_RATING          = "%d rating"
 L.INSPECT_RANK            = "#%d"
 L.INSPECT_HINT            = "Drag to turn, wheel to zoom, right click to reset."
 -- Only when their race is not known, which is now the rare case.
-L.INSPECT_HINT_OWN_RACE   = "Drag to turn, wheel to zoom, right click to reset.  Shown on your own race."
+L.INSPECT_HINT_OWN_RACE   = "Drag to turn, wheel to zoom, right click to reset.  Shown on your own body, so only weapons your class can hold."
 L.INSPECT_NOT_COVERED     = "Gear and talents are only recorded for the top five of each spec in each bracket."
 
 -- The played character, which the gear cannot say: every worn item is reported
@@ -265,6 +265,14 @@ L.INSPECT_ENCHANT_ID      = "enchant %d"
 -- that reading somebody else's needs no second vocabulary.
 L.INSPECT_PVP_ARENA       = "Arena Battles"
 L.INSPECT_PVP_RBG         = "Rated Battlegrounds"
+-- Earned, not current. A season title is kept for ever, which is the whole
+-- reason to show it: a 2100 player who was a Gladiator is not the same
+-- player as a 2100 who never has been.
+L.INSPECT_PVP_TITLES      = "Titles Earned"
+L.INSPECT_PVP_NO_TITLES   = "None on record."
+-- Said once, quietly, rather than leaving the section looking empty for
+-- every Anniversary character: the API has nothing to give there.
+L.INSPECT_PVP_TITLES_NONE_TBC = "Not published for this game."
 L.INSPECT_PVP_WL          = "W/L"
 L.INSPECT_PVP_RANK        = "Rank"
 L.INSPECT_PVP_CURRENT     = "Current"

@@ -1800,7 +1800,22 @@ local function ShowDetail(row,match)
 			-- The name gives up the skull's width when there is one, so the
 			-- skull always has somewhere to stand: without this a long name
 			-- fills the field and the skull lands on the ladder column.
-			local room=line.nameWidth-(hasSkull and (SKULL_SIZE+4) or 0)
+			--
+			-- And it takes back whatever the rating column is not using.
+			--
+			-- That column is 76 points because "#4087 1517" needs 76, and
+			-- almost nobody is rank four thousand. "#27 2383" leaves twenty
+			-- points of nothing, and the name is the field that paid for it --
+			-- reported as the MVP tag being cut off a name with room to spare
+			-- beside it.
+			--
+			-- Right-justified, so the room it does not use is on its left,
+			-- which is exactly where the name ends. Measured per row, since
+			-- how much there is depends on the number: rank one spares more
+			-- than rank nine hundred, and the widest case spares nothing and
+			-- leaves this where it was.
+			local spare=RANK_WIDTH-math.min(line.rank:GetStringWidth(),RANK_WIDTH)
+			local room=line.nameWidth+spare-(hasSkull and (SKULL_SIZE+4) or 0)
 			line.name:SetWidth(room)
 			line.name:SetText(label)
 

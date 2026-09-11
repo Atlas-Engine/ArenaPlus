@@ -78,6 +78,83 @@ if (-not (Test-Path (Join-Path $Repo ".git"))) {
     throw "$Repo is not a git repository yet -- see the README in _brain for the two account-level steps."
 }
 
+# ---------------------------------------------------------------- in flight
+#
+# Not while a pass is writing.
+#
+# This runs on its own 30-minute task and the update passes run on theirs,
+# so nothing has ever stopped the two landing in the same second. What this
+# publishes is whatever is in the live folder at the moment it looks, and a
+# pass rewrites a whole table -- so the file it copies can be the previous
+# ladder, or the new one, or the join between them.
+#
+# The passes have taken turns among themselves since 2026-08-23 through
+# ArenaPlus-fetch.lock. This was never taught about it, which left the one
+# reader that publishes to CurseForge as the only thing in the system still
+# racing the writers.
+#
+# Writes are atomic now as well -- see Write-DataFile in DataClients.ps1 --
+# so a single file can no longer be caught half-written. This covers the
+# other half of it: the four tables are written minutes apart, and a copy
+# taken between them ships a leaderboard whose specs and gear belong to the
+# run before. Both are needed; neither alone is enough.
+#
+# Declines rather than waits. A pass can run for fourteen minutes, holding
+# this task open that long would overlap its own next run, and there is
+# nothing to gain by waiting: the data is published on the next tick, half
+# an hour later at worst, and the tick after a pass is exactly when there is
+# something new to publish.
+$lockFile = Join-Path $PSScriptRoot "ArenaPlus-fetch.lock"
+
+# The owner id, the same way the passes read each other: a lock whose
+# process is gone is a leftover from a run that died, and treating it as
+# live would stop publishing for ever. The passes clear those; this only
+# needs to not be fooled by one.
+if (Test-Path $lockFile) {
+    $owner = 0
+    try { $owner = [int](Get-Content $lockFile -TotalCount 1 -ErrorAction Stop) } catch { }
+
+    if ($owner -gt 0 -and (Get-Process -Id $owner -ErrorAction SilentlyContinue)) {
+        $busy = ""
+        try { $busy = (Get-Content $lockFile -TotalCount 2)[1] } catch { }
+        if ($busy) { Say ("Waiting: {0} is still fetching (process {1}). Nothing published." -f $busy, $owner) }
+        else       { Say ("Waiting: a pass is still fetching (process {0}). Nothing published." -f $owner) }
+        return
+    }
+
+    # Removed, not just ignored. CreateNew below fails on a file that is
+    # still there, so "ignore it" would have meant never publishing again
+    # until somebody deleted it by hand -- and the run that leaves one
+    # behind is by definition a run that crashed, which is exactly when
+    # nobody is watching.
+    Say "Clearing a fetch lock left by a run that did not finish."
+    try { Remove-Item $lockFile -Force -ErrorAction Stop } catch { }
+}
+
+# Held for the copy, so a pass cannot start writing into the middle of it.
+#
+# CreateNew, not "test then create": two steps with a gap in the middle is
+# the bug this is here to prevent. Whoever gets the file wins and the other
+# is told.
+#
+# Only the copy needs it. The git work below reads the repository, which no
+# pass touches, so the lock goes back as soon as the files are in place --
+# a push can take a while and there is no reason to hold the fetchers off
+# through it.
+$held = $null
+try {
+    $held = [System.IO.File]::Open($lockFile, [System.IO.FileMode]::CreateNew,
+                                   [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+} catch {
+    Say "A pass claimed the fetch lock first. Nothing published."
+    return
+}
+
+$writer = New-Object System.IO.StreamWriter($held)
+$writer.WriteLine($PID)
+$writer.WriteLine("publish")
+$writer.Flush()
+
 # ---------------------------------------------------------------- copy
 #
 # Only the .lua tables. The .toc, .pkgmeta and README belong to the repository
@@ -93,6 +170,11 @@ foreach ($file in (Get-ChildItem -Path $Live -Filter *.lua -File)) {
         $copied++
     }
 }
+
+# The files are in the repository now; the fetchers can have their turn.
+$writer.Dispose()
+$held.Dispose()
+Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
 
 Push-Location $Repo
 try {

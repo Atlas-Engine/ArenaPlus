@@ -18,6 +18,33 @@
 # at different moments -- a folder copy would roll one of them back, which is
 # the same rule CLAUDE.md states for Dev and live.
 
+# Write a shipped table so no reader can ever see half of it.
+#
+# Set-Content truncates the file and then writes it, which leaves a window --
+# tens of milliseconds for a 2 MB leaderboard -- where the file on disk is
+# empty or half a table. Two things read these files while the passes run:
+# the game client, and Publish-Data.ps1 on its own 30-minute timer. A game
+# that loads a truncated table throws; a publish that copies one ships it to
+# everybody.
+#
+# A temp file in the same folder, then a move. A move within one volume is a
+# rename: the directory entry is repointed in one step, so a reader either
+# gets all of the old file or all of the new one and never a mixture.
+#
+# Same folder deliberately -- a temp in %TEMP% would be a different volume,
+# and a cross-volume move is a copy plus a delete, which is the very thing
+# this exists to avoid.
+function Write-DataFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value
+    )
+
+    $temp = $Path + ".tmp"
+    Set-Content -Path $temp -Value $Value -Encoding utf8
+    Move-Item -Path $temp -Destination $Path -Force
+}
+
 function Copy-ToOtherClients {
     param(
         [Parameter(Mandatory = $true)][string]$Primary,
