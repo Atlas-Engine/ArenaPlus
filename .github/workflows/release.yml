@@ -99,3 +99,70 @@ jobs:
           else
             gh release create "${VERSION}" --title "${VERSION}" --notes-file notes.md
           fi
+
+      - name: Announce it in Discord
+        # Optional, and silently skipped when no webhook is configured: the
+        # release itself must never fail because an announcement could not be
+        # sent. Add DISCORD_WEBHOOK under Settings -> Secrets and variables ->
+        # Actions to turn it on.
+        #
+        # The secret is a Discord webhook URL, which is a password: anybody
+        # holding it can post into that channel as the app. It lives in GitHub's
+        # secret store and nowhere else -- never in the repository, never in a
+        # log. Nothing below echoes it.
+        #
+        # Linked to the CurseForge PROJECT rather than to the new file, and that
+        # is deliberate. CurseForge builds from the tag asynchronously, so at the
+        # moment this runs the file usually does not exist yet -- a direct file
+        # link would 404 for the first minute or two. The project page always
+        # resolves and always shows the newest file.
+        #
+        # By id, not by slug: the id is in the .toc, so there is nothing here to
+        # guess or to keep in step with a rename.
+        #
+        # jq builds the JSON. The notes contain quotes, apostrophes, em-dashes
+        # and newlines -- every one of which breaks a hand-assembled payload --
+        # and --rawfile hands the file to jq without the shell touching it.
+        if: ${{ always() }}
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISCORD_WEBHOOK:-}" ]; then
+            echo "No DISCORD_WEBHOOK secret; nothing announced."
+            exit 0
+          fi
+
+          VERSION="${GITHUB_REF_NAME}"
+          PROJECT="https://www.curseforge.com/projects/1669655"
+
+          # Discord caps an embed description at 4096 characters. Truncated on a
+          # character count rather than a line count, because one long bullet is
+          # as capable of overflowing it as thirty short ones.
+          # The BOM goes first. CHANGELOG-RELEASE.md is written UTF-8 with one,
+          # and left in place it becomes the first character of the embed --
+          # invisible, but it is the sort of thing that shows up later as a
+          # stray glyph in something that renders more strictly than Discord.
+          sed -i '1s/^ï»¿//' notes.md
+
+          head -c 3900 notes.md > body.md
+          if [ "$(wc -c < notes.md)" -gt 3900 ]; then
+            echo "" >> body.md
+            echo "..." >> body.md
+          fi
+
+          jq -n \
+            --arg title "ArenaPlus ${GITHUB_REF_NAME}" \
+            --arg url "${PROJECT}" \
+            --rawfile body body.md \
+            '{embeds: [{title: $title, url: $url, description: $body, color: 3447003}]}' \
+            > payload.json
+
+          # --fail so a rejected post is a failed step rather than a silent one.
+          # The webhook goes in as a variable and is never printed.
+          curl --fail --silent --show-error \
+            -H "Content-Type: application/json" \
+            -d @payload.json \
+            "${DISCORD_WEBHOOK}"
+
+          echo "Announced ${VERSION}."

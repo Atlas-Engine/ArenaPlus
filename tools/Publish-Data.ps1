@@ -218,6 +218,43 @@ try {
 
     git add -A
     git commit -q -m "Data $version"
+
+    # Take whatever is on origin before tagging, rather than assuming
+    # nothing put it there.
+    #
+    # This only ever pushed, and for a repository nothing else writes to
+    # that held for a year. Then four commits were made through GitHub's
+    # web interface on 2026-09-08 -- a workflow file added and removed,
+    # twice -- and every run afterwards was a non-fast-forward and was
+    # refused. Seventy-two of them, over three days, while the dashboard
+    # said FAILED and the log said only "git refused".
+    #
+    # Merged, not rebased. The tags this script has already made point at
+    # local commits; a rebase would move those commits out from under
+    # them and leave ten tags naming a lineage on no branch. A merge
+    # leaves every one of them valid.
+    #
+    # After the commit rather than before it: the working tree is full of
+    # freshly copied tables at this point, and merging into a dirty tree
+    # is refused the moment origin happens to touch the same file.
+    #
+    # A conflict cannot happen in the ordinary case -- the tables are
+    # written by the passes and by nothing else -- so one means a person
+    # edited data on GitHub, and choosing between the two versions is
+    # their decision, not this script's.
+    git fetch -q origin
+    if ($LASTEXITCODE -ne 0) { throw "git could not reach origin to fetch." }
+
+    $behind = [int](git rev-list --count "HEAD..origin/main")
+    if ($behind -gt 0) {
+        Say "origin has $behind commit(s) this copy does not; merging them in first."
+        git merge -q --no-edit origin/main
+        if ($LASTEXITCODE -ne 0) {
+            git merge --abort
+            throw "origin and this copy disagree about a file -- merge $Repo by hand."
+        }
+    }
+
     git tag $version
 
     # Which old tags go, worked out before the push rather than after it.
@@ -260,7 +297,22 @@ try {
     #
     # Explicit refspecs rather than --tags: this pushes the one tag just made,
     # not whatever else happens to be lying around locally.
-    git push -q origin HEAD "refs/tags/$version" @refs
+    # Captured rather than let go to a console that does not exist.
+    #
+    # The scheduled run has no console, so git's own account of itself
+    # went nowhere and the log recorded that the push was refused without
+    # ever recording why. "fetch first" was sitting in that output for
+    # three days.
+    #
+    # ErrorActionPreference is Stop, and in Windows PowerShell redirecting
+    # a native program's stderr under Stop turns each line into a
+    # terminating NativeCommandError -- a failed push would die here
+    # instead of reaching the check below. Relaxed for the one call and
+    # put straight back.
+    $was = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $said = & git push -q origin HEAD "refs/tags/$version" @refs 2>&1
+    $ErrorActionPreference = $was
 
     # Checked rather than assumed. -q means a failure here says nothing at all,
     # and saying nothing is how the prune bug lasted three days.
@@ -271,6 +323,10 @@ try {
     # ls-remote confirmed a moment earlier, and nothing else pushes to this
     # repository.
     if ($LASTEXITCODE -ne 0) {
+        foreach ($line in $said) {
+            $text = "$line".Trim()
+            if ($text) { Say "  git: $text" }
+        }
         throw ("git refused the push of $version" +
                $(if ($drop.Count) { " and {0} tag deletion(s)" -f $drop.Count } else { "" }) + ".")
     }
