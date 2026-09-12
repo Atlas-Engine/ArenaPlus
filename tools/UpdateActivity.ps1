@@ -63,9 +63,10 @@ if (-not (Test-Path $ladderFile)) {
 
 # ---------------------------------------------------------------- the log
 #
-# This month and last. A seven-day window crosses the first of the month on six
-# days out of thirty, and on those days reading only the current file would
-# quietly report a week that began on the 1st.
+# This month and last. The widest window is a day, so it crosses the first of
+# the month only on the 1st itself -- but reading one file would report a day
+# that began at midnight on that day, and it costs nothing to read both.
+
 # Character for character what UpdateFromBlizzard.ps1 uses to stamp the rows
 # this reads, and that is the point: every comparison below is between the two,
 # so they have to be wrong in the same direction if they are wrong at all.
@@ -107,7 +108,7 @@ if ($tsvFiles.Count -eq 0) {
 #
 # Keyed by bracket as well as by character: the log counts 2v2 games and 3v3
 # games separately, and so does the ladder.
-$display = @{}
+$display = New-KeyTable
 $bracket = 0
 foreach ($line in Get-Content $ladderFile -Encoding UTF8) {
     $head = [regex]::Match($line, '^\s*\[(\d+)\]\s*=\s*\{\s*--')
@@ -138,6 +139,11 @@ foreach ($w in $Windows) { $totals[$w] = @{} }
 $read = 0
 $matched = 0
 $orphans = 0
+$phantom = 0
+
+# The last row seen for each character+bracket, to spot the repeat above.
+# Ordinal, for exactly the reason the repeat exists in the first place.
+$lastSig = New-KeyTable
 $widest = ($Windows | Measure-Object -Maximum).Maximum
 $oldest = $now - ($widest * 3600)
 
@@ -159,6 +165,34 @@ foreach ($path in $tsvFiles) {
         if (-not [int]::TryParse($stamp, [ref]$when)) { continue }
 
         $read++
+
+        # A row identical to that character's previous one, at the same
+        # rating, is not a second session -- it is the same session
+        # counted twice.
+        #
+        # Until 2026-09-12 the passes kept their per-character tables in a
+        # PowerShell @{}, whose comparer is culture-aware: the ae-ligature
+        # equals the letters "ae", so two real characters on Spineshatter
+        # shared one slot in the baseline and one of them diffed against
+        # the other's win count on every run. It emitted the same non-zero
+        # delta for ever while its rating never moved -- 105 rows for one
+        # of them in four days, which read as the busiest player on the
+        # ladder.
+        #
+        # The cause is fixed in DataClients.ps1 (New-KeyTable), but the
+        # rows already written stay in the log, so they are filtered here
+        # on the way out. Kept rather than deleted: the log is the one
+        # thing in this project that cannot be re-fetched, and a bug is
+        # evidence too.
+        #
+        # Measured across 53,670 rows: 165 of them, 0.3%, and 144 of those
+        # 165 are the two characters above. A real pair of sessions moves
+        # the rating or varies the count; identical at the very next poll
+        # is the fingerprint and nothing else produces it.
+        $sig = "{0}|{1}|{2}" -f $bit[3], $bit[5], $bit[6]
+        if ($lastSig[$bit[2]] -eq $sig) { $phantom++; continue }
+        $lastSig[$bit[2]] = $sig
+
         if ($when -lt $oldest) { continue }
 
         $row = $display[$bit[2]]
@@ -178,7 +212,7 @@ foreach ($path in $tsvFiles) {
             if ($when -lt ($now - ($w * 3600))) { continue }
 
             $per = $totals[$w]
-            if (-not $per.ContainsKey($index)) { $per[$index] = @{} }
+            if (-not $per.ContainsKey($index)) { $per[$index] = New-KeyTable }
 
             $at = $per[$index]
             if ($at.ContainsKey($row)) {
@@ -270,7 +304,7 @@ $null = $out.AppendLine("}")
 Write-DataFile -Path $activityFile -Value $out.ToString()
 
 $size = [math]::Round((Get-Item $activityFile).Length / 1KB)
-Write-Log ("{0}: {1} log row(s) read, {2} on the ladder, {3} off it. {4} entries across {5} window(s), {6} KB." -f `
-    $Region.ToUpper(), $read, $matched, $orphans, $written, $Windows.Count, $size)
+Write-Log ("{0}: {1} log row(s) read, {2} on the ladder, {3} off it, {4} repeated. {5} entries across {6} window(s), {7} KB." -f `
+    $Region.ToUpper(), $read, $matched, $orphans, $phantom, $written, $Windows.Count, $size)
 
 Copy-ToOtherClients -Primary $data -Files @($activityFile) -Say ${function:Write-Log}

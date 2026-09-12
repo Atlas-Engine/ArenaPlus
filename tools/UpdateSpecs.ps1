@@ -693,7 +693,7 @@ if ((Test-Path $inspectFile) -and $SetSpecConfidence -gt 0) {
     # Whichever set a character wears most of, if they wear enough of it to
     # mean anything. Four, because a two-piece is something people wear for the
     # bonus while playing another spec entirely.
-    $wear = @{}
+    $wear = New-KeyTable
     foreach ($line in (Get-Content $inspectFile)) {
         $who = [regex]::Match($line, '^\s*\["([^"]+)"\]=\{')
         if (-not $who.Success) { continue }

@@ -18,6 +18,43 @@
 # at different moments -- a folder copy would roll one of them back, which is
 # the same rule CLAUDE.md states for Dev and live.
 
+# A hashtable that compares character keys as text rather than as language.
+#
+# PowerShell's @{} is case-insensitive AND culture-aware, and the second half
+# is the trap. Under .NET's linguistic comparison the letter ae-ligature is
+# EQUAL to the two letters "ae", so "aezys" and the ligature spelling of it
+# are one key in a @{} and two keys everywhere else:
+#
+#     $h = @{}; $h['aezys']=1; $h['<ae>zys']=2; $h.Count   ->  1
+#
+# Two real characters on Spineshatter are spelled exactly that way. Every
+# table in the passes that is keyed by "bracket|name|realm" therefore had
+# them sharing one slot, last writer winning:
+#
+#   LastPoll  one of them diffed against the other's win count every run, so
+#             it emitted the same non-zero delta for ever while its rating sat
+#             still -- 109 phantom rows for one character in four days, and
+#             the +13,574 of "movement" that started this hunt.
+#   Best      a season peak recorded against the wrong character. That is the
+#             2033 sitting on a 1933-rated row in the shipped ladder today.
+#   LiveCache
+#   liveRatings
+#             a character served another character's rating outright.
+#   Baseline  the weekly change columns attributed to the wrong row.
+#
+# Ordinal compares the code units and nothing else, which is what a key built
+# out of a name and a realm slug wants: these are identifiers, not prose, and
+# no culture has an opinion about them. UpdateTitles.ps1 already builds its
+# own dictionary this way -- the lesson was learned there and never carried
+# across.
+#
+# Still case-SENSITIVE, deliberately. Every key handed to these tables is
+# lowered before it arrives, so folding case again would only buy back a
+# little of the ambiguity this exists to remove.
+function New-KeyTable {
+    return New-Object 'System.Collections.Hashtable' ([System.StringComparer]::Ordinal)
+}
+
 # Write a shipped table so no reader can ever see half of it.
 #
 # Set-Content truncates the file and then writes it, which leaves a window --

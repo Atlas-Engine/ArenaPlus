@@ -429,7 +429,7 @@ foreach ($bracket in $brackets) {
 # pass measured 5,590 of 5,915 answering 304 and still took eleven minutes,
 # because a 304 costs the same round trip. They save Blizzard the work and us
 # the parsing, which is worth keeping even when it does not save time.
-$liveRatings = @{}
+$liveRatings = New-KeyTable
 $liveFile = Join-Path $PSScriptRoot ("LiveCache-" + $Region + ".txt")
 $fresh = 0
 $unchanged = 0
@@ -448,7 +448,7 @@ $throttled = 0
 if ($Live) {
     # What the last pass learned, so unchanged characters cost a 304 rather than
     # a full response -- and so a 304 still has a rating to keep.
-    $cache = @{}
+    $cache = New-KeyTable
     if (Test-Path $liveFile) {
         foreach ($line in Get-Content $liveFile) {
             # Tabs, not pipes: the key is "bracket|name|realm", and splitting on
@@ -857,7 +857,7 @@ Write-DataFile -Path $cutoffFile -Value $cutoffOut
 # the script. Replaced once it is more than seven days old, so the comparison is
 # always against roughly a week and never against this morning.
 $baselineFile = Join-Path $PSScriptRoot ("Baseline-" + $Region + ".txt")
-$baseline = @{}
+$baseline = New-KeyTable
 $baselineDate = ""
 
 if (Test-Path $baselineFile) {
@@ -915,7 +915,7 @@ $activityFile = Join-Path $PSScriptRoot ("Activity-" + $Region + "-" + (Get-Date
 $lastFile     = Join-Path $PSScriptRoot ("LastPoll-" + $Region + ".txt")
 
 # key|bracket -> "rating won lost", as of the previous run.
-$lastPoll = @{}
+$lastPoll = New-KeyTable
 if (Test-Path $lastFile) {
     foreach ($line in Get-Content $lastFile) {
         if ($line.StartsWith("#")) { continue }
@@ -964,7 +964,7 @@ $activity = New-Object System.Collections.Generic.List[string]
 # season 13 is not a fact about season 14, and carrying it over would show
 # every returning player a peak they cannot match yet.
 $bestFile = Join-Path $PSScriptRoot ("Best-" + $Region + ".txt")
-$best = @{}
+$best = New-KeyTable
 $bestSeason = 0
 
 if (Test-Path $bestFile) {
@@ -982,7 +982,7 @@ if ($bestSeason -ne $season) {
     if ($bestSeason -gt 0) {
         Write-Host ("Season {0} replaces {1}: starting the best-rating history again." -f $season, $bestSeason)
     }
-    $best = @{}
+    $best = New-KeyTable
 }
 
 foreach ($bracket in $brackets) {
