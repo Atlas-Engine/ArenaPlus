@@ -1164,7 +1164,7 @@ end
 local function StampMe(byName,info)
 	if not (byName and info) then return end
 
-	local rank=GetPersonalRatedInfo and tonumber(select(11,GetPersonalRatedInfo(info.bracket)))
+	local rank=GetPersonalRatedInfo and tonumber((select(11,GetPersonalRatedInfo(info.bracket))))
 
 	for _,player in pairs(byName) do
 		if player.n and IsMe(player.n) then
@@ -1736,7 +1736,7 @@ local function ShowDetail(row,match)
 			-- GetPersonalRatedInfo knows your rating and your rank outright.
 			if not ladder and IsMe(player.n) and GetPersonalRatedInfo then
 				local rating=GetPersonalRatedInfo(bracket)
-				local rank=tonumber(select(11,GetPersonalRatedInfo(bracket)))
+				local rank=tonumber((select(11,GetPersonalRatedInfo(bracket))))
 				rating=tonumber(rating)
 
 				if rating and rating>0 and rank and rank>0 then
@@ -2239,7 +2239,7 @@ function Refresh()
 		-- tests below back to rating alone rather than claiming anything.
 		local rank=0
 		if mine and GetPersonalRatedInfo then
-			rank=tonumber(select(11,GetPersonalRatedInfo(bracket))) or 0
+			rank=tonumber((select(11,GetPersonalRatedInfo(bracket)))) or 0
 		end
 
 		-- Whether a tier is actually held, by the same rule ns.RankHex
