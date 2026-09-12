@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 1.6c
+
+- Fixes and improvements in Match history.
+
 ## 1.6b
 
 - Fixes and improvements in CHANGELOG.md, Wording, Match history.
@@ -118,6 +122,7 @@
 - Fixed characters with the same name on different realms showing each other's rank and rating.
 - Press Enter in the ladder search to step between characters sharing a name.
 - Changing page in the ladder now returns to the top of the list.
+
 
 
 

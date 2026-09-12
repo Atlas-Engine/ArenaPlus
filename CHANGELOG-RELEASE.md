@@ -1,1 +1,1 @@
-﻿- Fixes and improvements in CHANGELOG.md, Wording, Match history.
+﻿- Fixes and improvements in Match history.
