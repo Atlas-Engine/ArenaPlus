@@ -537,8 +537,12 @@ function ns.AuctionPvPShow(spec)
 			local who = entry.name or "?"
 			row.name:SetText(who)
 
+			-- The rating in the colour of the title it is worth, by the same rule
+			-- the ladder paints its rows with, and against the region the row came
+			-- from: a Gladiator cut is a different number in each.
 			local realm = entry.realm or ""
-			row.detail:SetText(("%d  %s"):format(entry.rating or 0, realm))
+			local hex = (ns.RankHex and ns.RankHex(panel.bracket, entry, LadderKey(panel.region))) or "b3b3b3"
+			row.detail:SetText(("|cff%s%d|r  %s"):format(hex, entry.rating or 0, realm))
 			row:Show()
 		end
 	end

@@ -187,13 +187,18 @@ end
 -- activity view is closed.
 local ACTIVITY_STRIP = 38
 
--- How the activity view is ordered: nil for rating, "seen" for recency.
---
--- Two states rather than the three a sortable column usually has. There is
--- no ascending last-seen worth offering -- "who played least recently" is a
--- question about people who have stopped playing, which this view exists to
--- exclude -- so the second click puts it back rather than reversing it.
+-- Which column orders the list: nil for rating, "seen" for recency, which
+-- only the activity view has.
 local activitySort
+-- And which way. Rating runs highest first and Last seen most recent first
+-- until the column in force is clicked again, which turns it over; clicking
+-- the other column moves to that one in its own default direction.
+--
+-- Reversible both ways on request. It used to be two states -- a second click
+-- on Last seen put rating back -- on the reasoning that "who played least
+-- recently" is not a question this view asks. It is a question people wanted
+-- to ask, and every other sortable table they use answers it.
+local sortAscending=false
 local specFilter -- the spec id being shown alone, or nil for all of them
 local rows={}    -- the pool, one per visible line rather than one per place
 local shown      -- the list the pool is drawing from, and which row is lit
@@ -324,8 +329,15 @@ local function ActivityRows(bracket)
 	-- Ties fall to games and then to name. Three keys rather than one because
 	-- table.sort is not stable: two characters on the same rating would
 	-- otherwise swap places between redraws for no reason the eye can follow.
+	--
+	-- Turned over as a whole when sortAscending is set. The tie-breaks stay
+	-- the way round they are: they exist to keep equal rows still, and
+	-- flipping them too would only make them move.
 	local function ByRating(a,b)
-		if (a.rating or 0)~=(b.rating or 0) then return (a.rating or 0)>(b.rating or 0) end
+		if (a.rating or 0)~=(b.rating or 0) then
+			if sortAscending then return (a.rating or 0)<(b.rating or 0) end
+			return (a.rating or 0)>(b.rating or 0)
+		end
 		if a.games~=b.games then return a.games>b.games end
 		return (a.name or "")<(b.name or "")
 	end
@@ -338,9 +350,18 @@ local function ActivityRows(bracket)
 		-- A row with no time at all sorts last rather than first. It can only
 		-- happen against a data file written before the column existed, and
 		-- "unknown" belongs at the bottom of a list ordered by recency.
+		--
+		-- Oldest first when turned over, and the unknown still at the bottom
+		-- either way: a row with no time is not older than every row that has
+		-- one, it is simply not placed.
 		table.sort(out,function(a,b)
 			local left,right=a.seenAt or 0,b.seenAt or 0
-			if left~=right then return left>right end
+			if left~=right then
+				if left==0 then return false end
+				if right==0 then return true end
+				if sortAscending then return left<right end
+				return left>right
+			end
 			return ByRating(a,b)
 		end)
 	else
@@ -1143,6 +1164,16 @@ local function Refresh()
 		full=Filtered(ActivityRows(bracket))
 	else
 		full=Filtered(Ladder(bracket))
+
+		-- Lowest first, when Rating has been turned over. A copy, never the
+		-- list itself: without a spec filter Filtered hands back the ladder
+		-- table the data addon owns, and reversing that in place would turn
+		-- every other reader of it upside down too.
+		if sortAscending and not activitySort then
+			local flipped={}
+			for index=#full,1,-1 do flipped[#flipped+1]=full[index] end
+			full=flipped
+		end
 	end
 
 	-- Found in the whole ladder before it is cut into pages, so a search can
@@ -2483,7 +2514,15 @@ local function CreateWindow()
 			local on=activityWindow and true or false
 			frame.seenHeading:SetShown(on)
 			if frame.seenSort then frame.seenSort:SetShown(on) end
-			if frame.ratingSort then frame.ratingSort:SetShown(on) end
+			-- Rating sorts on the ladder as well now, so its click target stays.
+			if frame.ratingSort then frame.ratingSort:Show() end
+
+			-- The arrow on whichever column is in force, pointing the way the
+			-- list runs. On the ladder that is always Rating: Last seen is not
+			-- there to be in force.
+			local sortingSeen=on and activitySort=="seen"
+			if frame.ratingSort then frame.ratingSort.ShowArrow(not sortingSeen) end
+			if frame.seenSort then frame.seenSort.ShowArrow(sortingSeen) end
 
 			-- Lit on whichever column is doing the sorting, grey on the other.
 			--
@@ -2546,12 +2585,42 @@ local function CreateWindow()
 	-- guessing that a second click on the other would do it -- and that
 	-- second click was broken, so the view could be sorted by recency and
 	-- never sorted back.
-	local function Sorter(heading,x,width,want)
+	local function Sorter(heading,x,width,want,justify)
 		local button=CreateFrame("Button",nil,header)
 		button:SetPoint("LEFT",header,"LEFT",x,0)
 		button:SetSize(width,14)
 		button.heading=heading
 		button.want=want
+
+		-- Which way the list runs, as the game's own sort arrow beside the
+		-- words. A texture rather than a character: the default font has no
+		-- triangle and draws one as an empty box. UI-SortArrow points down;
+		-- flipping its coordinates points it up.
+		--
+		-- Placed by the width of the words, not of the heading: a right-aligned
+		-- "Rating" sits at the far end of a 70-point box, and an arrow at the
+		-- box's edge would float well clear of it.
+		local arrow=header:CreateTexture(nil,"OVERLAY")
+		arrow:SetTexture("Interface\\Buttons\\UI-SortArrow")
+		arrow:SetSize(9,8)
+		arrow:Hide()
+
+		function button.ShowArrow(active)
+			if not active then arrow:Hide() return end
+			local words=heading:GetStringWidth() or 0
+			arrow:ClearAllPoints()
+			if justify=="RIGHT" then
+				arrow:SetPoint("RIGHT",heading,"RIGHT",-words-3,0)
+			else
+				arrow:SetPoint("LEFT",heading,"LEFT",words+3,0)
+			end
+			if sortAscending then
+				arrow:SetTexCoord(0,0.5625,1,0)
+			else
+				arrow:SetTexCoord(0,0.5625,0,1)
+			end
+			arrow:Show()
+		end
 
 		button:SetScript("OnClick",function()
 			-- Written as an if, deliberately.
@@ -2562,10 +2631,14 @@ local function CreateWindow()
 			-- back -- so the expression returns `want` whatever the state was.
 			-- That is exactly what shipped: clicking Last seen sorted, and
 			-- clicking it again did nothing at all.
+			--
+			-- The column in force turns over; any other column takes over in
+			-- its own default direction, highest or most recent first.
 			if activitySort==want then
-				activitySort=nil
+				sortAscending=not sortAscending
 			else
 				activitySort=want
+				sortAscending=false
 			end
 
 			-- Back to the top. The row you were looking at is somewhere else
@@ -2582,21 +2655,26 @@ local function CreateWindow()
 		-- looks exactly like one that cannot until you try it. The one already
 		-- sorting is left alone: it is lit, and lighting it further would be
 		-- saying nothing.
+		--
+		-- Outside the activity view nothing is lit, so Rating brightens there
+		-- whatever the order.
+		local function Lit(self)
+			return activityWindow and activitySort==self.want
+		end
 		button:SetScript("OnEnter",function(self)
-			if activitySort~=self.want then self.heading:SetTextColor(1,1,1) end
+			if not Lit(self) then self.heading:SetTextColor(1,1,1) end
 		end)
 		button:SetScript("OnLeave",function(self)
-			if activitySort~=self.want then self.heading:SetTextColor(0.6,0.6,0.6) end
+			if not Lit(self) then self.heading:SetTextColor(0.6,0.6,0.6) end
 		end)
 
 		return button
 	end
 
-	-- nil is the default order, so Rating's "want" is nil and clicking it
-	-- while it is already in force clears to nil again -- which is the same
-	-- thing, and so reads as a button that simply stays put.
-	frame.ratingSort=Sorter(frame.ratingHeading,COL_RATING,70,nil)
-	frame.seenSort=Sorter(frame.seenHeading,COL_SEEN,116,"seen")
+	-- nil is the rating order, so Rating's "want" is nil: clicking it while it
+	-- is in force turns it over rather than choosing it again.
+	frame.ratingSort=Sorter(frame.ratingHeading,COL_RATING,70,nil,"RIGHT")
+	frame.seenSort=Sorter(frame.seenHeading,COL_SEEN,116,"seen","LEFT")
 
 	local divider=frame:CreateTexture(nil,"ARTWORK")
 	divider:SetPoint("TOPLEFT",frame,"TOPLEFT",12,DIVIDER_TOP)
@@ -2822,6 +2900,7 @@ local function CreateWindow()
 		-- buttons are for the bracket in force. Home is the way out. A
 		-- working toggle here would be a branch that can never be reached.
 		activityWindow=ACTIVITY_DEFAULT
+		sortAscending=false
 
 		-- The order goes back with the window. Both are answers to "how do I
 		-- want this read", and leaving one behind while resetting the other
@@ -2959,6 +3038,7 @@ local function CreateWindow()
 		showingAlts=false
 		activityWindow=nil
 		activitySort=nil
+		sortAscending=false
 		specFilter=nil
 
 		-- And back to your own game and your own region, which are the two

@@ -954,6 +954,65 @@ end
 local TALENT_COLUMNS = 3
 local TALENT_TIERS   = 6
 
+-- One talent in a Burning Crusade tree, made on first use: trees run from
+-- twenty to twenty-four talents and nothing is gained by building the most any
+-- class could need up front.
+local function TreeCell(page,tree,index)
+	local cell=tree.cells[index]
+	if cell then return cell end
+
+	local size=page.treeCell-10
+	cell=CreateFrame("Button",nil,page)
+	cell:SetSize(size,size)
+
+	-- A square a point larger than the icon behind it, which is the border:
+	-- grey, green for part-taken, gold for taken to the top.
+	cell.edge=cell:CreateTexture(nil,"BORDER")
+	cell.edge:SetPoint("TOPLEFT",-2,2)
+	cell.edge:SetPoint("BOTTOMRIGHT",2,-2)
+
+	cell.icon=cell:CreateTexture(nil,"ARTWORK")
+	cell.icon:SetAllPoints()
+	cell.icon:SetTexCoord(0.07,0.93,0.07,0.93)
+
+	cell.plate=cell:CreateTexture(nil,"OVERLAY")
+	cell.plate:SetPoint("BOTTOMRIGHT",cell,"BOTTOMRIGHT",4,-4)
+	cell.plate:SetSize(22,12)
+	cell.plate:SetColorTexture(0,0,0,0.85)
+
+	cell.rank=cell:CreateFontString(nil,"OVERLAY","NumberFontNormalSmall")
+	cell.rank:SetPoint("CENTER",cell.plate,"CENTER",0,0)
+
+	cell:SetScript("OnEnter",function(self)
+		GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
+		-- The client's own tooltip where it knows the spell, which a TBC client
+		-- does. A Mists client does not know TBC rank spells, and gets the name
+		-- that ships with the layout instead of an empty box.
+		local ok=self.spellID and pcall(GameTooltip.SetSpellByID,GameTooltip,self.spellID)
+		if not ok or GameTooltip:NumLines()==0 then
+			GameTooltip:SetText(self.talentName or "",1,1,1)
+		end
+		GameTooltip:AddLine(L.INSPECT_TALENT_RANK:format(self.taken or 0,self.max or 0),
+			self.taken and self.taken>0 and 0.12 or 0.5,self.taken and self.taken>0 and 1 or 0.5,
+			self.taken and self.taken>0 and 0 or 0.5)
+		GameTooltip:Show()
+	end)
+	cell:SetScript("OnLeave",function() GameTooltip:Hide() end)
+
+	tree.cells[index]=cell
+	return cell
+end
+
+-- One straight piece of an arrow between two talents. An arrow that turns a
+-- corner is two of them.
+local function TreeLine(page,tree,index)
+	local line=tree.lines[index]
+	if line then return line end
+	line=page:CreateTexture(nil,"BORDER")
+	tree.lines[index]=line
+	return line
+end
+
 local function BuildTalentsPage(parent)
 	local page=CreateFrame("Frame",nil,parent)
 	page:SetPoint("TOPLEFT",0,0)
@@ -1016,62 +1075,54 @@ local function BuildTalentsPage(parent)
 	-- The Burning Crusade layout, built beside the grid above rather than
 	-- instead of it.
 	--
-	-- TBC has no tiers: it has three talent TREES, each taken to whatever
-	-- depth the player paid for, and a build is read as "17/0/44" plus which
-	-- talents those points bought. The six-by-three grid describes nothing
-	-- there -- it was drawing Mists tiers with TBC spell ids in them, which is
-	-- how a rogue came out showing "spell 108208" against level 15.
+	-- TBC has no tiers: it has three talent TREES, and a build is read as
+	-- "17/0/44" plus which talents those points bought. The six-by-three grid
+	-- describes nothing there -- it was drawing Mists tiers with TBC spell ids
+	-- in them, which is how a rogue came out showing "spell 108208" against
+	-- level 15.
+	--
+	-- Each tree is drawn whole, as the talent frame draws it: four columns and
+	-- nine rows, every talent in its cell whether it was taken or not, and the
+	-- lines from a talent to the ones it unlocks. The layout ships in
+	-- Data/TalentTreesTBC.lua, because no client will describe a class that is
+	-- not the player's own. Before that this was a list of what was taken, which
+	-- said nothing about what was passed over.
 	--
 	-- Which layout is used is decided by the DATA, not the client: a Mists
 	-- player looking at an Anniversary character needs this one too.
-	local treeRows=18
-	local treeRowHeight=18
+	--
+	-- Sized to the page: 440 points of height under the band, and 44 per cell
+	-- puts nine rows and a heading in 418 of them.
+	local TREE_COLUMNS,TREE_CELL,TREE_GAP=4,44,18
+	local treeWidth=TREE_COLUMNS*TREE_CELL
+	local treesLeft=math.floor((WIDTH-(TALENT_COLUMNS*treeWidth+(TALENT_COLUMNS-1)*TREE_GAP))/2)
+	page.treeCell=TREE_CELL
 	page.trees={}
 
 	for column=1,TALENT_COLUMNS do
-		local tree={}
-		local left=46+(column-1)*cellWidth
+		local tree={ cells={}, lines={} }
+		tree.left=treesLeft+(column-1)*(treeWidth+TREE_GAP)
+		tree.top=TOP-22
+
+		tree.icon=page:CreateTexture(nil,"ARTWORK")
+		tree.icon:SetSize(16,16)
+		tree.icon:SetPoint("TOPLEFT",page,"TOPLEFT",tree.left+4,TOP)
+		tree.icon:SetTexCoord(0.07,0.93,0.07,0.93)
 
 		tree.heading=page:CreateFontString(nil,"OVERLAY","GameFontNormal")
-		tree.heading:SetPoint("TOPLEFT",page,"TOPLEFT",left,TOP)
-		tree.heading:SetWidth(cellWidth-6)
+		tree.heading:SetPoint("LEFT",tree.icon,"RIGHT",6,0)
+		tree.heading:SetWidth(treeWidth-28)
 		tree.heading:SetJustifyH("LEFT")
 
-		tree.rows={}
-		for index=1,treeRows do
-			local row=CreateFrame("Button",nil,page)
-			row:SetSize(cellWidth-8,treeRowHeight-2)
-			row:SetPoint("TOPLEFT",page,"TOPLEFT",left,TOP-18-(index-1)*treeRowHeight)
-
-			row.icon=row:CreateTexture(nil,"ARTWORK")
-			row.icon:SetSize(treeRowHeight-4,treeRowHeight-4)
-			row.icon:SetPoint("LEFT",row,"LEFT",0,0)
-			row.icon:SetTexCoord(0.07,0.93,0.07,0.93)
-
-			row.rank=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-			row.rank:SetPoint("RIGHT",row,"RIGHT",-2,0)
-			row.rank:SetJustifyH("RIGHT")
-			row.rank:SetTextColor(0.7,0.7,0.7)
-
-			row.label=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-			row.label:SetPoint("LEFT",row.icon,"RIGHT",5,0)
-			row.label:SetPoint("RIGHT",row.rank,"LEFT",-4,0)
-			row.label:SetJustifyH("LEFT")
-			row.label:SetTextColor(1,0.82,0)
-
-			row:SetScript("OnEnter",function(self)
-				if not self.spellID then return end
-				GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
-				pcall(GameTooltip.SetSpellByID,GameTooltip,self.spellID)
-				GameTooltip:Show()
-			end)
-			row:SetScript("OnLeave",function() GameTooltip:Hide() end)
-			row:Hide()
-
-			tree.rows[index]=row
-		end
+		-- The tree's own ground, so three trees read as three things.
+		tree.ground=page:CreateTexture(nil,"BACKGROUND")
+		tree.ground:SetPoint("TOPLEFT",page,"TOPLEFT",tree.left-4,tree.top+4)
+		tree.ground:SetSize(treeWidth+8,9*TREE_CELL+8)
+		tree.ground:SetColorTexture(1,1,1,0.03)
 
 		tree.heading:Hide()
+		tree.icon:Hide()
+		tree.ground:Hide()
 		page.trees[column]=tree
 	end
 
@@ -3024,7 +3075,10 @@ function ns.ShowInspect(entry,region,bracket)
 	for column=1,TALENT_COLUMNS do
 		local tree=page.trees[column]
 		tree.heading:SetShown(onTrees)
-		for _,row in ipairs(tree.rows) do row:Hide() end
+		tree.icon:SetShown(onTrees)
+		tree.ground:SetShown(onTrees)
+		for _,cell in ipairs(tree.cells) do cell:Hide() end
+		for _,line in ipairs(tree.lines) do line:Hide() end
 	end
 
 	if onTrees then
@@ -3035,57 +3089,100 @@ function ns.ShowInspect(entry,region,bracket)
 			if page.levels and page.levels[tier] then page.levels[tier]:Hide() end
 		end
 
+		local layout=ns.TALENT_TREES_TBC and ns.TALENT_TREES_TBC[entry.class or ""]
+
+		-- What was taken, as [tree][talent] = { rank, spell }. The profile names a
+		-- talent by the spell of the rank that was bought, and q beside it says
+		-- which rank that was; the spell alone would say the same, and is the
+		-- fallback for a file written without q.
 		local ranks=data.q or {}
-		local taken=0   -- how far into the flat talent list we have read
-
-		-- d={name,points,count, name,points,count, ...} -- the count is what
-		-- splits the flat t={} list back into its trees. Deepest first, as
-		-- written, so the spec reads off the top.
-		for index=1,math.min(#trees/3,TALENT_COLUMNS) do
-			local tree=page.trees[index]
-			local name=trees[(index-1)*3+1]
-			local points=trees[(index-1)*3+2] or 0
-			local count=trees[(index-1)*3+3] or 0
-
-			tree.heading:SetText(("%s |cffffd100%d|r"):format(tostring(name),points))
-
-			for slot=1,count do
-				local row=tree.rows[slot]
-				local spellID=(data.t or {})[taken+slot]
-				if row and spellID then
-					row.spellID=spellID
-
-					-- The name ships with the data: these are TBC rank spells and
-					-- a Mists client, asked about them, answers nothing.
-					local shipped=ns.TALENT_NAMES and ns.TALENT_NAMES[spellID]
-					local fromClient,_,icon=GetSpellInfo(spellID)
-					row.label:SetText(shipped or fromClient or ("spell "..spellID))
-					row.icon:SetTexture(icon or "Interface/Icons/INV_Misc_QuestionMark")
-
-					-- "3/5": the rank taken, and the ceiling harvested across every
-					-- build read. Just the rank when the ceiling is not known yet.
-					local rank=ranks[taken+slot]
-					local talentID=ns.TALENT_OF_SPELL and ns.TALENT_OF_SPELL[spellID]
-					local max=talentID and ns.TALENT_MAX_RANK and ns.TALENT_MAX_RANK[talentID]
-					if rank and max then
-						row.rank:SetText(("%d/%d"):format(rank,max))
-					elseif rank then
-						row.rank:SetText(tostring(rank))
-					else
-						row.rank:SetText("")
-					end
-
-					row:Show()
-				end
+		local taken={}
+		for index,spellID in ipairs(data.t or {}) do
+			local at=ns.TALENT_TBC_BY_SPELL and ns.TALENT_TBC_BY_SPELL[spellID]
+			if at and at[1]==entry.class then
+				taken[at[2]]=taken[at[2]] or {}
+				taken[at[2]][at[3]]={ ranks[index] or at[4], spellID }
 			end
-
-			taken=taken+count
 		end
 
-		-- Trees the character spent nothing in are omitted by the API, so any
-		-- column left over is blanked rather than showing the last one twice.
-		for index=math.floor(#trees/3)+1,TALENT_COLUMNS do
-			page.trees[index].heading:SetText("")
+		local cellSize=page.treeCell
+		for column=1,TALENT_COLUMNS do
+			local tree=page.trees[column]
+			local shape=layout and layout[column]
+
+			if not shape then
+				tree.heading:SetText("")
+				tree.icon:Hide()
+			else
+				local mine=taken[column] or {}
+				local points=0
+				for _,got in pairs(mine) do points=points+(got[1] or 0) end
+
+				tree.heading:SetText(("%s |cffffd100%d|r"):format(shape.name,points))
+				tree.icon:SetTexture(shape.icon)
+
+				local function Centre(talent)
+					return tree.left+talent[2]*cellSize+cellSize/2,tree.top-talent[1]*cellSize-cellSize/2
+				end
+
+				local lines=0
+				for index,talent in ipairs(shape.talents) do
+					local got=mine[index]
+					local rank=got and got[1] or 0
+					local max=#talent[3]
+
+					local cell=TreeCell(page,tree,index)
+					local x,y=Centre(talent)
+					cell:ClearAllPoints()
+					cell:SetPoint("CENTER",page,"TOPLEFT",x,y)
+
+					cell.spellID=(got and got[2]) or talent[3][1]
+					cell.talentName=talent[6]
+					cell.taken,cell.max=rank,max
+
+					local icon=talent[5]
+					if not icon or icon==0 then icon=select(3,GetSpellInfo(talent[3][1])) end
+					cell.icon:SetTexture(icon or "Interface/Icons/INV_Misc_QuestionMark")
+					cell.icon:SetDesaturated(rank==0)
+					cell.icon:SetAlpha(rank==0 and 0.55 or 1)
+
+					cell.rank:SetText(("%d/%d"):format(rank,max))
+					if rank==0 then
+						cell.rank:SetTextColor(0.55,0.55,0.55)
+						cell.edge:SetColorTexture(0.25,0.25,0.25,1)
+					elseif rank<max then
+						cell.rank:SetTextColor(0.12,1,0)
+						cell.edge:SetColorTexture(0.12,0.8,0,1)
+					else
+						cell.rank:SetTextColor(1,0.82,0)
+						cell.edge:SetColorTexture(1,0.82,0,1)
+					end
+					cell:Show()
+
+					-- The arrow from what it needs: across first when the columns
+					-- differ, then down, which is how the talent frame routes them.
+					local need=talent[4]~=0 and shape.talents[talent[4]]
+					if need then
+						local fromX,fromY=Centre(need)
+						local lit=rank>0
+						local function Segment(x1,y1,x2,y2)
+							lines=lines+1
+							local line=TreeLine(page,tree,lines)
+							line:ClearAllPoints()
+							line:SetPoint("TOPLEFT",page,"TOPLEFT",math.min(x1,x2)-1.5,math.max(y1,y2)+1.5)
+							line:SetSize(math.abs(x2-x1)+3,math.abs(y2-y1)+3)
+							if lit then
+								line:SetColorTexture(0.85,0.68,0.1,0.9)
+							else
+								line:SetColorTexture(0.3,0.3,0.3,0.8)
+							end
+							line:Show()
+						end
+						if fromX~=x then Segment(fromX,fromY,x,fromY) end
+						if fromY~=y then Segment(x,fromY,x,y) end
+					end
+				end
+			end
 		end
 	end
 
@@ -3156,11 +3253,18 @@ function ns.ShowInspect(entry,region,bracket)
 	-- TBC has no glyphs, so the heading and its rows are hidden outright
 	-- rather than left saying "None glyphed" -- which reads as a character
 	-- who could have them and did not, when the expansion has none at all.
-	local noGlyphs=(ns.ClientVersion and ns.ClientVersion())=="tbc"
+	--
+	-- Decided by the CHARACTER as well as the client. A Mists player looking at
+	-- an Anniversary character still has glyph rows, and with nothing to fill
+	-- them drew "None glyphed." straight across the Affliction tree.
+	local noGlyphs=onTrees or (ns.ClientVersion and ns.ClientVersion())=="tbc"
 	if page.glyphHeading then page.glyphHeading:SetShown(not noGlyphs) end
 
 	for index,row in ipairs(page.glyphs) do
-		if noGlyphs then row:Hide() end
+		-- Shown again as well as hidden: on a Mists client this now changes
+		-- from one character to the next, and a TBC character looked at first
+		-- would otherwise leave every Mists character after it glyphless.
+		row:SetShown(not noGlyphs)
 		row.label:SetText(names[index] or "")
 
 		-- Kept on the row, so the hover reads what is there now rather than

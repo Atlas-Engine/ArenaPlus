@@ -39,6 +39,7 @@
 # change if Blizzard changes a talent or a glyph.
 Locales.lua
 Data\TalentGrid.lua
+Data\TalentTreesTBC.lua
 Data\GlyphData.lua
 HardCC.lua
 SpecData.lua
