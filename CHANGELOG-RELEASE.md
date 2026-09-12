@@ -1,1 +1,4 @@
-﻿- Fixes and improvements in Match history.
+﻿- New: TBC talents are drawn as the full talent trees in the inspect window -- all three trees, every talent with its rank, and the lines between talents that unlock each other. Works from both the Mists and Anniversary clients.
+- The ladder can be sorted by rating lowest first: click Rating to turn it over. In Activity, Rating and Last seen both turn over the same way, and an arrow shows which way the list runs.
+- Top PvP gear shows each player's rating in the colour of the title range it is worth.
+- Fixed "None glyphed." being written over TBC talents when looking at an Anniversary character from the Mists client.
