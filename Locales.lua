@@ -265,10 +265,13 @@ L.INSPECT_ENCHANT_ID      = "enchant %d"
 -- that reading somebody else's needs no second vocabulary.
 L.INSPECT_PVP_ARENA       = "Arena Battles"
 L.INSPECT_PVP_RBG         = "Rated Battlegrounds"
--- Earned, not current. A season title is kept for ever, which is the whole
--- reason to show it: a 2100 player who was a Gladiator is not the same
--- player as a 2100 who never has been.
-L.INSPECT_PVP_TITLES      = "Titles Earned"
+-- Earned, not current, which is the whole reason to show it: a 2100 player
+-- who was once a Gladiator is not the same player as a 2100 who never has
+-- been. Neither a season title nor a rating achievement is ever taken back.
+--
+-- "Achievements" rather than "Titles" because the section holds both, and
+-- the rating ones -- Three's Company: 2700 -- carry no title at all.
+L.INSPECT_PVP_TITLES      = "Achievements Earned"
 L.INSPECT_PVP_NO_TITLES   = "None on record."
 -- Said once, quietly, rather than leaving the section looking empty for
 -- every Anniversary character: the API has nothing to give there.
@@ -398,6 +401,41 @@ L.LADDER_ALTS             = "My alts"
 L.LADDER_TITLE_ALTS       = "My alts"
 L.LADDER_SUBTITLE_ALTS    = "%d rated"
 L.LADDER_NO_ALTS          = "None of your characters has a rating in this bracket."
+
+-- Who has actually been playing, rather than where everybody stands.
+--
+-- The window is named in the subtitle rather than in the heading, because
+-- the heading already carries the bracket and the flag and a third clause
+-- would push it past the game picker.
+L.LADDER_ACTIVITY         = "Activity"
+L.LADDER_TITLE_ACTIVITY   = "%s activity"
+-- Both halves matter. The count is the answer; the "as of" is the caveat,
+-- and without it a quiet hour reads as a broken window rather than as a
+-- file that was built before those games were played.
+L.LADDER_SUBTITLE_ACTIVITY = "%d playing in the last %s, as of %s"
+L.LADDER_NO_ACTIVITY      = "Nobody has played this bracket in that time."
+-- Different from the line above, and the difference is the whole point: one
+-- is a fact about the players, the other is a fact about this download.
+L.LADDER_NO_ACTIVITY_DATA = "This download has no activity data yet."
+
+-- The slider's stops, written under it.
+--
+-- Named by the hours rather than numbered by position, so the slider can
+-- gain or lose a stop without every label after it meaning something else.
+L.LADDER_WINDOW_1         = "1 hour"
+L.LADDER_WINDOW_3         = "3 hours"
+L.LADDER_WINDOW_6         = "6 hours"
+L.LADDER_WINDOW_12        = "12 hours"
+L.LADDER_WINDOW_24        = "24 hours"
+
+-- The same stops again for the subtitle, which puts "the last" in front of
+-- them. "the last hour" reads; "the last 1 hour" does not, and that single
+-- word is the whole reason there are two sets.
+L.LADDER_WINDOW_LONG_1    = "hour"
+L.LADDER_WINDOW_LONG_3    = "3 hours"
+L.LADDER_WINDOW_LONG_6    = "6 hours"
+L.LADDER_WINDOW_LONG_12   = "12 hours"
+L.LADDER_WINDOW_LONG_24   = "24 hours"
 -- For an alt the ladder does not list: the store keeps how many games it has
 -- played but not how they went, and "0/0" would be a wrong answer rather than
 -- a missing one.
@@ -412,6 +450,9 @@ L.LADDER_COL_RANK         = "#"
 L.LADDER_COL_NAME         = "Name"
 L.LADDER_COL_REALM        = "Realm"
 L.LADDER_COL_RECORD       = "Won / lost"
+-- Seen, not played. The ladder is polled on a timer, so what this dates is the
+-- poll that first noticed the games rather than the games themselves.
+L.LADDER_COL_SEEN         = "Last seen"
 L.LADDER_COL_RATING       = "Rating"
 
 L.HISTORY_SPECS_FILLED    = "Filled in %d missing specs on matches recorded before teammate specs could be read."
@@ -449,7 +490,6 @@ L.HISTORY_HEAD_RATING     = "Rating"
 -- Not on the published ladder: it stops at 1108 in 2v2 and 864 in 3v3, so this
 -- is most people in most matches rather than a fault.
 L.HISTORY_LADDER_NONE     = "|cff808080--|r"
-L.HISTORY_LADDER_CLICK    = "Click to find them on the ladder"
 L.HISTORY_SUMMARY_LENGTH  = "%d min %d sec"
 
 L.HISTORY_TIP_KILLS       = "Kills |cffffffff%d|r    Deaths |cffffffff%d|r"

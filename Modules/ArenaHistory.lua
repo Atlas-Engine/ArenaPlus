@@ -628,17 +628,33 @@ local function Sample()
 					-- Not Best: this one is signed, and keeping the larger of
 					-- the two would turn every defeat into a zero.
 					--
-					-- Nor "ignore zero", which was the first attempt: a loss
-					-- against somebody far below your MMR really does cost
-					-- nothing, and skipping zeroes left those players with a
-					-- blank line rather than a +0.
+					-- A zero is not written at all. This is a reversal: "ignore
+					-- zero" was the first attempt, it was abandoned because a loss
+					-- against somebody far below your MMR really does cost nothing
+					-- and those players came out blank, and the rule became
+					-- "seed a zero, let a real number replace it".
 					--
-					-- So: recorded even at zero, but a number once found is
-					-- never replaced by a zero. The scoreboard reads zero for
-					-- everybody until the match is decided, and empties again
-					-- as it closes.
+					-- That rule assumed the real number always arrives. It does
+					-- not. The scoreboard reads zero for everybody until the match
+					-- is decided and empties again as it closes, so a run that
+					-- reads between those two moments keeps the seeded zero for
+					-- ever, and a zero on disk cannot be told from a real one.
+					--
+					-- Measured over 770 recorded teams of two or more: 24% hold one
+					-- player with a real change beside a team mate reading zero,
+					-- and another 12% read zero across the whole team. Team mates
+					-- in one arena match do not disagree about whether the match
+					-- counted, so better than a third of every stored zero is
+					-- provably wrong. The genuine ones are a small minority of a
+					-- field that is wrong more often than right.
+					--
+					-- So nothing is written until a real figure turns up, and rc
+					-- left nil now means "never reported" rather than "reported as
+					-- nothing". Your own row loses nothing by it: match.d carries
+					-- the rating watcher's own figure, which is the client's rather
+					-- than the scoreboard's, and a genuine zero survives there.
 					local delta=tonumber(change)
-					if delta and (entry.rc==nil or delta~=0) then entry.rc=delta end
+					if delta and delta~=0 then entry.rc=delta end
 				end
 			end
 		end
@@ -912,30 +928,18 @@ end
 --
 -- The ladder place used to be looked up when the row was drawn, which meant a
 -- match got a different answer every time the ladder moved: fight a rank 12 and
--- read the row a week later, and it says whatever they are today. A record of a
--- past evening should not keep changing.
+-- The ladder stamp used to live here.
 --
--- So it is stamped once, here, when the match is committed -- `lr` for the
--- place and `lv` for the rating the ladder then had. Rows written before this
--- carry neither and fall back to a live lookup, which is what they always did.
+-- It wrote `lr` and `lv` onto each player as the match was committed, so that
+-- a row read a week later would not quietly say whatever they are today. The
+-- reasoning was sound and the result was not: the client parses the ladder
+-- file once at load, so every match in a session stamped an identical number,
+-- and that number was whatever the file happened to say at the last reload.
+-- It was a fixed point, but not a true one, and it disagreed with the ladder
+-- window sitting next to it.
 --
--- Honest about what it is: the ladder in memory is only as fresh as the file
--- loaded at the last reload, so this is where they stood when we last heard,
--- not to the minute. It is still a fixed point, which the old behaviour was
--- not.
-local function StampLadder(byName,bracket)
-	if not (byName and bracket and ns.LadderEntry) then return end
-
-	for _,player in pairs(byName) do
-		if player.n and player.lr==nil then
-			local entry=ns.LadderEntry(bracket,player.n)
-			if entry then
-				player.lr=entry.rank
-				player.lv=entry.rating
-			end
-		end
-	end
-end
+-- Nothing replaced it because nothing can. See the note at the lookup below
+-- for what the client was asked and what it said.
 
 local function AsList(byName)
 	local list,seen={},{}
@@ -1213,29 +1217,6 @@ local function FitsBracket(match,bracket)
 	return Counted(match.mine)<=size and Counted(match.theirs)<=size
 end
 
--- Whether this match captured rating changes at all.
---
--- Worth asking because of how the first version behaved: it recorded a change
--- only when it was non-zero, so a player who lost nothing -- which happens when
--- their rating sits far below their MMR -- came out with no number rather than
--- a zero.
---
--- So in a match where anybody has one, anybody without one had zero. That is
--- not a guess about the game, it is the exact inverse of what the recording
--- did. In a match where nobody has one, the match predates any of this and
--- nothing can be said.
-local function HasDeltas(match)
-	if not match then return false end
-
-	for _,side in ipairs({ match.mine, match.theirs }) do
-		for _,player in ipairs(side or {}) do
-			if tonumber(player.rc) then return true end
-		end
-	end
-
-	return false
-end
-
 -- Whether a match was watched at all.
 --
 -- The opposing team is read from the arena units, which only exist while you
@@ -1473,36 +1454,26 @@ local function DetailLine(detail,index)
 	-- Its own frame because a FontString cannot be clicked, and the highlight
 	-- because a thing that responds to a click has to look like one -- the gems
 	-- list read as static text until it got the same treatment.
-	line.rankHit=CreateFrame("Button",nil,line)
+	-- A plain holder for the standing, and nothing to click.
+	--
+	-- It used to be a button: clicking somebody's rank searched the ladder
+	-- for them. It was removed rather than repaired -- the ladder's own
+	-- search box does the same job without needing a row of a match you
+	-- happen to have played, and this was the one thing in the window that
+	-- looked clickable without being worth clicking.
+	--
+	-- Kept as a frame rather than folded into the line, because the width
+	-- arithmetic below measures this column to give the name back whatever
+	-- the rating did not use.
+	line.rankHit=CreateFrame("Frame",nil,line)
 	line.rankHit:SetPoint("LEFT",line,"LEFT",COL_KD-8-DELTA_WIDTH-6-RANK_WIDTH,0)
 	line.rankHit:SetSize(RANK_WIDTH,DETAIL_ROW)
-
-	local glow=line.rankHit:CreateTexture(nil,"HIGHLIGHT")
-	glow:SetAllPoints()
-	glow:SetColorTexture(1,1,1,0.10)
-	line.rankHit:SetHighlightTexture(glow)
 
 	line.rank=line.rankHit:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
 	line.rank:SetPoint("LEFT",line.rankHit,"LEFT",0,0)
 	line.rank:SetWidth(RANK_WIDTH)
 	line.rank:SetJustifyH("RIGHT")
 	line.rank:SetWordWrap(false)
-
-	line.rankHit:SetScript("OnEnter",function(self)
-		if not self.ladderName then return end
-		GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
-		-- Six arguments, not five: SetText is (text, r, g, b, alpha, wrap),
-		-- so a bare `true` after the colour lands in alpha and throws. AddLine
-		-- has no alpha and does take wrap fifth, which is why the same shape is
-		-- right there and wrong here.
-		GameTooltip:SetText(L.HISTORY_LADDER_CLICK,1,1,1,1,true)
-		GameTooltip:Show()
-	end)
-	line.rankHit:SetScript("OnLeave",function() GameTooltip:Hide() end)
-	line.rankHit:SetScript("OnClick",function(self)
-		if not (self.ladderName and ns.ShowLadderFor) then return end
-		ns.ShowLadderFor(self.ladderBracket,self.ladderName)
-	end)
 	line.delta   = column(COL_KD-8-DELTA_WIDTH,DELTA_WIDTH,"RIGHT")
 	line.kd      = column(COL_KD,COL_DAMAGE-COL_KD-6)
 	line.damage  = column(COL_DAMAGE,COL_HEALING-COL_DAMAGE-4)
@@ -1717,11 +1688,41 @@ local function ShowDetail(row,match)
 			local label=(player==mvp) and L.HISTORY_MVP:format(player.n or "?") or (player.n or "?")
 			local bracket=ns.ViewBracket()
 
-			-- What was recorded at the time, in preference to what is true now.
-			-- Only rows written before matches carried a stamp fall through to
-			-- a live lookup.
+			-- Where they stand now, looked up fresh every time the row is
+			-- drawn.
+			--
+			-- This used to prefer a figure stamped when the match was recorded,
+			-- so that a past match never changed. It was abandoned because the
+			-- stamped figure was not the truth of that evening either -- the
+			-- client only reads the ladder file at load, so every match played
+			-- in one session stamped the same number, and the one it stamped
+			-- was whatever the file said at the last reload.
+			--
+			-- Confirmed 2026-09-11 with /arena score in a live arena:
+			-- GetBattlefieldScore returns thirteen values and none of them is a
+			-- rating, GetNumBattlefieldTeams does not exist, and
+			-- GetBattlefieldTeamInfo answers with an empty name and zeroes. So
+			-- a per-match rating cannot be recovered at all, and the choice is
+			-- only between a stale number and a current one.
+			--
+			-- Current wins because it is checkable. It agrees with the ladder
+			-- window and with what the game itself shows, which is exactly the
+			-- comparison that found the old behaviour wrong: 2383 on the row
+			-- against 2429 everywhere else.
+			--
+			-- Your own row is the exception, and it is the only one that can be.
+			--
+			-- StampMe records the rating YOUR match actually finished at, taken
+			-- from the client rather than from the scrape, so for yourself the
+			-- true historical figure does exist and is worth more than a current
+			-- one. Everyone else falls through to the ladder, because for them
+			-- nothing of the sort is published.
+			--
+			-- Both halves required before it is trusted. A row carrying one and
+			-- not the other would render as "#0", and falling through to the
+			-- ladder is the better answer to a half-written stamp.
 			local ladder
-			if player.lr then
+			if IsMe(player.n) and player.lr and player.lv then
 				ladder={ rank=player.lr, rating=player.lv }
 			else
 				ladder=ns.LadderEntry and ns.LadderEntry(bracket,player.n)
@@ -1755,9 +1756,10 @@ local function ShowDetail(row,match)
 				-- among the people above the cutoff; the rating says what
 				-- beating them was worth.
 				--
-				-- Their rating now, not their rating during this match: the
-				-- ladder holds one figure per character and nothing records
-				-- where they stood on a given evening.
+				-- Their rating now, not their rating during this match. The
+				-- ladder holds one figure per character and the client does not
+				-- publish a per-player rating to addons, so where somebody
+				-- stood on a given evening is not recoverable by anything.
 				if ladder.rating then
 					standing=standing..L.HISTORY_LADDER_RATING:format(ladder.rating)
 				end
@@ -1768,14 +1770,10 @@ local function ShowDetail(row,match)
 			-- something that failed rather than something that was answered.
 			line.rank:SetText(standing~="" and standing or L.HISTORY_LADDER_NONE)
 
-			-- Only somebody who is on it can be found on it.
-			line.rankHit.ladderName=ladder and player.n or nil
-			line.rankHit.ladderBracket=bracket
 
 			-- What the row is about, for the copy box. The recorded name
 			-- carries its realm already.
 			line.nameHit.copyName=player.n
-			line.rankHit:EnableMouse(ladder~=nil)
 
 			-- What the match cost or paid that player.
 			--
@@ -1786,9 +1784,28 @@ local function ShowDetail(row,match)
 			local delta=tonumber(player.rc)
 			if not delta and IsMe(player.n) then delta=match.d end
 
-			-- Nothing recorded, but the others in this match have numbers: the
-			-- old rule dropped zeroes, so that is what this was.
-			if not delta and HasDeltas(match) then delta=0 end
+			-- A zero is only believed for yourself.
+			--
+			-- Measured across 1,851 recorded changes in a real history: 927
+			-- positive, 462 negative, 462 zero. Every match has as many losers
+			-- as winners, so those three should read 927 / 927 / a handful --
+			-- and instead half the losing side is sitting at zero. The
+			-- scoreboard reports the winners' change first and the losers'
+			-- late or not at all, so a zero read off it usually means "not
+			-- said yet" rather than "nothing changed". Confirmed live with
+			-- /arena score: +19 and +20 on the winning pair while both losers
+			-- still read 0, after the match was decided.
+			--
+			-- Your own row is exempt because it has a second source: match.d,
+			-- from the rating watcher, which is the client's own figure and
+			-- not the scoreboard's. A zero there has been corroborated.
+			--
+			-- The cost is a genuine zero on somebody else -- losing to a player
+			-- far below your MMR really can cost nothing -- showing blank
+			-- instead. That is a rare true blank against a common false
+			-- number, and a blank says "not known", which is accurate either
+			-- way.
+			if delta==0 and not IsMe(player.n) then delta=nil end
 
 			if delta then
 				local hex=(delta>0 and "1eff00") or (delta<0 and "ff2020") or "b3b3b3"
@@ -2199,8 +2216,20 @@ function Refresh()
 		-- it falls away together.
 		local mine=(ns.ViewingOwnRegion==nil) or ns.ViewingOwnRegion()
 
-		local rating=RatedInfo and select(1,RatedInfo(bracket))
-		if not rating and GetPersonalRatedInfo then rating=GetPersonalRatedInfo(bracket) end
+		-- Straight from the client.
+		--
+		-- This used to ask a RatedInfo() helper first and keep the line below as
+		-- a fallback. RatedInfo is a file local of ArenaMMR.lua and was never
+		-- visible from here, so the name read as a nil global, the `and` short
+		-- circuited on it every single time, and the "fallback" was in fact the
+		-- only path that ever ran.
+		--
+		-- Nothing behaved wrongly, which is why it survived: RatedInfo returns
+		-- tonumber(rating) as its first value and this returns rating as its
+		-- first, and both then go through the same tonumber below. The line was
+		-- describing a preference that did not exist, and reading it cost more
+		-- than it was worth.
+		local rating=GetPersonalRatedInfo and GetPersonalRatedInfo(bracket)
 		rating=mine and (tonumber(rating) or 0) or 0
 
 		local wanted,needed
@@ -2394,6 +2423,18 @@ local function RefreshFull()
 	end
 
 	if window.UpdateBrackets then window.UpdateBrackets() end
+
+	-- No swap to the ladder while the Rated page is up.
+	--
+	-- Opened from there the window is an expansion of the panel behind it,
+	-- and the panel has its own way to the ladder in the corner. The bracket
+	-- picker already takes itself away in the same circumstance and for the
+	-- same reason -- see the docked test in ns.BuildBracketPicker -- so this
+	-- is the row agreeing with itself rather than a new rule.
+	if window.swapButton then
+		local docked=panel and panel:IsVisible()
+		window.swapButton:SetShown(not docked)
+	end
 
 	if window.today then
 		-- Hidden on a day with no games rather than shown as "today 0/0",
@@ -3210,12 +3251,14 @@ function module:OnEnable()
 			left=not gathered.decided
 		end
 
-		-- Stamped before the lists are built, so both sides carry where they
-		-- stood at the time rather than wherever they end up later.
+		-- Your own exact figures, before the lists are built.
+		--
+		-- The two StampLadder calls that stood beside this went with the
+		-- stamp; this one stays, and is a different thing entirely. It
+		-- records what the CLIENT says you finished the match rated, which
+		-- is exact and historical. The ladder is a scrape that lags a logout
+		-- behind and can only ever say where somebody stands today.
 		if gathered then
-			StampLadder(gathered.mine,info.bracket)
-			StampLadder(gathered.theirs,info.bracket)
-			-- Last, so the exact figures win over the ladder's.
 			StampMe(gathered.mine,info)
 		end
 
@@ -3306,6 +3349,22 @@ ns.SlashCommands["score"]=function()
 		end
 
 		ns.Print("row %d: %s",index,table.concat(packed,"  "))
+	end
+
+	-- The team ratings in the same breath.
+	--
+	-- These two were separate commands, which meant remembering to run both
+	-- while a scoreboard was up and somebody was waiting to leave. They answer
+	-- halves of one question -- what does the client know about ratings at the
+	-- end of a match -- and there is exactly one moment to ask it.
+	--
+	-- What to look for: a per-player rating anywhere in the rows above. If one
+	-- of those numbered slots carries it, the history can stamp what somebody
+	-- was actually rated in THAT match instead of what the last-loaded ladder
+	-- file said, which is the whole of the complaint that sent me here.
+	if ns.SlashCommands["teams"] then
+		ns.Print(" ")
+		ns.SlashCommands["teams"]()
 	end
 end
 

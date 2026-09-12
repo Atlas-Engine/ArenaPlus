@@ -16,9 +16,19 @@ local L = ns.L
 -- same spot and the two take turns: swapping between them should look like
 -- changing pages rather than one window replacing another.
 local ROW_HEIGHT = 18
-local WIDTH      = 850
+-- 110 wider than it was, for the activity view's last column.
+--
+-- Widened rather than squeezed. The five columns that were here are all as
+-- narrow as their contents allow -- a realm is 170 points because Bloodsail
+-- Buccaneers needs them -- so a sixth had to come from somewhere, and taking
+-- it from the window costs nothing on any monitor this addon runs on.
+--
+-- It also buys the spec row its elbow room back. The Activity button sits at
+-- the end of that row and was finishing within two points of the right edge
+-- on the Mists ladder, which has every class in it.
+local WIDTH      = 960
 local HEIGHT     = 460
-local CONTENT    = 790
+local CONTENT    = 900
 
 -- Columns, as offsets from the left of a row.
 local COL_RANK   = 0
@@ -36,6 +46,10 @@ local COL_REALM     = 324
 local COL_RECORD    = 500
 local COL_RATING    = 630
 local COL_RATE_MOVE = 704
+-- Only the activity view fills this one. The ladder has nothing to put in
+-- it: a leaderboard row says where somebody stands, not when they were last
+-- at the keyboard.
+local COL_SEEN      = 772
 
 local SPEC_SIZE  = 16
 
@@ -132,6 +146,54 @@ local wantTop = false
 local jumpToSelf = false  -- set by the My rank button, cleared once obeyed
 local shownBracket        -- which bracket the page number belongs to
 local showingAlts = false -- the My alts view, rather than the ladder
+
+-- The activity view, and which window of it.
+--
+-- nil rather than false when off, because the value doubles as the window:
+-- 24 means the last 24 hours and nil means we are not in the view at all, so
+-- there is one piece of state here rather than two that could disagree.
+local activityWindow
+
+-- The stops on the window slider, in hours.
+--
+-- Spaced by doubling rather than evenly, because that is how the question
+-- changes: the step from one hour to three is the difference between "queuing
+-- now" and "on this evening", and the step from twelve to twenty-four is the
+-- difference between two ways of saying "today".
+--
+-- Every one of these must exist in the shipped file. UpdateActivity.ps1 is
+-- given the same list and writes exactly these windows, so a stop added here
+-- and not there is a slider position with nothing behind it.
+local ACTIVITY_STOPS = { 1, 3, 6, 12, 24 }
+
+-- Three hours to begin with, and not one.
+--
+-- An hour of a quiet bracket is usually nobody -- Mists 3v3 sees twelve
+-- characters in a whole day -- and a view that opens blank reads as broken
+-- rather than as quiet. Three is wide enough to have somebody in it on every
+-- ladder and narrow enough to still mean "now".
+local ACTIVITY_DEFAULT = 3
+
+-- The slider works in stop numbers, not in hours: its positions have to be
+-- evenly spaced and the hours are not. Found rather than written down, so
+-- the default cannot come adrift from the list above.
+local ACTIVITY_DEFAULT_STOP = 1
+for index,hours in ipairs(ACTIVITY_STOPS) do
+	if hours==ACTIVITY_DEFAULT then ACTIVITY_DEFAULT_STOP=index break end
+end
+
+-- How much taller the window's head becomes while the slider is in it.
+-- Everything below the band is moved down by this, and by nothing when the
+-- activity view is closed.
+local ACTIVITY_STRIP = 38
+
+-- How the activity view is ordered: nil for rating, "seen" for recency.
+--
+-- Two states rather than the three a sortable column usually has. There is
+-- no ascending last-seen worth offering -- "who played least recently" is a
+-- question about people who have stopped playing, which this view exists to
+-- exclude -- so the second click puts it back rather than reversing it.
+local activitySort
 local specFilter -- the spec id being shown alone, or nil for all of them
 local rows={}    -- the pool, one per visible line rather than one per place
 local shown      -- the list the pool is drawing from, and which row is lit
@@ -187,6 +249,110 @@ end
 -- question mark: the join lived in the index builder, which this never touched.
 local function Ladder(bracket)
 	return ns.LadderRows(bracket,ViewKey())
+end
+
+-- What the data addon shipped for the ladder being viewed, if anything.
+--
+-- Absent for three different reasons that look identical from here: an older
+-- data addon, a region whose pass has not run, or a fresh install whose
+-- activity log has no history in it yet. None is an error and all three mean
+-- the same thing to the caller.
+local function ActivityData()
+	local all=ns.ACTIVITY_BY_REGION
+	return all and all[ViewKey()]
+end
+
+-- The ladder, narrowed to whoever played in the window and sorted by how much
+-- they played.
+--
+-- Built from the ladder rows rather than from the activity table, so every row
+-- arrives with its class, spec, race and rating already joined on and the spec
+-- filter goes on working untouched. The activity table only decides which rows
+-- survive and what their numbers say.
+--
+-- Looked up by the display name exactly as written, NOT lowered. The generator
+-- wrote these keys from the ladder file for precisely this reason: Lua's
+-- :lower() folds only A-Z, so lowering here would lose every accented name --
+-- 872 characters across the four ladders, 626 of them on Mists EU alone.
+local function ActivityRows(bracket)
+	local data=ActivityData()
+	local per=data and data[activityWindow]
+	local at=per and per[bracket]
+	if not at then return {} end
+
+	local out={}
+	for _,entry in ipairs(Ladder(bracket)) do
+		local played=at[(entry.name or "").."|"..(entry.realm or "")]
+		if played then
+			-- A copy. The numbers below describe the window rather than the
+			-- season, and the ladder's own row has to go on saying what it
+			-- says -- it is the same table every other view is drawing from.
+			local row={}
+			for key,value in pairs(entry) do row[key]=value end
+
+			-- Won, lost and rating moved, all three for the window. The
+			-- weekly rank movement is dropped rather than left standing: a row
+			-- whose three numbers mean "this hour" and whose fourth means
+			-- "this week" is worse than one column short.
+			row.won,row.lost,row.dr=played[1],played[2],played[3]
+			row.dk=nil
+			row.played=nil
+			row.games=(played[1] or 0)+(played[2] or 0)
+
+			-- Turned back into a real time here, not into a printed age.
+			--
+			-- The file stores minutes before it was built, so an age worked out
+			-- now would freeze the moment the list was drawn and go on saying
+			-- "20 minutes ago" for as long as the window stayed open. An epoch
+			-- keeps ageing itself, and the row pool redraws on every scroll.
+			if data.built and played[4] then
+				row.seenAt=data.built-(played[4]*60)
+			end
+
+			out[#out+1]=row
+		end
+	end
+
+	-- Rating first, the same as the ladder itself.
+	--
+	-- The window has already done the filtering, and that is the whole of
+	-- what this view adds: everybody here played in the last few hours, so
+	-- ordering them by rating answers "who good is on right now" -- which is
+	-- the question -- where ordering them by games answers "who has queued
+	-- most", and the two only agree among people grinding at one rating.
+	--
+	-- Ties fall to games and then to name. Three keys rather than one because
+	-- table.sort is not stable: two characters on the same rating would
+	-- otherwise swap places between redraws for no reason the eye can follow.
+	local function ByRating(a,b)
+		if (a.rating or 0)~=(b.rating or 0) then return (a.rating or 0)>(b.rating or 0) end
+		if a.games~=b.games then return a.games>b.games end
+		return (a.name or "")<(b.name or "")
+	end
+
+	if activitySort=="seen" then
+		-- Most recent first, and rating does not enter into it -- that is the
+		-- point of asking for this order. seenAt is an epoch, so the larger
+		-- number is the more recent one.
+		--
+		-- A row with no time at all sorts last rather than first. It can only
+		-- happen against a data file written before the column existed, and
+		-- "unknown" belongs at the bottom of a list ordered by recency.
+		table.sort(out,function(a,b)
+			local left,right=a.seenAt or 0,b.seenAt or 0
+			if left~=right then return left>right end
+			return ByRating(a,b)
+		end)
+	else
+		table.sort(out,ByRating)
+	end
+
+	-- entry.rank is deliberately left alone. It is their place on the ladder,
+	-- which is the useful thing to read beside "played thirty games";
+	-- renumbering them 1..n by games would throw that away and would colour a
+	-- 1400 player's row as rank one, which is the very thing the alts view
+	-- grew its own TierHex branch to avoid.
+	return out
 end
 
 -- The class token the game's colour table uses. The scrape stores what the
@@ -496,12 +662,13 @@ end
 -- landed should not be told they are stale for the gap in between.
 local STALE_MINUTES = 75
 
-local function Ago(stamp,epoch)
-	if not stamp or stamp=="" then return "?" end
-
-	local minutes=MinutesSince(stamp,epoch)
-	if not minutes then return stamp:match("(%d+:%d+%s*[AP]?M?)") or stamp end
-
+-- A count of minutes, said the way a person would say it.
+--
+-- Split out of Ago below rather than written twice. Ago starts from a printed
+-- stamp because that is what the leaderboard files carry and it needs
+-- something to fall back on when the epoch is missing; the activity rows
+-- carry no stamp at all, only an age, so they start here instead.
+local function AgoMinutes(minutes)
 	if minutes<1  then return L.LADDER_AGO_NOW end
 	if minutes<60 then return L.LADDER_AGO_MINUTES:format(minutes) end
 
@@ -512,6 +679,15 @@ local function Ago(stamp,epoch)
 	local days=math.floor(hours/24)
 	if days==1 then return L.LADDER_AGO_DAY end
 	return L.LADDER_AGO_DAYS:format(days)
+end
+
+local function Ago(stamp,epoch)
+	if not stamp or stamp=="" then return "?" end
+
+	local minutes=MinutesSince(stamp,epoch)
+	if not minutes then return stamp:match("(%d+:%d+%s*[AP]?M?)") or stamp end
+
+	return AgoMinutes(minutes)
 end
 
 ----------------------------------------------------------------
@@ -802,6 +978,13 @@ local function CreateRow(parent)
 	row.record = Label(COL_RECORD,120)
 	row.rating = Label(COL_RATING,70,"RIGHT")
 
+	-- Empty on the ladder and on the alts list, which is why it is created
+	-- here with the rest rather than built when the activity view opens: the
+	-- row pool is shared by all three views and a row that grew a field
+	-- halfway through its life would be a field the other two never cleared.
+	row.seen   = Label(COL_SEEN,116,"LEFT","GameFontNormalSmall")
+	row.seen:SetTextColor(0.55,0.55,0.55)
+
 	row.realm:SetTextColor(0.55,0.55,0.55)
 
 	return row
@@ -885,6 +1068,18 @@ local function Layout()
 			row.rankMove:SetText(Movement(entry.dk,true))
 			row.ratingMove:SetText(Movement(entry.dr,false))
 
+			-- When they were last SEEN playing, which is not quite when they
+			-- played: the ladder is polled on a timer, so a game is noticed at
+			-- the next poll. Accurate to about fifteen minutes on Mists and to
+			-- the hour on Anniversary, which is the granularity this wording
+			-- suits anyway -- nobody reads "23 minutes ago" as a stopwatch.
+			if entry.seenAt then
+				row.seen:SetText(AgoMinutes(math.max(0,
+					math.floor(difftime(time(),entry.seenAt)/60))))
+			else
+				row.seen:SetText("")
+			end
+
 			-- Every other one, counted by where it sits on screen rather than by
 			-- its rank: the stripes should stay put while paging, not shuffle
 			-- because page two happens to start on an odd number.
@@ -944,6 +1139,8 @@ local function Refresh()
 	local full
 	if showingAlts then
 		full=AltRows(bracket)
+	elseif activityWindow then
+		full=Filtered(ActivityRows(bracket))
 	else
 		full=Filtered(Ladder(bracket))
 	end
@@ -1046,6 +1243,7 @@ local function Refresh()
 	-- bracket buttons a few points above already say which bracket -- "My 10v10
 	-- alts" spent half the heading repeating them.
 	local heading=showingAlts and L.LADDER_TITLE_ALTS
+		or activityWindow and L.LADDER_TITLE_ACTIVITY:format(BRACKET_NAMES[bracket] or "?")
 		or L.LADDER_TITLE:format(BRACKET_NAMES[bracket] or "?")
 
 	-- One fixed width, found by measuring. The alts heading does not change
@@ -1061,9 +1259,18 @@ local function Refresh()
 		window.titleRuler:SetText(heading..flag)
 		widest=window.titleRuler:GetStringWidth() or 0
 	else
+		-- The wording actually on screen, not the ladder's.
+		--
+		-- LADDER_TITLE is bare "%s" -- the bracket name and nothing else -- so
+		-- measuring it while the activity view was up reserved the width of
+		-- "2v2" for a title reading "2v2 activity", and the heading arrived
+		-- cut off at "2v2 acti...". Measured across every bracket either way,
+		-- which is the whole reason this loop exists: the row of buttons after
+		-- the title must not shift when 10v10 becomes 2v2.
+		local pattern=activityWindow and L.LADDER_TITLE_ACTIVITY or L.LADDER_TITLE
 		local last=((ns.ViewVersion and ns.ViewVersion())=="tbc") and 3 or #BRACKET_NAMES
 		for index=1,last do
-			window.titleRuler:SetText(L.LADDER_TITLE:format(BRACKET_NAMES[index])..flag)
+			window.titleRuler:SetText(pattern:format(BRACKET_NAMES[index])..flag)
 			widest=math.max(widest,window.titleRuler:GetStringWidth() or 0)
 		end
 	end
@@ -1074,11 +1281,25 @@ local function Refresh()
 	-- was. The alts view keeps its own count, which says how many of YOUR
 	-- characters are rated -- a different fact from how big somebody else's
 	-- ladder is, and the picker is hidden in that view anyway.
-	window.subtitle:SetText((showingAlts and #full>0)
-		and L.LADDER_SUBTITLE_ALTS:format(#full)
-		or "")
+	-- Three subtitles, because the three views answer different questions.
+	-- The activity one carries when the file was built as well as the count:
+	-- the passes run every fifteen minutes on Mists and hourly on Anniversary,
+	-- so "the last hour" always means the hour that ended when the file was
+	-- written, and saying so is the difference between reading a quiet bracket
+	-- and reading a broken window.
+	if activityWindow then
+		local when=ActivityData()
+		window.subtitle:SetText(L.LADDER_SUBTITLE_ACTIVITY:format(#full,
+			L["LADDER_WINDOW_LONG_"..activityWindow] or activityWindow,
+			when and Ago(when.builtText,when.built) or "?"))
+	else
+		window.subtitle:SetText((showingAlts and #full>0)
+			and L.LADDER_SUBTITLE_ALTS:format(#full)
+			or "")
+	end
 	if window.RefreshGame then window.RefreshGame() end
 	if window.LayoutSpecRow then window.LayoutSpecRow() end
+	if window.LayoutBody then window.LayoutBody() end
 	-- Said outright when there is nothing to show, rather than an empty window
 	-- that reads as a fault. "No alts in this bracket" and "no ladder" are
 	-- different sentences.
@@ -1086,7 +1307,17 @@ local function Refresh()
 	-- "empty ladder" line under three full tables reads as a bug.
 	window.empty:SetShown(#full==0 and not window.viewingCutoffs)
 	if #full==0 then
-		window.empty:SetText(showingAlts and L.LADDER_NO_ALTS or L.LADDER_EMPTY)
+		-- "Nobody played" and "this download cannot say" are different
+		-- answers, and giving the first when the second is true is how a
+		-- missing file comes to look like a dead bracket.
+		if activityWindow then
+			window.empty:SetText(ActivityData() and L.LADDER_NO_ACTIVITY
+				or L.LADDER_NO_ACTIVITY_DATA)
+		elseif showingAlts then
+			window.empty:SetText(L.LADDER_NO_ALTS)
+		else
+			window.empty:SetText(L.LADDER_EMPTY)
+		end
 	end
 
 	if window.pageLabel then
@@ -2203,6 +2434,80 @@ local function CreateWindow()
 				at=at+SPEC_CLASS_GAP-SPEC_ICON_GAP
 			end
 		end
+
+	-- In whatever room the icons left, which is why it is placed here rather
+	-- than anchored once at creation: the row is narrower on Anniversary,
+	-- where four of the eleven classes do not exist.
+	if frame.activityButton then
+		frame.activityButton:ClearAllPoints()
+		frame.activityButton:SetPoint("TOPLEFT",frame,"TOPLEFT",16+at+6,-36)
+
+		-- Shown only where there is something to show. On an older data
+		-- addon the only answer this button could give is that the download
+		-- has no activity in it, and a control that reports its own absence
+		-- is worse than no control.
+		frame.activityButton:SetShown(ActivityData() and true or false)
+
+		-- Greyed while the view is open, so the button says which state the
+		-- window is in rather than only what pressing it would do.
+		--
+		-- Set here, which is what makes it survive everything else. This runs
+		-- on every redraw, so changing bracket, region, game or spec repaints
+		-- it from activityWindow rather than leaving it looking unpressed
+		-- over a view that is still open.
+		--
+		-- Disable() and a gold label, which is exactly what the 2v2 and 3v3
+		-- buttons do for the bracket in force -- see ns.BuildBracketPicker.
+		-- Greying the label alone was a quieter version of the same idea and
+		-- did not match anything else in the window.
+		--
+		-- Disabled means it cannot be clicked back off, the same as a bracket
+		-- button. Home is the way out, which is what Home is for and what it
+		-- already does.
+		if activityWindow then
+			frame.activityButton:Disable()
+		else
+			frame.activityButton:Enable()
+		end
+
+		local label=frame.activityButton.GetFontString and frame.activityButton:GetFontString()
+		if label then
+			if activityWindow then label:SetTextColor(1,0.82,0)
+			else label:SetTextColor(0.75,0.75,0.75) end
+		end
+
+		-- Shown with the view it belongs to. Here rather than in Refresh
+		-- because this runs on every redraw too and the two would otherwise
+		-- have to be kept in step by hand.
+		if frame.seenHeading then
+			local on=activityWindow and true or false
+			frame.seenHeading:SetShown(on)
+			if frame.seenSort then frame.seenSort:SetShown(on) end
+			if frame.ratingSort then frame.ratingSort:SetShown(on) end
+
+			-- Lit on whichever column is doing the sorting, grey on the other.
+			--
+			-- Colour alone, with no arrow beside it. The default font carries no
+			-- triangle or down arrow -- both come out as an empty box -- and a
+			-- texture escape would put a missing-texture square in the header if
+			-- the path were ever wrong. The green is the same one the slider stop
+			-- in force wears, so one colour means "this is what you chose".
+			--
+			-- Rating is only lit inside the activity view. On the ladder it is
+			-- the only order there is, and lighting it would be announcing a
+			-- choice nobody made.
+			frame.seenHeading:SetTextColor(0.6,0.6,0.6)
+			frame.ratingHeading:SetTextColor(0.6,0.6,0.6)
+			if on then
+				if activitySort=="seen" then
+					frame.seenHeading:SetTextColor(0.12,1,0.12)
+				else
+					frame.ratingHeading:SetTextColor(0.12,1,0.12)
+				end
+			end
+		end
+
+	end
 	end
 
 	header:SetPoint("TOPLEFT",frame,"TOPLEFT",16,COLUMNS_TOP)
@@ -2222,7 +2527,76 @@ local function CreateWindow()
 	Heading(COL_NAME,180,L.LADDER_COL_NAME)
 	Heading(COL_REALM,170,L.LADDER_COL_REALM)
 	Heading(COL_RECORD,120,L.LADDER_COL_RECORD)
-	Heading(COL_RATING,70,L.LADDER_COL_RATING,"RIGHT")
+	frame.ratingHeading=Heading(COL_RATING,70,L.LADDER_COL_RATING,"RIGHT")
+
+	-- Kept, because it is the one heading that comes and goes: there is no
+	-- last-seen time on a leaderboard row, and a column header standing over
+	-- 150 blank cells reads as data that failed to load.
+	frame.seenHeading=Heading(COL_SEEN,116,L.LADDER_COL_SEEN)
+
+	-- The two orders the activity view offers, one click target each.
+	--
+	-- A button OVER the heading, not a heading that is a button: Heading()
+	-- makes a FontString and a FontString cannot take a click. Each of these
+	-- is invisible and does nothing but catch the mouse; the heading beneath
+	-- goes on doing all the drawing.
+	--
+	-- Rating is clickable as well as Last seen, and it has to be. With only
+	-- one of them live there was no way back to the default except by
+	-- guessing that a second click on the other would do it -- and that
+	-- second click was broken, so the view could be sorted by recency and
+	-- never sorted back.
+	local function Sorter(heading,x,width,want)
+		local button=CreateFrame("Button",nil,header)
+		button:SetPoint("LEFT",header,"LEFT",x,0)
+		button:SetSize(width,14)
+		button.heading=heading
+		button.want=want
+
+		button:SetScript("OnClick",function()
+			-- Written as an if, deliberately.
+			--
+			-- The obvious `activitySort=(activitySort==want) and nil or want`
+			-- can never clear it. When the test passes, `and nil` yields nil,
+			-- nil is false to `or`, and `or want` puts the value straight
+			-- back -- so the expression returns `want` whatever the state was.
+			-- That is exactly what shipped: clicking Last seen sorted, and
+			-- clicking it again did nothing at all.
+			if activitySort==want then
+				activitySort=nil
+			else
+				activitySort=want
+			end
+
+			-- Back to the top. The row you were looking at is somewhere else
+			-- entirely now, so holding the scroll position would land you in
+			-- the middle of a list you have no bearings in.
+			if frame.scroll then frame.scroll:SetVerticalScroll(0) end
+			wantTop=true
+			page=1
+			pageChosen=false
+			Refresh()
+		end)
+
+		-- Brightened under the cursor, because a heading that can be clicked
+		-- looks exactly like one that cannot until you try it. The one already
+		-- sorting is left alone: it is lit, and lighting it further would be
+		-- saying nothing.
+		button:SetScript("OnEnter",function(self)
+			if activitySort~=self.want then self.heading:SetTextColor(1,1,1) end
+		end)
+		button:SetScript("OnLeave",function(self)
+			if activitySort~=self.want then self.heading:SetTextColor(0.6,0.6,0.6) end
+		end)
+
+		return button
+	end
+
+	-- nil is the default order, so Rating's "want" is nil and clicking it
+	-- while it is already in force clears to nil again -- which is the same
+	-- thing, and so reads as a button that simply stays put.
+	frame.ratingSort=Sorter(frame.ratingHeading,COL_RATING,70,nil)
+	frame.seenSort=Sorter(frame.seenHeading,COL_SEEN,116,"seen")
 
 	local divider=frame:CreateTexture(nil,"ARTWORK")
 	divider:SetPoint("TOPLEFT",frame,"TOPLEFT",12,DIVIDER_TOP)
@@ -2244,6 +2618,122 @@ local function CreateWindow()
 	scroll:SetScrollChild(content)
 	frame.content=content
 	frame.scroll=scroll
+
+	----------------------------------------------------------------
+	-- The window slider
+	----------------------------------------------------------------
+
+	-- How far back the activity view looks, on a strip of its own below the
+	-- band.
+	--
+	-- A strip rather than a place in the header row. The slider wants its stop
+	-- labels underneath it, the header row already ends with the spec icons
+	-- and their class underlines, and the two would have been drawn on top of
+	-- each other. Everything below the band moves down by ACTIVITY_STRIP while
+	-- this is up, and back again when it goes.
+	--
+	-- Named, because OptionsSliderTemplate builds its Low, High and Text
+	-- strings as $parentLow and reaches them by name -- an unnamed slider
+	-- leaves those nil and the first SetText on one throws.
+	local SLIDER_NAME="ArenaPlus_ArenaLadderWindowSlider"
+	local SLIDER_X,SLIDER_W=120,600
+
+	local slider=CreateFrame("Slider",SLIDER_NAME,frame,"OptionsSliderTemplate")
+	slider:SetSize(SLIDER_W,16)
+	slider:SetMinMaxValues(1,#ACTIVITY_STOPS)
+	slider:SetValueStep(1)
+	if slider.SetObeyStepOnDrag then slider:SetObeyStepOnDrag(true) end
+	slider:SetValue(ACTIVITY_DEFAULT_STOP)
+	frame.windowSlider=slider
+
+	-- The template's own three labels are not wanted. Low and High would
+	-- repeat the first and last stop, which are already written underneath,
+	-- and Text would sit above the slider where the spec icons are.
+	if _G[SLIDER_NAME.."Low"]  then _G[SLIDER_NAME.."Low"]:SetText("")  end
+	if _G[SLIDER_NAME.."High"] then _G[SLIDER_NAME.."High"]:SetText("") end
+	if _G[SLIDER_NAME.."Text"] then _G[SLIDER_NAME.."Text"]:SetText("") end
+
+	-- One label under each stop, and the one in force is lit.
+	--
+	-- Placed by dividing the slider's own width rather than by a list of
+	-- offsets: the thumb travels that width in equal steps, so this is the
+	-- same arithmetic the slider itself is doing and the label cannot drift
+	-- away from the position it names.
+	frame.windowLabels={}
+	for index,hours in ipairs(ACTIVITY_STOPS) do
+		local text=frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+		text:SetWidth(90)
+		text:SetJustifyH("CENTER")
+		text:SetText(L["LADDER_WINDOW_"..hours] or hours)
+		text.at=SLIDER_X+((index-1)*SLIDER_W/(#ACTIVITY_STOPS-1))
+		frame.windowLabels[index]=text
+	end
+
+	-- Rounded before it is used. OnValueChanged fires mid-drag with a raw
+	-- position on some builds -- 2.4 rather than 2 -- and ACTIVITY_STOPS[2.4]
+	-- is nil, which would empty the list every time the thumb was dragged
+	-- across a stop rather than clicked onto it.
+	slider:SetScript("OnValueChanged",function(self,value)
+		local stop=math.max(1,math.min(#ACTIVITY_STOPS,math.floor(value+0.5)))
+		local hours=ACTIVITY_STOPS[stop]
+
+		-- Only while the view is open. The slider is hidden otherwise and
+		-- SetValue is called on it from the button, which would otherwise
+		-- turn the view on from underneath the thing that just turned it off.
+		if not activityWindow then return end
+		if hours==activityWindow then return end
+
+		activityWindow=hours
+		if frame.scroll then frame.scroll:SetVerticalScroll(0) end
+		wantTop=true
+		page=1
+		pageChosen=false
+		Refresh()
+	end)
+
+	-- Where the head ends and the list begins, which is not a constant while
+	-- the slider can come and go.
+	--
+	-- Four anchors and the strip, in one place. They were each written once at
+	-- creation against COLUMNS_TOP and its derivatives, which was right while
+	-- nothing could ever sit between the band and the headings.
+	function frame.LayoutBody()
+		local open=activityWindow and true or false
+		local drop=open and ACTIVITY_STRIP or 0
+
+		slider:SetShown(open)
+		slider:ClearAllPoints()
+		slider:SetPoint("TOPLEFT",frame,"TOPLEFT",SLIDER_X,COLUMNS_TOP-6)
+
+		for index,text in ipairs(frame.windowLabels) do
+			text:SetShown(open)
+			text:ClearAllPoints()
+			text:SetPoint("TOP",frame,"TOPLEFT",text.at,COLUMNS_TOP-24)
+
+			-- Lit for the one in force, grey for the rest. The same green
+			-- the record column uses for a win, so the window reads as the
+			-- setting it is rather than as another heading.
+			if ACTIVITY_STOPS[index]==activityWindow then
+				text:SetTextColor(0.12,1,0.12)
+			else
+				text:SetTextColor(0.5,0.5,0.5)
+			end
+		end
+
+		header:ClearAllPoints()
+		header:SetPoint("TOPLEFT",frame,"TOPLEFT",16,COLUMNS_TOP-drop)
+
+		divider:ClearAllPoints()
+		divider:SetPoint("TOPLEFT",frame,"TOPLEFT",12,DIVIDER_TOP-drop)
+		divider:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-12,DIVIDER_TOP-drop)
+
+		scroll:ClearAllPoints()
+		scroll:SetPoint("TOPLEFT",frame,"TOPLEFT",16,LIST_TOP-drop)
+		scroll:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",-36,30)
+
+		frame.empty:ClearAllPoints()
+		frame.empty:SetPoint("TOPLEFT",frame,"TOPLEFT",18,EMPTY_TOP-drop)
+	end
 
 	-- Moving repaints the pool onto whatever is now under the window. The
 	-- template's own handler keeps the scroll bar honest, so it runs first.
@@ -2296,8 +2786,63 @@ local function CreateWindow()
 	frame.altsButton:SetScript("OnClick",function()
 		showingAlts=not showingAlts
 
+		-- Exclusive with the activity view, which is everybody rather than you.
+		if showingAlts then activityWindow=nil end
+
 		-- A different list entirely, so nothing about where you were in the old
 		-- one carries over.
+		query=""
+		if frame.search then frame.search:SetText("") end
+		if frame.scroll then frame.scroll:SetVerticalScroll(0) end
+		wantTop=true
+		page=1
+		pageChosen=false
+		Refresh()
+	end)
+
+	-- Who has been playing, in the room the spec row leaves at its end.
+	--
+	-- A plain on and off. It used to cycle through the windows as well, so
+	-- that one button could do both jobs in the space available -- which
+	-- worked, and read as a button whose label kept changing into something
+	-- you had not asked for. The window is the slider's job now, and this is
+	-- back to meaning one thing.
+	frame.activityButton=PageButton(L.LADDER_ACTIVITY,84)
+	frame.activityButton:SetScript("OnClick",function()
+		-- Opens the view, and only opens it.
+		--
+		-- It used to read `activityWindow and nil or ACTIVITY_DEFAULT`, which
+		-- cannot ever yield nil -- `and nil` gives nil and `nil or x` gives x
+		-- -- so it could never close what it had opened. The same trap is
+		-- commented on the spec filter twenty lines up and in the history
+		-- window, and this is the third time it has been walked into.
+		--
+		-- Written as an assignment rather than as a fixed toggle because the
+		-- button is disabled while the view is up, exactly as the bracket
+		-- buttons are for the bracket in force. Home is the way out. A
+		-- working toggle here would be a branch that can never be reached.
+		activityWindow=ACTIVITY_DEFAULT
+
+		-- The order goes back with the window. Both are answers to "how do I
+		-- want this read", and leaving one behind while resetting the other
+		-- would reopen the view half-configured by a session nobody remembers.
+		activitySort=nil
+
+		-- Back to three hours every time it is opened rather than resuming
+		-- wherever the slider was left. The view answers "who is playing",
+		-- and reopening it a day later onto a 24-hour window that somebody
+		-- dragged to once would answer a different question without saying
+		-- so.
+		if activityWindow and frame.windowSlider then
+			frame.windowSlider:SetValue(ACTIVITY_DEFAULT_STOP)
+		end
+
+		-- Never both at once. The alts view is your own characters and this
+		-- is everybody's, so entering one leaves the other.
+		if activityWindow then showingAlts=false end
+
+		-- A different list entirely, so nothing about where you were in the
+		-- old one carries across.
 		query=""
 		if frame.search then frame.search:SetText("") end
 		if frame.scroll then frame.scroll:SetVerticalScroll(0) end
@@ -2315,7 +2860,13 @@ local function CreateWindow()
 		-- Out of the alts list first, if that is where we are. Your rank means
 		-- your rank on the ladder; in a list of five of your own characters
 		-- numbered from one it would mean nothing.
+		--
+		-- Out of the activity view too, and for a related reason. The ranks
+		-- there ARE ladder ranks, but the list holds only the people who have
+		-- played lately -- so if you have not, My rank would have nowhere to
+		-- go and would quietly do nothing.
 		showingAlts=false
+		activityWindow=nil
 
 		query=""
 		if frame.search then frame.search:SetText("") end
@@ -2406,7 +2957,21 @@ local function CreateWindow()
 		-- Home means the ladder, from wherever you are -- including the cutoffs.
 		if frame.viewingCutoffs and frame.ShowCutoffs then frame.ShowCutoffs(false) end
 		showingAlts=false
+		activityWindow=nil
+		activitySort=nil
 		specFilter=nil
+
+		-- And back to your own game and your own region, which are the two
+		-- things the button was leaving behind. Reading somebody else's
+		-- ladder is a thing you go and do; home is where you started.
+		--
+		-- Cleared rather than set to the player's own. ViewRegion and
+		-- ViewVersion already fall back to PlayerRegion and ClientVersion
+		-- when nothing has been chosen, so writing the answer in would be a
+		-- second copy of that rule -- and one that goes stale the moment a
+		-- character logs in on another region.
+		if ns.SetViewRegion  then ns.SetViewRegion(nil)  end
+		if ns.SetViewVersion then ns.SetViewVersion(nil) end
 
 		query=""
 		if frame.search then frame.search:SetText("") end
@@ -2459,8 +3024,9 @@ local function CreateWindow()
 		page=1
 		pageChosen=false
 		-- Back to the ladder, not whichever view was left open: the window's
-		-- job is the ladder and My alts is a detour from it.
+		-- job is the ladder and both My alts and Activity are detours from it.
 		showingAlts=false
+		activityWindow=nil
 		if self.search then
 			self.search:SetText("")
 			self.search:ClearFocus()
