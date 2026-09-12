@@ -1,11 +1,16 @@
-﻿- New on the inspect panel's PvP tab: the titles a player has earned. Gladiator,
--   Duelist, Rival or Challenger, with the rating milestones behind them, in the
--   colour that title is worth. Only the highest is shown, since every Gladiator is
--   also a Duelist. Mists only -- Blizzard does not publish achievements for
--   Anniversary.
-- The weapons under the inspect model sit together and centred again, each enchant
--   beside the weapon it belongs to, with the thrown weapon or bow out to their right.
-- The model shows a player's main hand rather than their off hand. It can only wear
--   what your own character could wear, which the line underneath now says.
-- A long name in the match history is no longer cut short by the rating column
--   beside it, which was holding room it rarely used. The MVP tag fits again.
+﻿- New: Activity on the ladder. The button at the end of the spec icons lists who has actually
+-   been playing this bracket, with a slider for how far back to look -- an hour, three, six,
+-   twelve or a day. Sorted by rating, with what each of them won, lost and moved in that
+-   window, and when they were last seen. Needs the data addon updated alongside it.
+- Clicking Last seen orders the list by who played most recently, and clicking Rating puts it back.
+- The ladder window is wider, so nothing in the header crowds the buttons beside it.
+- Home now returns you to your own region and game as well as to the ladder.
+- The inspect panel's Titles Earned is now Achievements Earned, since the rating milestones
+-   listed under it are not titles.
+- In the match history, a player's rating is what the ladder says today rather than a figure
+-   kept from when the match was saved, so it agrees with the ladder window and with the game.
+-   Your own line still shows the rating that match actually finished at.
+- In the match history, a rating change the client never reported is left blank instead of
+-   shown as +0.
+- The rating in the match history is no longer clickable.
+- The Leaderboard button is hidden while the match history is open beside the PvP panel.
