@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 1.6b
+
+- Fixes and improvements in CHANGELOG.md, Wording, Match history.
+
 ## 1.6a
 
 - New: Activity on the ladder. The button at the end of the spec icons lists who has actually
@@ -114,6 +118,7 @@
 - Fixed characters with the same name on different realms showing each other's rank and rating.
 - Press Enter in the ladder search to step between characters sharing a name.
 - Changing page in the ladder now returns to the top of the list.
+
 
 
 
