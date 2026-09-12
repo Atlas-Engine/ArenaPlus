@@ -176,10 +176,27 @@ L.REGION_TAG              = "  |cffffd100%s|r"
 L.CUTOFF_VALUE            = "|cff%s%d|r"
 -- Rank one and Gladiator are a fixed number of places, and the rating is the
 -- one sitting in the last of them. Its own column, so the ratings stay in line.
+-- How many hold the title at this moment.
+--
+-- Counted off the ladder rather than published: the reward endpoint carries a
+-- rating_cutoff and nothing else -- no allocation, no percentage. So the figure
+-- climbs as people reach the rating and drops when Blizzard moves the cutoff,
+-- which is worth knowing when it is three points below you.
 L.CUTOFF_SPOTS            = "%d slots"
 -- How far the next title is from where you stand, beside the heading.
 L.CUTOFF_NEXT             = "|cff%s+%d to %s|r"
-L.CUTOFF_NEXT_TOP         = "|cffff8000above every cutoff|r"
+-- The top title of this bracket, named rather than described.
+--
+-- Through TierName, because the top of a rated battleground ladder is Hero of
+-- the Faction and not Rank one -- and it is named for the side the reader
+-- actually plays.
+L.CUTOFF_NEXT_TOP         = "|cff%s%s range|r"
+-- When the rating is there and the placing is not.
+--
+-- Rank one and Gladiator are a fixed number of places, so clearing the
+-- rating is necessary and not sufficient: 2404 beats a 2401 cutoff and still
+-- misses at #24 of 23 places. "+N rating" cannot say that -- N is negative.
+L.CUTOFF_NEXT_PLACES      = "|cff%s%s|r is %d places -- you are #%d"
 -- The date a user can act on. What they have is whatever shipped in the last
 -- release, and a release only happens when the numbers moved -- so this is when
 -- the companion script last read Blizzard, not when Blizzard last changed them.

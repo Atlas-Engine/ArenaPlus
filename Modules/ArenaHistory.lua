@@ -2232,16 +2232,32 @@ function Refresh()
 		local rating=GetPersonalRatedInfo and GetPersonalRatedInfo(bracket)
 		rating=mine and (tonumber(rating) or 0) or 0
 
-		local wanted,needed
-		if cutoffs then
-			for index=#(ns.TIERS or {}),1,-1 do
-				local tier=ns.TIERS[index]
-				local cutoff=ns.TierApplies(tier,bracket) and cutoffs[tier.key]
-				if cutoff and cutoff>rating then
-					wanted,needed=tier,cutoff-rating
-					break
-				end
-			end
+		-- Your place on the ladder, which decides the top two titles.
+		--
+		-- The eleventh return of GetPersonalRatedInfo, the same one the
+		-- ladder window reads. Zero where it is not known, which falls the
+		-- tests below back to rating alone rather than claiming anything.
+		local rank=0
+		if mine and GetPersonalRatedInfo then
+			rank=tonumber(select(11,GetPersonalRatedInfo(bracket))) or 0
+		end
+
+		-- Whether a tier is actually held, by the same rule ns.RankHex
+		-- colours a ladder row with.
+		--
+		-- Rank one and Gladiator are a fixed number of places, so a position
+		-- outside them is not held however high the rating is. Reading the
+		-- rating alone is what had this box saying "above every cutoff" at
+		-- #24 of 23 places while the ladder's own footer painted that exact
+		-- standing Gladiator purple -- one addon, two answers.
+		local function Holds(tier)
+			if not ns.TierApplies(tier,bracket) then return false end
+
+			local places=slots and slots[tier.key]
+			if places and places>0 and rank>0 then return rank<=places end
+
+			local cutoff=cutoffs and cutoffs[tier.key]
+			return (cutoff and cutoff>0 and rating>=cutoff) and true or false
 		end
 
 		-- The title you currently hold, lit the way the PvP panel lights your
@@ -2251,12 +2267,37 @@ function Refresh()
 		-- ever one line is yours -- and the texture is keyed on the frame that
 		-- owns it, so asking for it on a different row moves it rather than
 		-- leaving the old one behind.
-		local held
+		local held,heldAt
 		if cutoffs and rating>0 then
-			for _,tier in ipairs(ns.TIERS or {}) do
+			for index,tier in ipairs(ns.TIERS or {}) do
+				if Holds(tier) then
+					held,heldAt=tier,index
+					break
+				end
+			end
+		end
+
+		-- What you are climbing towards: the next tier above the one held,
+		-- or the lowest one there is if none is.
+		--
+		-- TIERS runs best first, so "above" is a lower index. Tiers that do
+		-- not exist in this bracket are stepped over -- rated battlegrounds
+		-- have no Gladiator -- rather than named at a cutoff of nothing.
+		local wanted,needed
+		if heldAt then
+			for index=heldAt-1,1,-1 do
+				local tier=ns.TIERS[index]
+				if ns.TierApplies(tier,bracket) and cutoffs[tier.key] then
+					wanted,needed=tier,cutoffs[tier.key]-rating
+					break
+				end
+			end
+		elseif cutoffs then
+			for index=#(ns.TIERS or {}),1,-1 do
+				local tier=ns.TIERS[index]
 				local cutoff=ns.TierApplies(tier,bracket) and cutoffs[tier.key]
-				if cutoff and cutoff>0 and rating>=cutoff then
-					held=tier
+				if cutoff and cutoff>rating then
+					wanted,needed=tier,cutoff-rating
 					break
 				end
 			end
@@ -2302,11 +2343,27 @@ function Refresh()
 			-- Named through the same helper as the rows, or climbing towards
 			-- the top of a rated battleground ladder would read "+180 to Rank
 			-- one" against a row that says Hero of the Faction.
-			panel.cutoffs.next:SetText(L.CUTOFF_NEXT:format(wanted.hex,needed,
-				ns.TierName(wanted,bracket)))
-		elseif rating>0 and cutoffs then
-			-- Above every cutoff there is.
-			panel.cutoffs.next:SetText(L.CUTOFF_NEXT_TOP)
+			--
+			-- Two ways of being short of a title, and they need different
+			-- sentences. Short on rating is "+43 to Duelist". Short on
+			-- PLACING, with the rating already there, is a negative number in
+			-- that sentence -- so it says where you stand instead.
+			local places=slots and slots[wanted.key]
+			if needed>0 then
+				panel.cutoffs.next:SetText(L.CUTOFF_NEXT:format(wanted.hex,needed,
+					ns.TierName(wanted,bracket)))
+			elseif places and places>0 and rank>0 then
+				panel.cutoffs.next:SetText(L.CUTOFF_NEXT_PLACES:format(wanted.hex,
+					ns.TierName(wanted,bracket),places,rank))
+			else
+				panel.cutoffs.next:SetText("")
+			end
+		elseif held then
+			-- Nothing left to climb towards: name what is held instead of saying
+			-- what it is above. "Rank one range" is the thing a reader wants to
+			-- see; "above every cutoff" made them work out which title that was.
+			panel.cutoffs.next:SetText(L.CUTOFF_NEXT_TOP:format(held.hex,
+				ns.TierName(held,bracket)))
 		else
 			panel.cutoffs.next:SetText("")
 		end
