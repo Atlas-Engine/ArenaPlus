@@ -152,12 +152,61 @@ try {
 
     git add -- $Toc CHANGELOG.md CHANGELOG-RELEASE.md
     git commit -q -m "Version $Version"
+
+    # Take whatever is on origin before tagging.
+    #
+    # This only ever pushed. On 2026-09-08 two commits were made through
+    # GitHub's web interface -- discord.yml added, then the whole
+    # .github/workflows directory deleted -- and every push afterwards was a
+    # non-fast-forward. It went unnoticed for three days because the TAG
+    # still went up: CurseForge and the release workflow both trigger on the
+    # tag, so releases kept building and announcing while main quietly fell
+    # six commits behind what was actually shipped.
+    #
+    # Merged, not rebased: the tags already made point at local commits, and
+    # a rebase would move those commits out from under them.
+    #
+    # A conflict stops the release rather than guessing. The one that
+    # actually happened was a modify/delete on release.yml -- deleted on the
+    # web, extended here -- and picking a side of that is a decision, not a
+    # merge strategy. Better a release that stops and says so than one that
+    # silently ships without its own workflow.
+    git fetch -q origin
+    if ($LASTEXITCODE -ne 0) { throw "git could not reach origin to fetch." }
+
+    $behind = [int](git rev-list --count "HEAD..origin/main")
+    if ($behind -gt 0) {
+        Say "origin has $behind commit(s) this copy does not; merging them in first."
+        git merge -q --no-edit origin/main
+        if ($LASTEXITCODE -ne 0) {
+            git merge --abort
+            throw "origin and this copy disagree about a file -- merge $Repo by hand, then release again."
+        }
+    }
+
     git tag $Version
 
     # Explicit refspec rather than --tags: this sends the tag just made, not
     # whatever else happens to be lying around locally.
-    git push -q origin HEAD "refs/tags/$Version"
-    if ($LASTEXITCODE -ne 0) { throw "git refused the push of $Version." }
+    # Captured rather than left to a console nobody is watching.
+    #
+    # ErrorActionPreference is Stop, and in Windows PowerShell redirecting a
+    # native program's stderr under Stop turns each line into a terminating
+    # NativeCommandError -- the push would die at the redirect instead of
+    # reaching the check below. Relaxed for the one call and put straight
+    # back.
+    $was = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $said = & git push -q origin HEAD "refs/tags/$Version" 2>&1
+    $ErrorActionPreference = $was
+
+    if ($LASTEXITCODE -ne 0) {
+        foreach ($line in $said) {
+            $text = "$line".Trim()
+            if ($text) { Say "  git: $text" }
+        }
+        throw "git refused the push of $Version."
+    }
 
     Say ""
     Say "Published $Version. CurseForge builds from the tag on its own."
