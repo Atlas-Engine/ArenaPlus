@@ -15,7 +15,9 @@ local L = ns.L
 -- Sized and placed exactly like the history window, because it stands in the
 -- same spot and the two take turns: swapping between them should look like
 -- changing pages rather than one window replacing another.
-local ROW_HEIGHT = 18
+-- 22 rather than 18, to make room for the larger list text. Fewer players fit
+-- before scrolling, which was the trade asked for.
+local ROW_HEIGHT = 22
 -- 110 wider than it was, for the activity view's last column.
 --
 -- Widened rather than squeezed. The five columns that were here are all as
@@ -51,7 +53,7 @@ local COL_RATE_MOVE = 704
 -- at the keyboard.
 local COL_SEEN      = 772
 
-local SPEC_SIZE  = 16
+local SPEC_SIZE  = 18
 
 local BRACKET_NAMES = ns.BRACKET_NAMES
 
@@ -970,7 +972,7 @@ local function CreateRow(parent)
 	row.highlight:Hide()
 
 	local function Label(x,width,justify,font)
-		local text=row:CreateFontString(nil,"OVERLAY",font or "GameFontHighlightSmall")
+		local text=row:CreateFontString(nil,"OVERLAY",ns.ListFont(font or "GameFontHighlightSmall"))
 		text:SetPoint("LEFT",row,"LEFT",x,0)
 		text:SetWidth(width)
 		text:SetJustifyH(justify or "LEFT")
@@ -1592,7 +1594,7 @@ local function CreateWindow()
 	frame:SetSize(WIDTH,HEIGHT)
 	frame:SetFrameStrata("DIALOG")
 	frame:SetToplevel(true)
-	frame:EnableMouse(true)
+	ns.MakeMovable(frame)
 	ns.StyleAsPanel(frame)
 
 	tinsert(UISpecialFrames,"ArenaPlus_ArenaLadder")
@@ -2553,7 +2555,7 @@ local function CreateWindow()
 	header:SetSize(CONTENT,14)
 
 	local function Heading(x,width,text,justify)
-		local label=header:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+		local label=header:CreateFontString(nil,"OVERLAY",ns.ListFont("GameFontNormalSmall",1))
 		label:SetPoint("LEFT",header,"LEFT",x,0)
 		label:SetWidth(width)
 		label:SetJustifyH(justify or "LEFT")

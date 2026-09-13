@@ -165,7 +165,15 @@ foreach ($line in Get-Content $ladderFile) {
     if ($m.Success) {
         $key = ConvertTo-LuaLower ($m.Groups[1].Value + '-' + $m.Groups[2].Value)
         if (-not $wanted.Contains($key)) {
-            $wanted[$key] = @{ Name = $m.Groups[1].Value; Realm = $m.Groups[2].Value }
+            $wanted[$key] = @{ Name = $m.Groups[1].Value; Realm = $m.Groups[2].Value; Games = 0 }
+        }
+
+        # Games played this season, summed over every bracket they are on.
+        # Only ever goes up, so a bigger number than last time means they have
+        # played since -- see "played since" below.
+        $record = [regex]::Match($line, 'won=(\d+), lost=(\d+)')
+        if ($record.Success) {
+            $wanted[$key].Games += [int]$record.Groups[1].Value + [int]$record.Groups[2].Value
         }
     }
 }
@@ -245,6 +253,13 @@ if (Test-Path $cacheFile) {
                 Seen   = $bits[2]
                 Race   = if ($bits.Count -ge 4) { [int]$bits[3] } else { 0 }
                 Gender = if ($bits.Count -ge 5) { [int]$bits[4] } else { 0 }
+                # Games when the spec was read. -1 for a cache written before
+                # this was kept: unknown, so nobody is re-asked on its account.
+                Games  = if ($bits.Count -ge 6) { [int]$bits[5] } else { -1 }
+                # When the spec was last actually ASKED for, as opposed to Seen,
+                # when the character was last on the ladder. A cache from before
+                # this field falls back to Seen, which is the best it knew.
+                Asked  = if ($bits.Count -ge 7 -and $bits[6]) { $bits[6] } else { $bits[2] }
             }
         }
     }
@@ -307,13 +322,54 @@ if ($full) {
 
 # The oldest readings first, which is what makes this a rotation rather than a
 # random sample. Ordinal, to match the dictionary they came from.
+#
+# Oldest by when the spec was ASKED for, among characters on the ladder now.
+#
+# It sorted by Seen, which every run sets to today for everybody on the ladder
+# -- so the oldest dates always belonged to characters who had left it, the
+# slice was spent entirely on people it would not ask about, and nobody on the
+# ladder was ever refreshed. Measured 2026-09-12: "118 due a refresh", asked 0.
+# That is how Oxy stayed Discipline.
 $stale = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
 if ($slice -gt 0) {
-    foreach ($key in ($seen.Keys | Sort-Object { $seen[$_].Seen } | Select-Object -First $slice)) {
+    $onLadder = @($seen.Keys | Where-Object { $wanted.Contains($_) })
+    foreach ($key in ($onLadder | Sort-Object { $seen[$_].Asked } | Select-Object -First $slice)) {
         $null = $stale.Add($key)
     }
     Write-Host ("{0} of {1} known characters due a refresh this run." -f $stale.Count, $seen.Count)
 }
+
+# ---------------------------------------------------------------- played since
+#
+# Everyone who has played a game since their spec was read, asked again now
+# rather than when the daily rotation comes round to them.
+#
+# The spec is Blizzard's active_spec, which is written when a character logs
+# out. So it goes stale in exactly one way: somebody logs out in one spec and
+# plays the next session in another. Reported live -- Oxy, a Holy priest the
+# whole time he was watched, shown as Discipline because the day's reading
+# caught a profile he had last logged out of in Discipline, and the rotation
+# would not look again until tomorrow.
+#
+# Played since is the right trigger because it is exactly when the answer can
+# have changed and only then: a character who has not queued has not logged in
+# to change anything worth showing. It costs one request per active player per
+# run, and on a fifteen-minute beat that is a few hundred, well inside budget.
+#
+# It can still lag by a session. Blizzard only writes the profile at logout,
+# so asking while they are still in the new spec returns the old one; the next
+# game they play after logging out puts it right.
+$playedSince = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+foreach ($key in $wanted.Keys) {
+    $known = $seen[$key]
+    if ($known -and $known.Games -ge 0 -and $wanted[$key].Games -gt $known.Games) {
+        $null = $playedSince.Add($key)
+    }
+}
+if ($playedSince.Count -gt 0) {
+    Write-Host ("{0} characters have played since their spec was read; asking again." -f $playedSince.Count)
+}
+foreach ($key in $playedSince) { $null = $stale.Add($key) }
 
 # ---------------------------------------------------------------- fetch
 
@@ -584,16 +640,16 @@ try {
 
             if ($answer -and $answer.Status -eq 'ok' -and $answer.Class -and $answer.Spec) {
                 $slug = (($answer.Class + '-' + $answer.Spec).ToLower()) -replace ' ', '-'
-                $seen[$key] = @{ Slug = $slug; Seen = $askedOn; Race = $answer.Race; Gender = $answer.Gender }
+                $seen[$key] = @{ Slug = $slug; Seen = $askedOn; Race = $answer.Race; Gender = $answer.Gender; Games = $wanted[$key].Games; Asked = $askedOn }
                 $found++
             } elseif ($answer -and $answer.Status -eq 'ok') {
                 # Answered, but not about a class and a spec.
-                $seen[$key] = @{ Slug = ''; Seen = $askedOn; Race = $answer.Race; Gender = $answer.Gender }
+                $seen[$key] = @{ Slug = ''; Seen = $askedOn; Race = $answer.Race; Gender = $answer.Gender; Games = $wanted[$key].Games; Asked = $askedOn }
                 $missing++
             } elseif ($answer -and $answer.Code -eq 404) {
                 # Gone for good: an empty slug is recorded so later runs stop
                 # asking about a character that no longer exists.
-                $seen[$key] = @{ Slug = ''; Seen = $askedOn; Race = 0; Gender = 0 }
+                $seen[$key] = @{ Slug = ''; Seen = $askedOn; Race = 0; Gender = 0; Games = $wanted[$key].Games; Asked = $askedOn }
                 $missing++
             } else {
                 # Refused, timed out, or no answer at all -- nothing was learned
@@ -639,7 +695,11 @@ $now = Get-Date -Format $TimeFormat
 # about this run. That is what keeps a returning regular from ageing out of the
 # cache and being asked about all over again.
 foreach ($key in $wanted.Keys) {
-    if ($seen.ContainsKey($key)) { $seen[$key].Seen = $askedOn }
+    if ($seen.ContainsKey($key)) {
+        $seen[$key].Seen = $askedOn
+        # A reading from before games were kept starts counting from now.
+        if ($seen[$key].Games -lt 0) { $seen[$key].Games = $wanted[$key].Games }
+    }
 }
 
 # Misses are written as 0, not dropped.
@@ -819,8 +879,10 @@ $null = $cacheLines.Add("# lastFull=$fullStamp")
 $dropped = 0
 foreach ($key in ($seen.Keys | Sort-Object)) {
     if ($seen[$key].Seen -lt $stale) { $dropped++; continue }
-    $null = $cacheLines.Add(("{0}|{1}|{2}|{3}|{4}" -f $key, $seen[$key].Slug, $seen[$key].Seen,
-        $seen[$key].Race, $seen[$key].Gender))
+    $games = if ($null -ne $seen[$key].Games) { $seen[$key].Games } else { -1 }
+    $askedAt = if ($seen[$key].Asked) { $seen[$key].Asked } else { $seen[$key].Seen }
+    $null = $cacheLines.Add(("{0}|{1}|{2}|{3}|{4}|{5}|{6}" -f $key, $seen[$key].Slug, $seen[$key].Seen,
+        $seen[$key].Race, $seen[$key].Gender, $games, $askedAt))
 }
 Set-Content -Path $cacheFile -Value ($cacheLines -join "`n") -Encoding utf8
 

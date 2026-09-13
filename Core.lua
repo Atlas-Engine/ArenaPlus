@@ -1233,6 +1233,88 @@ function ns.CloseButton(parent)
 	return close
 end
 
+-- The game's small font, a few points bigger, for the text in the lists.
+--
+-- The ladder and the match history were drawn in the client's small fonts,
+-- which are ten points, and were hard to read at a glance. A copy of the same
+-- font object keeps the face, the outline and the shadow, and only the size
+-- moves -- so the lists still look like the rest of the game.
+--
+-- Made once per template and growth and reused: a font object is a global,
+-- and every row asking for its own would be hundreds of them.
+function ns.ListFont(template,grow)
+	grow=grow or 2
+	local name=("ArenaPlus_%s_%d"):format(template,grow)
+	if _G[name] then return name end
+
+	local base=_G[template]
+	local font=CreateFont(name)
+	if base then
+		font:CopyFontObject(base)
+		local path,size,flags=base:GetFont()
+		if path and size then font:SetFont(path,size+grow,flags) end
+	end
+	return name
+end
+
+-- Let a window be dragged anywhere, and put it back where it belongs when it
+-- closes.
+--
+-- Every window this addon opens has a home: the centre of the screen, beside
+-- the PvP window, off the edge of the auction house. Dragging one somewhere
+-- else is a choice about right now, not a setting -- so it lasts until the
+-- window closes, and the next time it opens it is where it always is. Nothing
+-- is saved, and nobody ends up with a window stranded half off the screen
+-- from a session they have forgotten.
+--
+-- Home is read at the moment the drag starts, not when the window is built,
+-- because several of these are placed by code every time they open. What was
+-- there just before the first drag is by definition where it was meant to be.
+-- SetUserPlaced(false) after the drag stops the client remembering the new
+-- spot in its own layout cache, which would quietly undo the whole point.
+--
+-- canMove, if given, is asked before each drag, for a window that must stay
+-- put in some circumstance.
+function ns.MakeMovable(frame,canMove)
+	if not frame or frame.arenaPlusMovable then return end
+	frame.arenaPlusMovable=true
+
+	frame:SetMovable(true)
+	frame:EnableMouse(true)
+	frame:SetClampedToScreen(true)
+	frame:RegisterForDrag("LeftButton")
+
+	frame:SetScript("OnDragStart",function(self)
+		if canMove and not canMove(self) then return end
+		if not self.arenaPlusHome then
+			local home={}
+			for index=1,self:GetNumPoints() do
+				home[index]={ self:GetPoint(index) }
+			end
+			self.arenaPlusHome=home
+		end
+		self:StartMoving()
+	end)
+
+	frame:SetScript("OnDragStop",function(self)
+		self:StopMovingOrSizing()
+		if self.SetUserPlaced then self:SetUserPlaced(false) end
+	end)
+
+	frame:HookScript("OnHide",function(self)
+		local home=self.arenaPlusHome
+		if not home then return end
+		self.arenaPlusHome=nil
+		-- A window closed mid-drag would otherwise keep following the mouse
+		-- the next time it opened.
+		self:StopMovingOrSizing()
+		self:ClearAllPoints()
+		for _,point in ipairs(home) do
+			self:SetPoint(unpack(point))
+		end
+	end)
+end
+
 
 ----------------------------------------------------------------
 -- Settings
@@ -1262,11 +1344,7 @@ local function CreateConfig()
 	frame:SetPoint("CENTER",UIParent,"CENTER",0,0)
 	frame:SetFrameStrata("DIALOG")
 	frame:SetToplevel(true)
-	frame:EnableMouse(true)
-	frame:SetMovable(true)
-	frame:RegisterForDrag("LeftButton")
-	frame:SetScript("OnDragStart",frame.StartMoving)
-	frame:SetScript("OnDragStop",frame.StopMovingOrSizing)
+	ns.MakeMovable(frame)
 	ns.StyleAsPanel(frame)
 
 	tinsert(UISpecialFrames,"ArenaPlus_Config")
@@ -1488,6 +1566,10 @@ local function AttachSpec(entry,region)
 		end
 	end
 end
+
+-- Shared, so a name that is not a ladder row -- an alt listed in the inspect
+-- window -- can have its class looked up the same way a row does.
+ns.AttachSpec=AttachSpec
 
 -- Every row of one bracket, with class and spec joined on.
 --

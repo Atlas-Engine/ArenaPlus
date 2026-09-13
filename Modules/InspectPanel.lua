@@ -2480,19 +2480,13 @@ local function BuildWindow()
 	frame:SetFrameStrata("FULLSCREEN_DIALOG")
 	frame:SetToplevel(true)
 	frame:EnableMouse(true)
-	-- Movable, except when it is hanging off the auction house.
+	-- Movable everywhere, the auction house row included.
 	--
-	-- Opened from the ladder it is a window in its own right and drags like
-	-- one. Opened from the auction house it is the third panel in a row --
-	-- house, top players, their gems -- and a row you can pull one piece out of
-	-- is a row that ends up wrong.
-	frame:SetMovable(true)
-	frame:RegisterForDrag("LeftButton")
-	frame:SetScript("OnDragStart",function(self)
-		if self.attached then return end
-		self:StartMoving()
-	end)
-	frame:SetScript("OnDragStop",frame.StopMovingOrSizing)
+	-- It used to refuse to move while hanging off the auction house, because
+	-- a row of three panels you could pull one piece out of was a row that
+	-- ended up wrong for good. Moves no longer last past closing, so pulling
+	-- one aside for a moment costs nothing: it is back in the row next time.
+	ns.MakeMovable(frame)
 	ns.StyleAsPanel(frame)
 
 	-- Its own opaque layer on top of the shared styling. The panel was letting
@@ -2556,6 +2550,55 @@ local function BuildWindow()
 	frame.subtitle=frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
 	frame.subtitle:SetPoint("TOPLEFT",frame.title,"BOTTOMLEFT",0,-4)
 	frame.subtitle:SetTextColor(0.55,0.55,0.55)
+
+	-- Rank-one titles, as the achievements' own icons after the rating line.
+	--
+	-- On the subtitle line rather than beside the name: a long name and five
+	-- crests beside it reach the spec title centred across the top. The
+	-- subtitle is short -- a rating, a place, a flag -- so there is room.
+	--
+	-- Here and not on the ladder. A column of crests down the ladder crowds
+	-- the thing the ladder is for; this is where somebody is looked at.
+	frame.prestige={}
+	for index=1,6 do
+		local mark=CreateFrame("Button",nil,frame)
+		mark:SetSize(16,16)
+		if index==1 then
+			mark:SetPoint("LEFT",frame.subtitle,"RIGHT",10,0)
+		else
+			mark:SetPoint("LEFT",frame.prestige[index-1],"RIGHT",3,0)
+		end
+
+		mark.icon=mark:CreateTexture(nil,"ARTWORK")
+		mark.icon:SetAllPoints()
+		mark.icon:SetTexCoord(0.07,0.93,0.07,0.93)
+
+		-- Every bracket the title was earned in, one line each, in the
+		-- colour of what it is: rank one orange, Hero gold.
+		mark:SetScript("OnEnter",function(self)
+			if not self.lines then return end
+			GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
+			for line,text in ipairs(self.lines) do
+				if line==1 then
+					GameTooltip:SetText(text,self.r,self.g,self.b)
+				else
+					GameTooltip:AddLine(text,self.r,self.g,self.b)
+				end
+			end
+			GameTooltip:Show()
+		end)
+		mark:SetScript("OnLeave",function() GameTooltip:Hide() end)
+		mark:Hide()
+		frame.prestige[index]=mark
+	end
+
+	-- Their other characters, on a line of its own under the rating. Inside
+	-- the band, which has room for exactly one short line more.
+	frame.alts=frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+	frame.alts:SetPoint("TOPLEFT",frame.subtitle,"BOTTOMLEFT",0,-3)
+	frame.alts:SetWidth(WIDTH-60)
+	frame.alts:SetJustifyH("LEFT")
+	frame.alts:SetWordWrap(false)
 
 	local close=ns.CloseButton(frame)
 	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0)
@@ -2805,6 +2848,140 @@ local function TierOfTitle(name)
 	end
 end
 
+-- A character's rank-one titles, grouped for drawing: one per title, best
+-- first, each with every bracket it was earned in.
+--
+-- Grouped by the title with its bracket taken off, not by the icon. Blizzard
+-- reuses art across eras -- Merciless Gladiator from 2007 and Tyrannical
+-- Gladiator from Mists Classic wear the same one -- so grouping by icon would
+-- put titles a decade apart behind one hover.
+--
+-- Newest season first, read from the name: achievement ids were handed out as
+-- Blizzard added them, and Season 1's Infernal Gladiator came after Season 12.
+local function PrestigeOf(entry,region)
+	local ranks=ns.PVP_PRESTIGE
+	local names=ns.PVP_TITLE_NAMES
+	local byRegion=ns.TITLES_BY_REGION and ns.TITLES_BY_REGION[region]
+	if not (ranks and names and byRegion and entry and entry.name) then return {} end
+
+	local ids=byRegion[(entry.name.."-"..(entry.realm or "")):lower()]
+	if not ids or ids=="" then return {} end
+
+	local groups,order={},{}
+	for piece in ids:gmatch("[^,]+") do
+		local id=tonumber(piece)
+		local info=id and ranks[id]
+		local name=info and names[id]
+		if name then
+			local key=name:gsub("%s*%(%d+v%d+%)$","")
+			local group=groups[key]
+			if not group then
+				group={ icon=info.icon, rank=info.rank, season=0, lines={} }
+				groups[key]=group
+				order[#order+1]=group
+			end
+			if info.rank<group.rank then group.rank=info.rank end
+			local season=tonumber(name:match("Season (%d+)")) or 0
+			if season>group.season then group.season=season end
+			group.lines[#group.lines+1]=name
+		end
+	end
+
+	for _,group in ipairs(order) do table.sort(group.lines) end
+	table.sort(order,function(a,b)
+		if a.rank~=b.rank then return a.rank<b.rank end
+		return a.season>b.season
+	end)
+	return order
+end
+
+-- The other characters on this character's account.
+--
+-- From ALTS_BY_REGION, which UpdateTitles.ps1 writes: one line per account,
+-- found by achievements that carry the same completion time on every
+-- character of one account. Mists only, like the titles it comes from.
+--
+-- Matched with a comma either side, so gc-raden does not find itself inside
+-- a line that only holds xgc-raden. Realms are only named where an alt is on
+-- another realm from the one being looked at.
+--
+-- Each name in its class colour, found the way a ladder row finds its class:
+-- the spec file knows every character the specs pass has asked about, which is
+-- everybody on the ladder. One it has never heard of stays white.
+local function ClassHex(class)
+	if not class then return nil end
+	local colour=RAID_CLASS_COLORS and RAID_CLASS_COLORS[(class:upper():gsub("%-",""))]
+	if not colour then return nil end
+	if colour.colorStr then return colour.colorStr:sub(-6) end
+	return ("%02x%02x%02x"):format(math.floor(colour.r*255+0.5),math.floor(colour.g*255+0.5),
+		math.floor(colour.b*255+0.5))
+end
+
+local function AltsOf(entry,region)
+	local lines=ns.ALTS_BY_REGION and ns.ALTS_BY_REGION[region]
+	if not (lines and entry and entry.name) then return {} end
+
+	local me=(entry.name.."-"..(entry.realm or "")):lower()
+	for _,line in ipairs(lines) do
+		if (","..line:lower()..","):find(","..me..",",1,true) then
+			local others={}
+			for who in line:gmatch("[^,]+") do
+				if who:lower()~=me then
+					local name,realm=who:match("^(.-)%-(.+)$")
+					name=name or who
+					-- A lowered key, from a character no longer on the ladder:
+					-- its first letter back up, which is how names are spelled.
+					if name:sub(1,1):match("%l") then name=name:sub(1,1):upper()..name:sub(2) end
+					local shown=name
+					if realm and realm~=(entry.realm or "") and ns.RealmName then
+						shown=shown.."-"..ns.RealmName(realm)
+					end
+
+					local alt={ name=name, realm=realm }
+					if ns.AttachSpec then ns.AttachSpec(alt,region) end
+					local hex=ClassHex(alt.class)
+					if hex then shown="|cff"..hex..shown.."|r" end
+
+					others[#others+1]=shown
+				end
+			end
+			return others
+		end
+	end
+	return {}
+end
+
+local function FillAlts(entry,region)
+	if not (frame and frame.alts) then return end
+	local others=AltsOf(entry,region)
+	if #others==0 then
+		frame.alts:SetText("")
+	else
+		frame.alts:SetText(L.INSPECT_ALTS:format(table.concat(others,", ")))
+	end
+end
+
+local function FillPrestige(entry,region)
+	if not (frame and frame.prestige) then return end
+	local list=PrestigeOf(entry,region)
+	for index,mark in ipairs(frame.prestige) do
+		local group=list[index]
+		if group then
+			mark.icon:SetTexture("Interface\\Icons\\"..(group.icon~="" and group.icon or "INV_Misc_QuestionMark"))
+			mark.lines=group.lines
+			if group.rank==3 then
+				mark.r,mark.g,mark.b=1,0.82,0
+			else
+				mark.r,mark.g,mark.b=1,0.5,0
+			end
+			mark:Show()
+		else
+			mark.lines=nil
+			mark:Hide()
+		end
+	end
+end
+
 local function FillTitles(entry,region)
 	local page=frame and frame.pages and frame.pages.pvp
 	if not (page and page.titles) then return end
@@ -3024,6 +3201,8 @@ function ns.ShowInspect(entry,region,bracket)
 		or (ns.RegionShort and ns.RegionShort(region))
 		or region:upper()
 	frame.subtitle:SetText(table.concat(bits,"   "))
+	FillPrestige(entry,region)
+	FillAlts(entry,region)
 
 	-- Always true by the time we are here: the no-data case turned back at the
 	-- top. Kept as a field because ShowPage reads it to decide whether a page
@@ -3481,16 +3660,8 @@ local function BuildShopWindow()
 		if socketWatcher then socketWatcher:UnregisterEvent("GET_ITEM_INFO_RECEIVED") end
 	end)
 
-	-- Draggable only when it is not hanging off the shelf, the same rule the
-	-- inspect panel used to follow: a row of windows you can pull one piece
-	-- out of is a row that ends up wrong.
-	shop:SetMovable(true)
-	shop:RegisterForDrag("LeftButton")
-	shop:SetScript("OnDragStart",function(self)
-		if self.attached then return end
-		self:StartMoving()
-	end)
-	shop:SetScript("OnDragStop",shop.StopMovingOrSizing)
+	-- Movable, and back in its place when it closes -- see ns.MakeMovable.
+	ns.MakeMovable(shop)
 
 	-- A shorter band than the inspect panel's, holding a name and a spec
 	-- rather than a name, a rating, a rank and a row of professions.

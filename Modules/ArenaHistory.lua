@@ -37,7 +37,7 @@ local module = ns.RegisterModule("history",{
 -- is a limit small enough to hit in normal play.
 local KEEP_MAX     = 500  -- kept per bracket
 local PANEL_ROWS   = 10   -- shown beside the PvP panel
-local ROW_HEIGHT   = 20
+local ROW_HEIGHT   = 22   -- room for the larger list text
 local ICON_SIZE    = 16
 local PANEL_WIDTH  = 300
 -- Room at the top of the panel for the season line.
@@ -76,7 +76,7 @@ local RATING_WIDTH = 76
 local MAP_X       = 420
 local MAP_WIDTH   = 170
 local DATE_WIDTH   = 104
-local DETAIL_ROW   = 22   -- a player's line inside an expanded match
+local DETAIL_ROW   = 24   -- a player's line inside an expanded match
 local DETAIL_ICON  = 20
 local TOGGLE_SIZE  = 14   -- the plus/minus at the head of each row
 
@@ -985,29 +985,49 @@ local function Fill(texture,r,g,b,a)
 	end
 end
 
--- The death that decided the match: the first one on a win, the last on a
--- loss. Only matches recorded here have the full order -- imported ones know
--- which death came first and nothing more -- so a loss is left unmarked rather
--- than marked wrongly.
-local function DecisiveDeath(match)
+-- Who went down first in the match, on either side, or nil.
+--
+-- The one death worth marking. Tinting everybody who died made a long 3v3
+-- half red, which said less than marking the one that opened the game up --
+-- and the first death is known for every match, imported ones included, where
+-- the order after it is not.
+local function FirstDeath(match)
 	if not match then return nil end
-
-	local wantLast=(match.w==false)
-	if wantLast and not match.live then return nil end
-
-	local decisive,order
+	local first,order
 	for _,side in ipairs({match.mine,match.theirs}) do
 		for _,player in ipairs(side or {}) do
 			local died=tonumber(player.died)
-			if died then
-				if not order or (wantLast and died>order) or (not wantLast and died<order) then
-					decisive,order=player,died
-				end
+			if died and (not order or died<order) then
+				first,order=player,died
 			end
 		end
 	end
+	return first
+end
 
-	return decisive
+-- How it is marked: the portrait greyed out and darkened, the way the game's
+-- own party frames show somebody dead, with a red cross on its corner.
+--
+-- A red tint was tried first and could not be got right: the full (1, 0.3,
+-- 0.3) was hard to look at, (1, 0.62, 0.62) too faint to notice, and a red icon
+-- never read as "dead" at any strength -- only as "red". Grey and a cross do,
+-- and the class stays recognisable underneath.
+--
+-- The ready-check cross, which every client has, rather than anything shipped.
+-- The name in an expanded match keeps a muted red: text has no grey-out, and a
+-- grey name would read as missing data.
+local DEATH_CROSS = "Interface\\RaidFrame\\ReadyCheck-NotReady"
+local DEATH_SHADE = 0.55
+local DEATH_NAME = { 0.95, 0.38, 0.38 }
+
+local function MarkDead(icon,cross,dead)
+	icon:SetDesaturated(dead)
+	if dead then
+		icon:SetVertexColor(DEATH_SHADE,DEATH_SHADE,DEATH_SHADE)
+	else
+		icon:SetVertexColor(1,1,1)
+	end
+	cross:SetShown(dead)
 end
 
 -- The scoreboard's count where there is one -- imported matches have it -- and
@@ -1072,11 +1092,13 @@ local function CreateSlot(row)
 	slot.icon=slot:CreateTexture(nil,"ARTWORK")
 	slot.icon:SetAllPoints()
 
-	slot.skull=slot:CreateTexture(nil,"OVERLAY")
-	slot.skull:SetTexture(SKULL_ICON)
-	slot.skull:SetSize(10,10)
-	slot.skull:SetPoint("BOTTOMRIGHT",slot,"BOTTOMRIGHT",3,-3)
-	slot.skull:Hide()
+	-- Centred on the portrait, and nearly as big: on a sixteen point icon a
+	-- corner badge was a detail you had to look for.
+	slot.cross=slot:CreateTexture(nil,"OVERLAY",nil,1)
+	slot.cross:SetTexture(DEATH_CROSS)
+	slot.cross:SetSize(14,14)
+	slot.cross:SetPoint("CENTER",slot,"CENTER",0,0)
+	slot.cross:Hide()
 
 	slot:SetScript("OnEnter",ShowPlayerTooltip)
 	slot:SetScript("OnLeave",function() GameTooltip:Hide() end)
@@ -1091,10 +1113,8 @@ local function CreateSlot(row)
 	return slot
 end
 
-local function SetSlot(slot,player,duration,x,row,decisive)
+local function SetSlot(slot,player,duration,x,row,firstDeath)
 	if not player then return slot:Hide() end
-
-	slot.skull:SetShown(decisive~=nil and player==decisive)
 
 	slot.player,slot.duration=player,duration
 	slot.icon:SetTexture(CLASS_ICONS)
@@ -1102,13 +1122,9 @@ local function SetSlot(slot,player,duration,x,row,decisive)
 	local coords=CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[player.c]
 	if coords then slot.icon:SetTexCoord(unpack(coords)) end
 
-	-- Anyone who died is tinted red, the same as in an expanded match, so a
-	-- glance at the short list already says who fell.
-	if Deaths(player)>0 then
-		slot.icon:SetVertexColor(1,0.3,0.3)
-	else
-		slot.icon:SetVertexColor(1,1,1)
-	end
+	-- The first to fall is marked, the same as in an expanded match, so a
+	-- glance at the short list already says where the game broke open.
+	MarkDead(slot.icon,slot.cross,firstDeath~=nil and player==firstDeath)
 
 	slot:ClearAllPoints()
 	slot:SetPoint("LEFT",row,"LEFT",x,0)
@@ -1260,10 +1276,10 @@ local function ShowMatch(row,match,expanded)
 		row.vs:Hide()
 	else
 		local x=(row.date and DATE_WIDTH or 0)+RATING_WIDTH
-		local decisive=DecisiveDeath(match)
+		local firstDeath=FirstDeath(match)
 
 		for index=1,5 do
-			SetSlot(row.mine[index],match.mine and match.mine[index],match.dur,x,row,decisive)
+			SetSlot(row.mine[index],match.mine and match.mine[index],match.dur,x,row,firstDeath)
 			if match.mine and match.mine[index] then x=x+ICON_SIZE+1 end
 		end
 
@@ -1273,7 +1289,7 @@ local function ShowMatch(row,match,expanded)
 		x=x+18
 
 		for index=1,5 do
-			SetSlot(row.theirs[index],match.theirs and match.theirs[index],match.dur,x,row,decisive)
+			SetSlot(row.theirs[index],match.theirs and match.theirs[index],match.dur,x,row,firstDeath)
 			if match.theirs and match.theirs[index] then x=x+ICON_SIZE+1 end
 		end
 	end
@@ -1318,15 +1334,6 @@ end
 -- numbers cut a sliver out of the middle of it.
 local ROLE_TEXTURE = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
 
--- The raid target markers, used here as small badges on a portrait.
---
--- SKULL_ICON was referenced in two places and defined in none, so it was a nil
--- global: SetTexture(nil) clears a texture rather than complaining, which is why
--- the decisive-kill marker has never appeared and nothing ever said so.
-local SKULL_ICON = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_8"
--- Bigger than a badge would be, because it now stands beside the name rather
--- than on top of a portrait.
-local SKULL_SIZE = 14
 local ROLE_COORDS  = {
 	TANK    = {   0, 19/64, 22/64, 41/64 },
 	HEALER  = { 20/64, 39/64,  1/64, 20/64 },
@@ -1374,28 +1381,20 @@ local function DetailLine(detail,index)
 	line.icon:SetSize(DETAIL_ICON,DETAIL_ICON)
 	line.icon:SetPoint("LEFT",line,"LEFT",ROLE_ICON+4,0)
 
+	line.cross=line:CreateTexture(nil,"OVERLAY",nil,1)
+	line.cross:SetTexture(DEATH_CROSS)
+	line.cross:SetSize(17,17)
+	line.cross:SetPoint("CENTER",line.icon,"CENTER",0,0)
+	line.cross:Hide()
+
 	line.spec=line:CreateTexture(nil,"ARTWORK")
 	line.spec:SetSize(SPEC_ICON,SPEC_ICON)
 	line.spec:SetPoint("LEFT",line.icon,"RIGHT",2,0)
 	-- Icons come with a border baked in that the class circles do not have.
 	line.spec:SetTexCoord(0.07,0.93,0.07,0.93)
 
-	-- After the name, not on the portrait.
-	--
-	-- On the class icon it simply covered it -- a badge over a twenty pixel
-	-- portrait leaves nothing of the portrait worth seeing, and the first
-	-- attempt at a corner offset put it on the spec icon next door instead.
-	-- Beside the name it has room to be read.
-	--
-	-- Placed when the row is drawn rather than here: where the name ends
-	-- depends on the name.
-	line.skull=line:CreateTexture(nil,"OVERLAY")
-	line.skull:SetTexture(SKULL_ICON)
-	line.skull:SetSize(SKULL_SIZE,SKULL_SIZE)
-	line.skull:Hide()
-
 	local function column(x,width,justify)
-		local text=line:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+		local text=line:CreateFontString(nil,"OVERLAY",ns.ListFont("GameFontNormalSmall",1))
 		text:SetPoint("LEFT",line,"LEFT",x,0)
 		if width then text:SetWidth(width) end
 		text:SetJustifyH(justify or "LEFT")
@@ -1469,7 +1468,7 @@ local function DetailLine(detail,index)
 	line.rankHit:SetPoint("LEFT",line,"LEFT",COL_KD-8-DELTA_WIDTH-6-RANK_WIDTH,0)
 	line.rankHit:SetSize(RANK_WIDTH,DETAIL_ROW)
 
-	line.rank=line.rankHit:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+	line.rank=line.rankHit:CreateFontString(nil,"OVERLAY",ns.ListFont("GameFontNormalSmall",1))
 	line.rank:SetPoint("LEFT",line.rankHit,"LEFT",0,0)
 	line.rank:SetWidth(RANK_WIDTH)
 	line.rank:SetJustifyH("RIGHT")
@@ -1649,7 +1648,7 @@ local function ShowDetail(row,match)
 	end
 
 	local detail=row.detail
-	local decisive=DecisiveDeath(match)
+	local firstDeath=FirstDeath(match)
 	local mvp=MostValuable(match)
 	local index=0
 
@@ -1663,20 +1662,19 @@ local function ShowDetail(row,match)
 			local coords=CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[player.c]
 			if coords then line.icon:SetTexCoord(unpack(coords)) end
 
-			-- Anyone who died is marked in red, icon and name both.
-			local died=Deaths(player)>0
+			-- The first to die is marked, icon and name both. Everybody else
+			-- keeps their class colour, deaths or not: the K/D column already
+			-- counts those.
 			local colour=RAID_CLASS_COLORS and RAID_CLASS_COLORS[player.c]
 
-			if died then
-				line.icon:SetVertexColor(1,0.3,0.3)
-				line.name:SetTextColor(1,0.3,0.3)
+			local fellFirst=firstDeath~=nil and player==firstDeath
+			MarkDead(line.icon,line.cross,fellFirst)
+			if fellFirst then
+				line.name:SetTextColor(unpack(DEATH_NAME))
 			else
-				line.icon:SetVertexColor(1,1,1)
 				line.name:SetTextColor(colour and colour.r or 1,colour and colour.g or 1,colour and colour.b or 1)
 			end
 
-			local hasSkull=decisive~=nil and player==decisive
-			line.skull:SetShown(hasSkull)
 
 			line.role:SetTexCoord(RoleCoords(RoleOf(player)))
 			local specIcon=SpecIcon(player)
@@ -1814,11 +1812,7 @@ local function ShowDetail(row,match)
 				line.delta:SetText("")
 			end
 
-			-- The name gives up the skull's width when there is one, so the
-			-- skull always has somewhere to stand: without this a long name
-			-- fills the field and the skull lands on the ladder column.
-			--
-			-- And it takes back whatever the rating column is not using.
+			-- The name takes back whatever the rating column is not using.
 			--
 			-- That column is 76 points because "#4087 1517" needs 76, and
 			-- almost nobody is rank four thousand. "#27 2383" leaves twenty
@@ -1832,17 +1826,10 @@ local function ShowDetail(row,match)
 			-- than rank nine hundred, and the widest case spares nothing and
 			-- leaves this where it was.
 			local spare=RANK_WIDTH-math.min(line.rank:GetStringWidth(),RANK_WIDTH)
-			local room=line.nameWidth+spare-(hasSkull and (SKULL_SIZE+4) or 0)
+			local room=line.nameWidth+spare
 			line.name:SetWidth(room)
 			line.name:SetText(label)
 
-			if hasSkull then
-				-- GetStringWidth measures the whole string, clipped or not, so
-				-- it is capped at what the field actually shows.
-				local used=math.min(line.name:GetStringWidth(),room)
-				line.skull:ClearAllPoints()
-				line.skull:SetPoint("LEFT",line.name,"LEFT",used+4,0)
-			end
 			line.kd:SetText(L.HISTORY_DETAIL_KD:format(player.k or 0,Deaths(player)))
 
 			local duration=match.dur
@@ -1953,19 +1940,19 @@ local function CreateRow(parent,index,withDate)
 		row.toggle:SetPoint("TOPLEFT",row,"TOPLEFT",2,-3)
 		row.toggle:SetTexture(PLUS_TEXTURE)
 
-		row.date=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+		row.date=row:CreateFontString(nil,"OVERLAY",ns.ListFont("GameFontNormalSmall"))
 		row.date:SetPoint("TOPLEFT",row,"TOPLEFT",TOGGLE_SIZE+6,-2)
 		row.date:SetWidth(DATE_WIDTH-TOGGLE_SIZE-10)
 		row.date:SetJustifyH("LEFT")
 		row.date:SetTextColor(0.7,0.7,0.7)
 	end
 
-	row.rating=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+	row.rating=row:CreateFontString(nil,"OVERLAY",ns.ListFont("GameFontNormalSmall"))
 	row.rating:SetPoint("TOPLEFT",row,"TOPLEFT",(withDate and DATE_WIDTH or 0)+2,-2)
 	row.rating:SetWidth(RATING_WIDTH-4)
 	row.rating:SetJustifyH("LEFT")
 
-	row.vs=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+	row.vs=row:CreateFontString(nil,"OVERLAY",ns.ListFont("GameFontNormalSmall"))
 	row.vs:SetText(L.HISTORY_VS)
 	row.vs:SetTextColor(0.5,0.5,0.5)
 
@@ -1987,14 +1974,14 @@ local function CreateRow(parent,index,withDate)
 	-- shorter than a 5v5, and columns that slide about with the bracket are
 	-- harder to read down than columns that stay put.
 	if withDate then
-		row.map=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+		row.map=row:CreateFontString(nil,"OVERLAY",ns.ListFont("GameFontNormalSmall"))
 		row.map:SetPoint("TOPLEFT",row,"TOPLEFT",MAP_X,-2)
 		row.map:SetWidth(MAP_WIDTH)
 		row.map:SetJustifyH("LEFT")
 		row.map:SetWordWrap(false)
 		row.map:SetTextColor(0.62,0.62,0.62)
 
-		row.length=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+		row.length=row:CreateFontString(nil,"OVERLAY",ns.ListFont("GameFontNormalSmall"))
 		row.length:SetPoint("TOPLEFT",row,"TOPLEFT",MAP_X+MAP_WIDTH+14,-2)
 		row.length:SetWidth(110)
 		row.length:SetJustifyH("LEFT")
@@ -2605,7 +2592,7 @@ local function CreateWindow()
 	ns.PlaceFullWindow(frame)
 	frame:SetFrameStrata("DIALOG")
 	frame:SetToplevel(true)
-	frame:EnableMouse(true)
+	ns.MakeMovable(frame)
 	ns.StyleAsPanel(frame)
 
 	-- The same dark band the other two windows wear, so all three read as one
@@ -2801,6 +2788,9 @@ local function CreatePanel()
 	-- down the screen.
 	panel:SetPoint("TOPLEFT",PVEFrame,"TOPRIGHT",PANEL_GAP,0)
 	panel:Hide()
+	-- Back beside the PvP window whenever it closes, which includes closing
+	-- the PvP window itself.
+	ns.MakeMovable(panel)
 	ns.StyleAsPanel(panel)
 
 	panel.title=panel:CreateFontString(nil,"OVERLAY","GameFontNormal")

@@ -222,6 +222,59 @@ foreach ($id in $TitleIds.Keys) {
     }
 }
 
+# ---------------------------------------------------------------- rank one
+#
+# The titles above Gladiator: the ones only the top of a season gets.
+#
+#   Undisputed Gladiator: Season 13          the best of the whole season
+#   Tyrannical Gladiator: Season 13 (3v3)    that season's named Gladiator, per bracket
+#   Merciless Gladiator: Season 2            the same thing from the original seasons
+#   Hero of the Alliance: Malevolent         rated battleground rank one
+#
+# None of them are in the Arena category, so the whole achievement index is read
+# and they are picked out by name. The patterns are strict on purpose: the
+# reward mounts share the words ("Tyrannical Gladiator's Cloud Serpent") and
+# carry an apostrophe, and plain "Gladiator: Season 13" is Gladiator, which the
+# ladder colours already say.
+#
+# Achievements are account-wide, so a Mists Classic character carries whatever
+# the account earned years ago. That history is kept, not filtered out -- it is
+# the most interesting thing about somebody sitting at 2100.
+#
+# Ranked so a reader can show the best one: 1 Undisputed, 2 a named Gladiator,
+# 3 Hero. And each carries its own icon, from the achievement's media, so the
+# addon and the site both draw the game's art rather than a stand-in.
+$prestige = New-Object 'System.Collections.Generic.Dictionary[int,object]'
+try {
+    $requests++
+    $index = Invoke-RestMethod -Uri "$apiRoot/data/wow/achievement/index?namespace=$staticNs&locale=en_US" `
+                               -Headers @{ Authorization = $auth; 'Accept-Encoding' = 'gzip' } -TimeoutSec 60
+    foreach ($a in @($index.achievements)) {
+        if (-not ($a.id -and $a.name)) { continue }
+        $name = [string]$a.name
+        $rank = 0
+        if ($name -match '^Undisputed Gladiator: Season \d+') { $rank = 1 }
+        elseif ($name -match '^[A-Z][a-z]+ Gladiator: Season \d+( \([0-9v]+\))?$') { $rank = 2 }
+        elseif ($name -match '^Hero of the (Alliance|Horde)(: [A-Z][a-z]+)?$') { $rank = 3 }
+        if ($rank -eq 0) { continue }
+
+        $icon = ""
+        try {
+            $requests++
+            $media = Invoke-RestMethod -Uri "$apiRoot/data/wow/media/achievement/$($a.id)?namespace=$staticNs" `
+                                       -Headers @{ Authorization = $auth } -TimeoutSec 30
+            $url = [string](@($media.assets | Where-Object { $_.key -eq 'icon' })[0].value)
+            if ($url) { $icon = [IO.Path]::GetFileNameWithoutExtension($url) }
+        } catch { }
+
+        $prestige[[int]$a.id] = @{ Rank = $rank; Icon = $icon }
+        $titleName[[int]$a.id] = $name
+    }
+} catch {
+    Write-Log ("Could not read the achievement index for rank-one titles: " + $_.Exception.Message)
+}
+Write-Host ("{0} rank-one titles recognised." -f $prestige.Count)
+
 # What rating each milestone needs, read off its own name.
 #
 # "Just the Two of Us: 2200" and "Three's Company: 2700" carry the threshold in
@@ -287,6 +340,59 @@ foreach ($line in Get-Content $ladderFile) {
 
 Write-Host ("{0} distinct characters on the {1} ladder." -f $wanted.Count, $Region.ToUpper())
 
+# ---------------------------------------------------------------- one at a time
+#
+# Taken BEFORE the cache is read, and held until it has been written.
+#
+# It used to be taken just before the requests and let go straight after them,
+# with the cache read before and written after -- outside it at both ends. On
+# 2026-09-12 that lost three and a half thousand EU answers: a full manual run
+# let go of the lock, a scheduled run started in the moment before the manual
+# one saved, read the cache as it was an hour earlier, asked its 1,500, and
+# saved that over the finished run. Holding the lock from read to write makes
+# the two runs take turns over the cache, not just over Blizzard.
+#
+# Released at the very end. A run that dies after taking it leaves the file
+# behind, and the next run finds the process gone and clears it, as below.
+#
+# The shared lock, so this pass takes its turn with the others rather than
+# adding its rate to theirs. See the long note in UpdateFromBlizzard.ps1.
+$lockFile = Join-Path $PSScriptRoot "ArenaPlus-fetch.lock"
+$passLabel = "titles $Region"
+
+$held = $null
+for ($try = 1; $try -le 2; $try++) {
+    try {
+        $held = [System.IO.File]::Open($lockFile, [System.IO.FileMode]::CreateNew,
+                                       [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+        break
+    } catch {
+        $owner = 0
+        try { $owner = [int](Get-Content $lockFile -TotalCount 1 -ErrorAction Stop) } catch { }
+
+        if ($owner -gt 0 -and (Get-Process -Id $owner -ErrorAction SilentlyContinue)) {
+            $busy = ""
+            try { $busy = (Get-Content $lockFile -TotalCount 2)[1] } catch { }
+            if ($busy) { Write-Host ("Waiting: {0} is running (process {1})." -f $busy, $owner) }
+            else       { Write-Host ("Waiting: another pass is running (process {0})." -f $owner) }
+            return
+        }
+
+        if ($try -eq 1) {
+            Write-Host "Clearing a lock left by a run that did not finish."
+            try { Remove-Item $lockFile -Force -ErrorAction Stop } catch { }
+        } else {
+            Write-Host "Another run claimed the lock first. Nothing to do."
+            return
+        }
+    }
+}
+
+$writer = New-Object System.IO.StreamWriter($held)
+$writer.WriteLine($PID)
+$writer.WriteLine($passLabel)
+$writer.Flush()
+
 # ---------------------------------------------------------------- known
 #
 # What has been asked, and what came back.
@@ -302,8 +408,19 @@ Write-Host ("{0} distinct characters on the {1} ladder." -f $wanted.Count, $Regi
 # is remembered as having none rather than asked about for ever.
 $seen = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([System.StringComparer]::Ordinal)
 
+# Which ids the cache was collected against. A character asked before the
+# rank-one titles were being looked for was remembered WITHOUT them, and nothing
+# about their rating would ever send them back to be asked again -- so a cache
+# built against a different set is kept for its answers but counted as stale,
+# and the ordinary -Limit works through it over the next few runs.
+# "sketch64" is part of it: a cache written before the account sketch existed
+# has none, and every character in it has to be asked once more to get one.
+$keepSignature = "sketch64;" + (($titleName.Keys | Sort-Object) -join ",")
+$cacheCurrent = $false
+
 if ((Test-Path $cacheFile) -and -not $Force) {
     foreach ($line in Get-Content $cacheFile) {
+        if ($line.StartsWith("# keep: ")) { $cacheCurrent = ($line.Substring(8) -eq $keepSignature); continue }
         if ($line.StartsWith("#")) { continue }
         $bits = $line -split "`t"
         if ($bits.Count -lt 3) { continue }
@@ -319,7 +436,13 @@ if ((Test-Path $cacheFile) -and -not $Force) {
         $when = [datetime]::MinValue
         $null = [datetime]::TryParse($bits[1], [ref]$when)
 
-        $seen[$bits[0]] = @{ When = $when; Rating = [int]$bits[2]; Ids = $ids }
+        $sketch = if ($bits.Count -ge 5) { $bits[4] } else { "" }
+        $seen[$bits[0]] = @{ When = $when; Rating = [int]$bits[2]; Ids = $ids; Sketch = $sketch }
+    }
+
+    if (-not $cacheCurrent) {
+        Write-Host "The titles looked for have changed since the cache was built; re-asking everybody over the next runs."
+        foreach ($key in @($seen.Keys)) { $seen[$key].When = [datetime]::MinValue }
     }
 }
 
@@ -387,45 +510,6 @@ if ($Limit -gt 0 -and $work.Count -gt $Limit) {
 
 Write-Host ("{0} to ask about ({1} already known), doing {2} this run." -f $queued, $skippedKnown, $work.Count)
 
-# ---------------------------------------------------------------- one at a time
-#
-# The shared lock, so this pass takes its turn with the others rather than
-# adding its rate to theirs. See the long note in UpdateFromBlizzard.ps1.
-$lockFile = Join-Path $PSScriptRoot "ArenaPlus-fetch.lock"
-$passLabel = "titles $Region"
-
-$held = $null
-for ($try = 1; $try -le 2; $try++) {
-    try {
-        $held = [System.IO.File]::Open($lockFile, [System.IO.FileMode]::CreateNew,
-                                       [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
-        break
-    } catch {
-        $owner = 0
-        try { $owner = [int](Get-Content $lockFile -TotalCount 1 -ErrorAction Stop) } catch { }
-
-        if ($owner -gt 0 -and (Get-Process -Id $owner -ErrorAction SilentlyContinue)) {
-            $busy = ""
-            try { $busy = (Get-Content $lockFile -TotalCount 2)[1] } catch { }
-            if ($busy) { Write-Host ("Waiting: {0} is running (process {1})." -f $busy, $owner) }
-            else       { Write-Host ("Waiting: another pass is running (process {0})." -f $owner) }
-            return
-        }
-
-        if ($try -eq 1) {
-            Write-Host "Clearing a lock left by a run that did not finish."
-            try { Remove-Item $lockFile -Force -ErrorAction Stop } catch { }
-        } else {
-            Write-Host "Another run claimed the lock first. Nothing to do."
-            return
-        }
-    }
-}
-
-$writer = New-Object System.IO.StreamWriter($held)
-$writer.WriteLine($PID)
-$writer.WriteLine($passLabel)
-$writer.Flush()
 
 $asked = 0
 $found = 0
@@ -457,12 +541,45 @@ try {
                         -Headers @{ Authorization = $auth; 'Accept-Encoding' = 'gzip' }
 
                     $mine = New-Object System.Collections.Generic.List[int]
+
+                    # Which account this character is on, as a sketch.
+                    #
+                    # Blizzard will not say which characters share an account,
+                    # but achievements are account-wide and each carries the
+                    # millisecond it was earned. Alts therefore share hundreds
+                    # of identical (achievement, time) pairs -- measured on
+                    # 2026-09-12, Baz and five of his alts shared 319 to 347 --
+                    # while two teammates who earned things in the same fight
+                    # share about thirty.
+                    #
+                    # A thousand pairs per character is too much to keep for a
+                    # whole ladder, so each pair is hashed and the 64 smallest
+                    # hashes are kept: a bottom-k sketch. Two characters'
+                    # sketches overlap in proportion to how much of their
+                    # achievement history is literally the same. On the same
+                    # six characters, alts overlapped in 6 or 7 of 48 and the
+                    # teammates in none.
+                    #
+                    # The hash is plain arithmetic in unsigned 64-bit, so the
+                    # site's Python reproduces it exactly: the time's low 32
+                    # bits times Knuth's multiplier, plus the id times a second
+                    # constant, modulo 2^32. The product stays below 2^64.
+                    $M = [uint64]4294967296
+                    $hashes = New-Object 'System.Collections.Generic.HashSet[uint64]'
+
                     foreach ($a in $body.achievements) {
                         $id = [int]$a.id
                         if ($keepIds.Contains($id)) { $null = $mine.Add($id) }
+
+                        if ($a.completed_timestamp) {
+                            $ts = [uint64]$a.completed_timestamp
+                            $null = $hashes.Add(((($ts % $M) * [uint64]2654435761) + ([uint64]$id * [uint64]40503)) % $M)
+                        }
                     }
 
-                    return [pscustomobject]@{ Status = 'ok'; Ids = $mine }
+                    $sketch = @($hashes | Sort-Object | Select-Object -First 64)
+
+                    return [pscustomobject]@{ Status = 'ok'; Ids = $mine; Sketch = ($sketch -join ',') }
                 } catch {
                     $code = 0
                     try { $code = [int]$_.Exception.Response.StatusCode } catch { }
@@ -554,7 +671,7 @@ try {
                         $ids = New-Object 'System.Collections.Generic.List[int]'
                         foreach ($id in $answer.Ids) { $null = $ids.Add([int]$id) }
 
-                        $seen[$key] = @{ When = (Get-Date); Rating = $rating; Ids = $ids }
+                        $seen[$key] = @{ When = (Get-Date); Rating = $rating; Ids = $ids; Sketch = [string]$answer.Sketch }
                         if ($ids.Count -gt 0) { $found++ } else { $none++ }
                     } elseif ($answer -and $answer.Status -eq 'gone') {
                         $seen[$key] = @{ When = (Get-Date); Rating = $rating; Ids = (New-Object 'System.Collections.Generic.List[int]') }
@@ -580,9 +697,8 @@ try {
         }
     }
 } finally {
-    $writer.Dispose()
-    $held.Dispose()
-    if (Test-Path $lockFile) { Remove-Item $lockFile -Force -ErrorAction SilentlyContinue }
+    # The lock is kept: the cache still has to be written. See the note where
+    # it is taken.
 }
 
 # ---------------------------------------------------------------- write
@@ -614,6 +730,18 @@ $null = $out.Add("")
 $null = $out.Add("ns.PVP_TITLE_NAMES = ns.PVP_TITLE_NAMES or {")
 foreach ($id in ($titleName.Keys | Sort-Object)) {
     $null = $out.Add(("`t[{0}] = ""{1}""," -f $id, (Escape-Lua $titleName[$id])))
+}
+$null = $out.Add("}")
+$null = $out.Add("")
+
+# The rank-one titles: which of the ids above they are, how they rank, and
+# the icon each one wears. Guarded the same way as the names.
+$null = $out.Add("-- Rank-one titles among the names above. rank: 1 Undisputed Gladiator,")
+$null = $out.Add("-- 2 a season's named Gladiator, 3 Hero of the Alliance or Horde. icon is")
+$null = $out.Add("-- the achievement's own, as a file name under Interface\\Icons.")
+$null = $out.Add("ns.PVP_PRESTIGE = ns.PVP_PRESTIGE or {")
+foreach ($id in ($prestige.Keys | Sort-Object)) {
+    $null = $out.Add(("`t[{0}] = {{ rank={1}, icon=""{2}"" }}," -f $id, $prestige[$id].Rank, (Escape-Lua $prestige[$id].Icon)))
 }
 $null = $out.Add("}")
 $null = $out.Add("")
@@ -660,19 +788,122 @@ foreach ($key in $wanted.Keys) {
 $null = $out.Add("}")
 $null = $out.Add("")
 
+# ---------------------------------------------------------------- accounts
+#
+# Which characters are one account, from the achievement sketches.
+#
+# Two sketches of the same account overlap, because account-wide achievements
+# carry the same completion millisecond on every character; two strangers'
+# barely do. MATCH is the overlap that counts: 6 of 64. It was 3, which merged
+# two accounts whose players always queue together -- their alts earn the same
+# arena achievements in the same millisecond, and a few cross pairs scored 3.
+# Real links on those accounts scored 8 or more; the cross links 3 at most. A group is joined through
+# any member, so an alt that shares little with the main but a lot with a
+# sibling still lands in the right account.
+#
+# Only characters sharing a sketch value are ever compared, which keeps this
+# to a few thousand comparisons instead of every pair on the ladder. A value
+# shared by more than forty characters is ignored: it is not evidence of an
+# account, and it is the only thing that could make this slow.
+#
+# The same grouping arenaplus.live does in titles.py; the two must agree.
+$MATCH = 6
+$SKETCH = 64
+
+$sketchOf = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([System.StringComparer]::Ordinal)
+$bucket = New-Object 'System.Collections.Generic.Dictionary[uint64,object]'
+foreach ($key in $seen.Keys) {
+    $text = [string]$seen[$key].Sketch
+    if (-not $text) { continue }
+    $set = New-Object 'System.Collections.Generic.HashSet[uint64]'
+    foreach ($part in ($text -split ',')) {
+        $v = [uint64]0
+        if ([uint64]::TryParse($part, [ref]$v)) { $null = $set.Add($v) }
+    }
+    $sketchOf[$key] = $set
+    foreach ($v in $set) {
+        if (-not $bucket.ContainsKey($v)) { $bucket[$v] = New-Object 'System.Collections.Generic.List[string]' }
+        $null = $bucket[$v].Add($key)
+    }
+}
+
+$parent = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::Ordinal)
+foreach ($key in $sketchOf.Keys) { $parent[$key] = $key }
+function Find-Root([string]$k) {
+    while ($parent[$k] -ne $k) { $parent[$k] = $parent[$parent[$k]]; $k = $parent[$k] }
+    return $k
+}
+
+$tested = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+foreach ($members in $bucket.Values) {
+    if ($members.Count -lt 2 -or $members.Count -gt 40) { continue }
+    for ($i = 0; $i -lt $members.Count; $i++) {
+        for ($j = $i + 1; $j -lt $members.Count; $j++) {
+            $a = $members[$i]; $b = $members[$j]
+            $pair = if ([string]::CompareOrdinal($a, $b) -lt 0) { "$a|$b" } else { "$b|$a" }
+            if (-not $tested.Add($pair)) { continue }
+
+            $sa = $sketchOf[$a]; $sb = $sketchOf[$b]
+            $union = New-Object 'System.Collections.Generic.List[uint64]'
+            foreach ($v in $sa) { $null = $union.Add($v) }
+            foreach ($v in $sb) { if (-not $sa.Contains($v)) { $null = $union.Add($v) } }
+            $union.Sort()
+            $shared = 0
+            for ($n = 0; $n -lt [Math]::Min($SKETCH, $union.Count); $n++) {
+                if ($sa.Contains($union[$n]) -and $sb.Contains($union[$n])) { $shared++ }
+            }
+            if ($shared -ge $MATCH) { $parent[(Find-Root $a)] = (Find-Root $b) }
+        }
+    }
+}
+
+$groups = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([System.StringComparer]::Ordinal)
+foreach ($key in $sketchOf.Keys) {
+    $root = Find-Root $key
+    if (-not $groups.ContainsKey($root)) { $groups[$root] = New-Object 'System.Collections.Generic.List[string]' }
+    $null = $groups[$root].Add($key)
+}
+
+# Written with the names as the ladder spells them where the ladder still has
+# the character, so "Bâz-arugal-au" rather than the lowered key. A character
+# who has left the ladder keeps the lowered form -- the addon lowers before
+# matching either way.
+$null = $out.Add("-- Characters on one account, worked out from achievement completion times:")
+$null = $out.Add("-- each line is one account. Only accounts with a character on the ladder now.")
+$null = $out.Add("ns.ALTS_BY_REGION = ns.ALTS_BY_REGION or {}")
+$null = $out.Add(("ns.ALTS_BY_REGION[""{0}""] = {{" -f $Region))
+$accounts = 0
+foreach ($list in $groups.Values) {
+    if ($list.Count -lt 2) { continue }
+    $onLadder = $false
+    foreach ($k in $list) { if ($wanted.Contains($k)) { $onLadder = $true; break } }
+    if (-not $onLadder) { continue }
+
+    $shown = foreach ($k in ($list | Sort-Object)) {
+        if ($wanted.Contains($k)) { $wanted[$k].Name + "-" + $wanted[$k].Realm } else { $k }
+    }
+    $accounts++
+    $null = $out.Add(("`t""{0}""," -f (Escape-Lua ($shown -join ","))))
+}
+$null = $out.Add("}")
+$null = $out.Add("")
+Write-Host ("{0} accounts with more than one character." -f $accounts)
+
 Write-DataFile -Path $titleFile -Value ($out -join "`n")
 
 # ---------------------------------------------------------------- cache
 $cacheLines = New-Object System.Collections.Generic.List[string]
 $null = $cacheLines.Add("# What each character's achievements said, and when. Not shipped.")
 $null = $cacheLines.Add("# Safe to delete, at the cost of one cold pass -- which is not cheap here.")
+$null = $cacheLines.Add("# keep: " + $keepSignature)
 foreach ($key in ($seen.Keys | Sort-Object)) {
     $it = $seen[$key]
-    $null = $cacheLines.Add(("{0}`t{1}`t{2}`t{3}" -f `
+    $null = $cacheLines.Add(("{0}`t{1}`t{2}`t{3}`t{4}" -f `
         $key,
         $it.When.ToString('yyyy-MM-dd HH:mm:ss'),
         $it.Rating,
-        (($it.Ids | Sort-Object) -join ",")))
+        (($it.Ids | Sort-Object) -join ","),
+        $it.Sketch))
 }
 Set-Content -Path $cacheFile -Value ($cacheLines -join "`n") -Encoding utf8
 
@@ -681,3 +912,8 @@ Write-Log ("{0}: asked {1} of {2} queued, {3} with titles, {4} without, {5} gone
 
 # Every other installed client gets the same file.
 Copy-ToOtherClients -Primary $data -Files @($titleFile) -Say ${function:Write-Log}
+
+# Only now, with the cache on disk, is the next run free to read it.
+$writer.Dispose()
+$held.Dispose()
+if (Test-Path $lockFile) { Remove-Item $lockFile -Force -ErrorAction SilentlyContinue }

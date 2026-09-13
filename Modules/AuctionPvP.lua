@@ -241,6 +241,8 @@ local function BuildPanel()
 	-- The same styling as every other window this addon puts up, so it looks
 	-- like it belongs to the same addon.
 	if ns.StyleAsPanel then ns.StyleAsPanel(panel) end
+	-- Draggable off the auction house, and back against it when it closes.
+	if ns.MakeMovable then ns.MakeMovable(panel) end
 
 	-- Its own opaque layer under everything. The shared styling has a
 	-- see-through layer, which is why the first version of this window showed
