@@ -1,4 +1,6 @@
-﻿- New: TBC talents are drawn as the full talent trees in the inspect window -- all three trees, every talent with its rank, and the lines between talents that unlock each other. Works from both the Mists and Anniversary clients.
-- The ladder can be sorted by rating lowest first: click Rating to turn it over. In Activity, Rating and Last seen both turn over the same way, and an arrow shows which way the list runs.
-- Top PvP gear shows each player's rating in the colour of the title range it is worth.
-- Fixed "None glyphed." being written over TBC talents when looking at an Anniversary character from the Mists client.
+﻿- Every ArenaPlus window can now be moved: drag it anywhere, and it goes back to its usual place when you close it.
+- Bigger, easier to read text on the ladder and in match history.
+- Match history marks the first player to die with a greyed-out portrait and a cross, instead of tinting everyone who died red.
+- The inspect window shows a player's rank-one titles (Undisputed, the season's named Gladiator, Hero) as icons you can hover, and lists their alts in class colour.
+- Rating on the ladder can be sorted lowest first as well as highest first.
+- Specs on the ladder stay current: a player who switches spec shows their new one after their next game, instead of a day or more later.
