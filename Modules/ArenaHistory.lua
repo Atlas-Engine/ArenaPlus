@@ -1316,12 +1316,13 @@ local function ShowMatch(row,match,expanded)
 		if delta>0 then won=true elseif delta<0 then won=false end
 	end
 
+	-- The site's win and loss greens and reds, not the client's pure ones.
 	if won==true then
-		Fill(row.dot,0.12,1,0,1)
+		ns.Theme.Fill(row.dot,"win",1)
 	elseif won==false then
-		Fill(row.dot,1,0.13,0.13,1)
+		ns.Theme.Fill(row.dot,"loss",1)
 	else
-		Fill(row.dot,0.7,0.7,0.7,1)
+		ns.Theme.Fill(row.dot,"faint",1)
 	end
 
 	row:Show()
@@ -2014,7 +2015,7 @@ local function CreateRow(parent,index,withDate)
 	if not withDate then
 		row.selected=row:CreateTexture(nil,"BACKGROUND")
 		row.selected:SetAllPoints()
-		Fill(row.selected,1,1,0,0.25)
+		ns.Theme.Hover(row.selected)
 		row.selected:Hide()
 	end
 
@@ -2602,24 +2603,15 @@ local function CreateWindow()
 	band:SetPoint("TOPLEFT",frame,"TOPLEFT",11,-BAND_INSET)
 	band:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-12,-BAND_INSET)
 	band:SetHeight(BAND_HEIGHT)
-	band:SetColorTexture(1,1,1,1)
-
-	local shaded=false
-	if band.SetGradient and CreateColor then
-		shaded=pcall(band.SetGradient,band,"VERTICAL",
-			CreateColor(0.05,0.05,0.07,1),CreateColor(0.12,0.13,0.17,1))
-	end
-	if not shaded and band.SetGradientAlpha then
-		shaded=pcall(band.SetGradientAlpha,band,"VERTICAL",
-			0.05,0.05,0.07,1,0.12,0.13,0.17,1)
-	end
-	if not shaded then band:SetColorTexture(0.09,0.10,0.13,1) end
+	-- Flat, in the site's raised colour, with its line under it: the same
+	-- header the ladder wears.
+	ns.Theme.Fill(band,"raised",1)
 
 	local underline=frame:CreateTexture(nil,"ARTWORK")
 	underline:SetPoint("TOPLEFT",band,"BOTTOMLEFT",0,0)
 	underline:SetPoint("TOPRIGHT",band,"BOTTOMRIGHT",0,0)
 	underline:SetHeight(1)
-	underline:SetColorTexture(1,0.82,0,0.35)
+	ns.Theme.Line(underline)
 
 	tinsert(UISpecialFrames,"ArenaPlus_ArenaHistoryFull")
 
@@ -2635,6 +2627,7 @@ local function CreateWindow()
 	end)
 
 	frame.title=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightLarge")
+	ns.Theme.Title(frame.title,24)
 	frame.title:SetPoint("LEFT",frame,"TOPLEFT",16,HEADER_MID)
 
 	-- Won and lost over everything recorded, not only the ten on the panel.
@@ -2653,7 +2646,7 @@ local function CreateWindow()
 	frame.total=frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
 	frame.total:SetPoint("LEFT",frame.record,"RIGHT",10,0)
 	frame.total:SetJustifyH("LEFT")
-	frame.total:SetTextColor(0.55,0.55,0.55)
+	ns.Theme.Text(frame.total,"muted")
 
 	-- On the right of this one: its heading already carries the record, the
 	-- count and today's games, and there is no room left after them.
@@ -2668,7 +2661,7 @@ local function CreateWindow()
 	frame.today:Hide()
 
 	local close=ns.CloseButton(frame)
-	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0)
+	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-8,-8)
 
 	-- To the ladder, keeping the bracket. The mirror of the button on the other
 	-- window, and for the same reason: both windows clear the shared bracket as
@@ -2676,6 +2669,7 @@ local function CreateWindow()
 	frame.swapButton=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
 	frame.swapButton:SetSize(SWAP_W,20)
 	frame.swapButton:SetText(L.HISTORY_SWAP)
+	ns.Theme.Button(frame.swapButton)
 	frame.swapButton:SetPoint("TOPLEFT",frame,"TOPLEFT",BRACKET_X,HEADER_TOP)
 	frame.swapButton:SetScript("OnClick",function()
 		local bracket=ns.ViewBracket and ns.ViewBracket()
@@ -2795,8 +2789,8 @@ local function CreatePanel()
 
 	panel.title=panel:CreateFontString(nil,"OVERLAY","GameFontNormal")
 	panel.title:SetPoint("TOPLEFT",panel,"TOPLEFT",14,-14-HEADER_HEIGHT)
-
-	panel.title:SetTextColor(1,0.82,0)
+	ns.Theme.Font(panel.title,"display",17)
+	ns.Theme.Text(panel.title,"gold")
 
 	-- Won and lost across the same ten, straight after the bracket it belongs
 	-- to. The squares down the right already say it match by match; this says it
@@ -2815,7 +2809,7 @@ local function CreatePanel()
 	local function HeaderLine(y)
 		local label=panel:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
 		label:SetPoint("TOPLEFT",panel,"TOPLEFT",14,y)
-		label:SetTextColor(0.55,0.55,0.55)
+		ns.Theme.Text(label,"muted")
 
 		local value=panel:CreateFontString(nil,"OVERLAY","GameFontNormal")
 		value:SetPoint("TOPRIGHT",panel,"TOPRIGHT",-14,y+1)
@@ -2847,7 +2841,8 @@ local function CreatePanel()
 	panel.cutoffs={ frame=cutoffs }
 	panel.cutoffs.title=cutoffs:CreateFontString(nil,"OVERLAY","GameFontNormal")
 	panel.cutoffs.title:SetPoint("TOPLEFT",cutoffs,"TOPLEFT",14,-10)
-	panel.cutoffs.title:SetTextColor(1,0.82,0)
+	ns.Theme.Font(panel.cutoffs.title,"display",17)
+	ns.Theme.Text(panel.cutoffs.title,"gold")
 
 	-- What the next title costs from where you are, on the same line as the
 	-- heading: the whole reason for reading a cutoff list is working out how

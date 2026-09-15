@@ -888,7 +888,7 @@ local function CreateRow(parent)
 	row:SetScript("OnEnter",function(self)
 		if self.highlight and not self.highlight:IsShown() then
 			self.hover=true
-			self.highlight:SetColorTexture(1,1,1,0.08)
+			ns.Theme.Hover(self.highlight)
 			self.highlight:Show()
 		end
 
@@ -961,7 +961,7 @@ local function CreateRow(parent)
 	-- faint -- this should be felt rather than seen.
 	row.stripe=row:CreateTexture(nil,"BACKGROUND",nil,-8)
 	row.stripe:SetAllPoints()
-	row.stripe:SetColorTexture(1,1,1,0.025)
+	ns.Theme.Stripe(row.stripe)
 	row.stripe:Hide()
 
 	-- Behind the text, for marking your own place. Above the stripe, so a
@@ -1622,18 +1622,9 @@ local function CreateWindow()
 	-- Two spellings of the same call, because it was renamed and retyped
 	-- between client versions -- colour objects now, nine loose numbers before
 	-- -- and a flat band if neither is understood.
-	band:SetColorTexture(1,1,1,1)
-
-	local shaded=false
-	if band.SetGradient and CreateColor then
-		shaded=pcall(band.SetGradient,band,"VERTICAL",
-			CreateColor(0.05,0.05,0.07,1),CreateColor(0.12,0.13,0.17,1))
-	end
-	if not shaded and band.SetGradientAlpha then
-		shaded=pcall(band.SetGradientAlpha,band,"VERTICAL",
-			0.05,0.05,0.07,1,0.12,0.13,0.17,1)
-	end
-	if not shaded then band:SetColorTexture(0.09,0.10,0.13,1) end
+	-- Flat, in the site's raised colour: the gradient this used to carry
+	-- was the one thing on the window the site has no counterpart for.
+	ns.Theme.Fill(band,"raised",1)
 
 	-- A line under it, brighter than the one between the columns, so the top
 	-- of the window reads as a header and the list reads as a list.
@@ -1641,9 +1632,10 @@ local function CreateWindow()
 	underline:SetPoint("TOPLEFT",band,"BOTTOMLEFT",0,0)
 	underline:SetPoint("TOPRIGHT",band,"BOTTOMRIGHT",0,0)
 	underline:SetHeight(1)
-	underline:SetColorTexture(1,0.82,0,0.35)
+	ns.Theme.Line(underline)
 
 	frame.title=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightLarge")
+	ns.Theme.Title(frame.title,24)
 	frame.title:SetPoint("LEFT",frame,"TOPLEFT",16,HEADER_MID)
 	-- Given a width below, and a fixed width needs both of these said out
 	-- loud: a FontString centres its text by default, so "2v2" would sit in
@@ -1659,13 +1651,14 @@ local function CreateWindow()
 	-- Done to the heading itself that would be four texts written to a label
 	-- on screen every refresh; done here it is arithmetic.
 	frame.titleRuler=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightLarge")
+	ns.Theme.Title(frame.titleRuler,24)
 	frame.titleRuler:SetPoint("LEFT",frame,"TOPLEFT",16,HEADER_MID)
 	frame.titleRuler:SetWordWrap(false)
 	frame.titleRuler:Hide()
 
 	frame.subtitle=frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
 	frame.subtitle:SetPoint("LEFT",frame.title,"RIGHT",10,0)
-	frame.subtitle:SetTextColor(0.55,0.55,0.55)
+	ns.Theme.Text(frame.subtitle,"muted")
 
 	-- The game picker, standing where the place count used to.
 	--
@@ -1713,7 +1706,7 @@ local function CreateWindow()
 	-- plus a patch for the backdrop, and it needs no frame template.
 	local menuBg=frame.gameMenu:CreateTexture(nil,"BACKGROUND")
 	menuBg:SetAllPoints()
-	menuBg:SetColorTexture(0.04,0.04,0.05,1)
+	ns.Theme.Fill(menuBg,"raised",1)
 
 	for _,edge in ipairs({
 		{ "TOPLEFT","TOPRIGHT",0,1 },
@@ -1900,6 +1893,7 @@ local function CreateWindow()
 	local cutoffsButton=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
 	cutoffsButton:SetSize(CUTOFF_TAB_W,20)
 	cutoffsButton:SetText(L.LADDER_CUTOFFS)
+	ns.Theme.Button(cutoffsButton)
 	cutoffsButton:Hide()
 	-- Not anchored here.
 	--
@@ -1940,19 +1934,20 @@ local function CreateWindow()
 			local gap=cutoffs:CreateTexture(nil,"ARTWORK")
 			gap:SetPoint("TOPLEFT",cutoffs,"TOPLEFT",index*width-12,-2)
 			gap:SetSize(1,200)
-			gap:SetColorTexture(1,1,1,0.10)
+			ns.Theme.Line(gap,true)
 		end
 
 		column.title=column.frame:CreateFontString(nil,"OVERLAY","GameFontNormal")
 		column.title:SetPoint("TOPLEFT",column.frame,"TOPLEFT",4,-4)
-		column.title:SetTextColor(1,0.82,0)
+		ns.Theme.Font(column.title,"display",17)
+		ns.Theme.Text(column.title,"gold")
 
 		-- Under the heading, so each column reads as its own small table.
 		column.rule=column.frame:CreateTexture(nil,"ARTWORK")
 		column.rule:SetPoint("TOPLEFT",column.frame,"TOPLEFT",4,-24)
 		column.rule:SetPoint("TOPRIGHT",column.frame,"TOPRIGHT",-4,-24)
 		column.rule:SetHeight(1)
-		column.rule:SetColorTexture(1,1,1,0.15)
+		ns.Theme.Line(column.rule)
 
 		column.rows={}
 		for tierIndex,tier in ipairs(ns.TIERS or {}) do
@@ -1972,7 +1967,7 @@ local function CreateWindow()
 			row.spots=column.frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
 			row.spots:SetPoint("TOPRIGHT",column.frame,"TOPRIGHT",-4,y)
 			row.spots:SetJustifyH("RIGHT")
-			row.spots:SetTextColor(0.5,0.5,0.5)
+			ns.Theme.Text(row.spots,"faint")
 
 			row.tier=tier
 			column.rows[tierIndex]=row
@@ -1993,7 +1988,7 @@ local function CreateWindow()
 	-- ANCHORED to that footer, which is built a long way below this. Placed on
 	-- first show rather than here, because it does not exist yet.
 	cutoffs.source=cutoffs:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-	cutoffs.source:SetTextColor(0.45,0.45,0.45)
+	ns.Theme.Text(cutoffs.source,"faint")
 
 	-- Filling it, and swapping the window between the two views.
 	--
@@ -2021,14 +2016,7 @@ local function CreateWindow()
 			if show then frame.search:ClearFocus() end
 		end
 
-		local label=cutoffsButton.GetFontString and cutoffsButton:GetFontString()
-		if label then
-			if show then
-				label:SetTextColor(1,0.82,0)
-			else
-				label:SetTextColor(0.75,0.75,0.75)
-			end
-		end
+		ns.Theme.Active(cutoffsButton,show)
 
 		if not cutoffs.sourcePlaced and frame.source then
 			cutoffs.source:ClearAllPoints()
@@ -2173,7 +2161,7 @@ local function CreateWindow()
 
 
 	local close=ns.CloseButton(frame)
-	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0)
+	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-8,-8)
 
 	-- Find somebody the same way the window finds you: bring their row to the
 	-- middle and light it. Two thousand places is more than anybody scrolls.
@@ -2188,6 +2176,7 @@ local function CreateWindow()
 		search:SetAutoFocus(false)
 		if search.SetMaxLetters then search:SetMaxLetters(40) end
 		if search.Instructions then search.Instructions:SetText(L.LADDER_SEARCH) end
+		ns.Theme.Search(search)
 
 		search:SetScript("OnTextChanged",function(self,userInput)
 			-- The template owns its placeholder and clear button, and without
@@ -2270,6 +2259,7 @@ local function CreateWindow()
 			fallback:SetHeight(20)
 			fallback.region=choice.key
 			fallback:SetText(ns.RegionShort(choice.key))
+			ns.Theme.Button(fallback)
 
 			local label=fallback.GetFontString and fallback:GetFontString()
 			fallback:SetWidth(label and (label:GetStringWidth()+24) or 100)
@@ -2559,7 +2549,8 @@ local function CreateWindow()
 		label:SetPoint("LEFT",header,"LEFT",x,0)
 		label:SetWidth(width)
 		label:SetJustifyH(justify or "LEFT")
-		label:SetTextColor(0.6,0.6,0.6)
+		-- Small capitals in the faint colour, as the site's table heads.
+		ns.Theme.Heading(label)
 		label:SetText(text)
 		return label
 	end
@@ -2848,6 +2839,7 @@ local function CreateWindow()
 		local b=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
 		b:SetSize(width or 28,20)
 		b:SetText(text)
+		ns.Theme.Button(b)
 		return b
 	end
 
@@ -2978,7 +2970,7 @@ local function CreateWindow()
 	frame.pageLabel:SetPoint("LEFT",frame.pagePrev,"RIGHT",6,0)
 	frame.pageLabel:SetWidth(72)
 	frame.pageLabel:SetJustifyH("CENTER")
-	frame.pageLabel:SetTextColor(0.7,0.7,0.7)
+	ns.Theme.Text(frame.pageLabel,"muted")
 
 	frame.source=frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
 	-- To the history, keeping the bracket.

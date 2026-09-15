@@ -946,7 +946,7 @@ local function BuildCharacterPage(parent)
 	-- top of the tabs. Cleared above it instead.
 	page.hint:SetPoint("BOTTOM",page,"BOTTOM",0,FOOT+8)
 	page.hint:SetText(L.INSPECT_HINT)
-	page.hint:SetTextColor(0.4,0.4,0.4)
+	ns.Theme.Text(page.hint,"faint")
 
 	return page
 end
@@ -1803,7 +1803,7 @@ local function FillSockets(page,gear,glyphs,class)
 	local haveIt=CanSearch()
 	page.hint:SetText(haveIt and L.INSPECT_AH_HINT or L.INSPECT_AH_HINT_NO_AUCTIONATOR)
 	if haveIt then
-		page.hint:SetTextColor(0.5,0.5,0.5)
+		ns.Theme.Text(page.hint,"faint")
 	else
 		page.hint:SetTextColor(1,0.82,0)
 	end
@@ -2455,8 +2455,13 @@ local function ShowPage(which)
 	frame.page=which
 
 	for name,tab in pairs(frame.tabs) do
-		-- The selected tab reads brighter, the way Blizzard's do.
-		tab:SetAlpha(name==which and 1 or 0.6)
+		-- The selected tab reads brighter, the way Blizzard's do; with the
+		-- theme it is the gold pill, as the site marks the tab you are on.
+		if ns.Theme then
+			ns.Theme.Active(tab,name==which)
+		else
+			tab:SetAlpha(name==which and 1 or 0.6)
+		end
 	end
 end
 
@@ -2535,6 +2540,7 @@ local function BuildWindow()
 	underline:SetColorTexture(1,0.82,0,0.35)
 
 	frame.title=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightLarge")
+	ns.Theme.Title(frame.title,24)
 	frame.title:SetPoint("TOPLEFT",16,-14)
 
 	-- "Subtlety Rogue", across the top in the class's colour.
@@ -2544,6 +2550,7 @@ local function BuildWindow()
 	-- all -- the tree list below says 41 points in Subtlety but never says the
 	-- word rogue.
 	frame.specLine=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightLarge")
+	ns.Theme.Font(frame.specLine,"display",20)
 	frame.specLine:SetPoint("TOP",frame,"TOP",0,-18)
 	frame.specLine:SetJustifyH("CENTER")
 
@@ -2601,7 +2608,7 @@ local function BuildWindow()
 	frame.alts:SetWordWrap(false)
 
 	local close=ns.CloseButton(frame)
-	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0)
+	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-8,-8)
 
 	-- Professions, up beside the name rather than down among the gear: it is a
 	-- fact about the character, not about any one slot. No skill level, because
@@ -2678,6 +2685,12 @@ local function BuildWindow()
 		-- text; without this they keep the template's own width and the labels
 		-- run over the edges.
 		if PanelTemplates_TabResize then pcall(PanelTemplates_TabResize,tab,0) end
+		-- The site's pill, not Blizzard's three-piece tab; sized after the
+		-- template has had its say, or it would put its own width back.
+		if ns.Theme then
+			ns.Theme.Button(tab)
+			tab:SetSize(96,22)
+		end
 
 		if previous then
 			tab:SetPoint("LEFT",previous,"RIGHT",4,0)
@@ -2848,16 +2861,19 @@ local function TierOfTitle(name)
 	end
 end
 
--- A character's rank-one titles, grouped for drawing: one per title, best
--- first, each with every bracket it was earned in.
+-- A character's season titles -- rank one, and a season's Gladiator -- grouped
+-- for drawing: one per title, in the
+-- order they were earned -- oldest season on the left, newest on the right,
+-- as the website shows them -- each with every bracket it was earned in.
 --
 -- Grouped by the title with its bracket taken off, not by the icon. Blizzard
 -- reuses art across eras -- Merciless Gladiator from 2007 and Tyrannical
 -- Gladiator from Mists Classic wear the same one -- so grouping by icon would
 -- put titles a decade apart behind one hover.
 --
--- Newest season first, read from the name: achievement ids were handed out as
+-- The season is read from the name: achievement ids were handed out as
 -- Blizzard added them, and Season 1's Infernal Gladiator came after Season 12.
+-- A title with no season in its name sorts first rather than claiming newest.
 local function PrestigeOf(entry,region)
 	local ranks=ns.PVP_PRESTIGE
 	local names=ns.PVP_TITLE_NAMES
@@ -2876,21 +2892,34 @@ local function PrestigeOf(entry,region)
 			local key=name:gsub("%s*%(%d+v%d+%)$","")
 			local group=groups[key]
 			if not group then
-				group={ icon=info.icon, rank=info.rank, season=0, lines={} }
+				group={ icon=info.icon, rank=info.rank, lines={} }
 				groups[key]=group
 				order[#order+1]=group
 			end
 			if info.rank<group.rank then group.rank=info.rank end
-			local season=tonumber(name:match("Season (%d+)")) or 0
-			if season>group.season then group.season=season end
+			local season=tonumber(name:match("Season (%d+)"))
+			if season and (not group.season or season<group.season) then group.season=season end
 			group.lines[#group.lines+1]=name
 		end
 	end
 
+	-- A season's plain Gladiator only where nothing better was earned that
+	-- season: rank one is also awarded Gladiator, and the one icon says it.
+	local topped={}
+	for _,group in ipairs(order) do
+		if group.season and group.rank<=2 then topped[group.season]=true end
+	end
+	local kept={}
+	for _,group in ipairs(order) do
+		if not (group.rank==4 and group.season and topped[group.season]) then kept[#kept+1]=group end
+	end
+	order=kept
+
 	for _,group in ipairs(order) do table.sort(group.lines) end
 	table.sort(order,function(a,b)
-		if a.rank~=b.rank then return a.rank<b.rank end
-		return a.season>b.season
+		local sa,sb=a.season or 0,b.season or 0
+		if sa~=sb then return sa<sb end
+		return a.rank<b.rank
 	end)
 	return order
 end
@@ -2971,6 +3000,9 @@ local function FillPrestige(entry,region)
 			mark.lines=group.lines
 			if group.rank==3 then
 				mark.r,mark.g,mark.b=1,0.82,0
+			elseif group.rank==4 then
+				-- A season's plain Gladiator, in the Gladiator tier's purple.
+				mark.r,mark.g,mark.b=0.64,0.21,0.93
 			else
 				mark.r,mark.g,mark.b=1,0.5,0
 			end
@@ -3697,7 +3729,7 @@ local function BuildShopWindow()
 	shop.specLine:SetJustifyH("LEFT")
 
 	local close=ns.CloseButton(shop)
-	close:SetPoint("TOPRIGHT",shop,"TOPRIGHT",0,0)
+	close:SetPoint("TOPRIGHT",shop,"TOPRIGHT",-8,-8)
 
 	local list=CreateFrame("Frame",nil,shop)
 	list:SetPoint("TOPLEFT",shop,"TOPLEFT",16,SHOP_TOP)

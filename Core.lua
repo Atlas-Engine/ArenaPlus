@@ -765,6 +765,7 @@ function ns.BuildBracketPicker(frame,point,x,y,follows)
 		button:SetSize(BRACKET_BUTTON_W,20)
 		button:SetText(names[bracket])
 		button.bracket=bracket
+		if ns.Theme then ns.Theme.Button(button) end
 
 		-- From the right, the row is built leftwards so the first button named
 		-- still ends up leftmost on screen.
@@ -831,12 +832,17 @@ function ns.BuildBracketPicker(frame,point,x,y,follows)
 			local active=bracket==current
 			if active then button:Disable() else button:Enable() end
 
-			local label=button.GetFontString and button:GetFontString()
-			if label then
-				if active then
-					label:SetTextColor(1,0.82,0)
-				else
-					label:SetTextColor(0.75,0.75,0.75)
+			if ns.Theme then
+				-- The gold pill, as the site marks the tab you are on.
+				ns.Theme.Active(button,active)
+			else
+				local label=button.GetFontString and button:GetFontString()
+				if label then
+					if active then
+						label:SetTextColor(1,0.82,0)
+					else
+						label:SetTextColor(0.75,0.75,0.75)
+					end
 				end
 			end
 		end
@@ -1175,7 +1181,14 @@ function ns.FitScale(width,height,preferred)
 	return math.max(fits,0.65)
 end
 
+-- Every window's chrome, from the theme: the website's card -- its surface
+-- colour, its thin line, its rounded corners -- and none of Blizzard's dialog
+-- art. See Theme.lua; the tooltip-border look this replaced is gone with it.
 function ns.StyleAsPanel(frame)
+	if ns.Theme then
+		ns.Theme.Panel(frame)
+		return
+	end
 	frame:SetBackdrop({
 		bgFile="Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
 		edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",
@@ -1184,26 +1197,6 @@ function ns.StyleAsPanel(frame)
 	})
 	frame:SetBackdropColor(0,0,0,1)
 	frame:SetBackdropBorderColor(1,1,1,1)
-
-	local solid=frame:CreateTexture(nil,"BACKGROUND",nil,-8)
-	solid:SetPoint("TOPLEFT",frame,"TOPLEFT",11,-12)
-	solid:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",-12,11)
-	if solid.SetColorTexture then solid:SetColorTexture(0,0,0,1) else solid:SetTexture(0,0,0,1) end
-
-	local tint=CreateFrame("Frame",nil,frame,"BackdropTemplate")
-	tint:SetAllPoints()
-	-- Pinned to the parent's own level so it stays behind the parent's
-	-- FontStrings, which live at that level too -- a child frame otherwise
-	-- draws its whole backdrop above them.
-	tint:SetFrameLevel(frame:GetFrameLevel())
-	tint:SetBackdrop({
-		bgFile="Interface\\Tooltips\\UI-Tooltip-Background",
-		edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",
-		tile=true,tileEdge=true,tileSize=16,edgeSize=16,
-		insets={left=5,right=5,top=5,bottom=5}
-	})
-	tint:SetBackdropColor(TOOLTIP_DEFAULT_BACKGROUND_COLOR.r,TOOLTIP_DEFAULT_BACKGROUND_COLOR.g,TOOLTIP_DEFAULT_BACKGROUND_COLOR.b)
-	tint:SetBackdropBorderColor(TOOLTIP_DEFAULT_COLOR.r,TOOLTIP_DEFAULT_COLOR.g,TOOLTIP_DEFAULT_COLOR.b)
 end
 
 -- The X in the corner.
@@ -1224,6 +1217,13 @@ end
 -- replaced, and a hook would leave it running as well.
 function ns.CloseButton(parent)
 	local close=CreateFrame("Button",nil,parent,"UIPanelCloseButton")
+	-- The site's close: a small round pill with a cross, muted until the
+	-- pointer reaches it. The template's red button goes with its art.
+	if ns.Theme then
+		close:SetSize(22,22)
+		close:SetText("×")
+		ns.Theme.Button(close,15)
+	end
 	close:SetScript("OnClick",function(self)
 		if PlaySound and SOUNDKIT and SOUNDKIT.IG_MAINMENU_CLOSE then
 			PlaySound(SOUNDKIT.IG_MAINMENU_CLOSE)
@@ -1252,6 +1252,9 @@ function ns.ListFont(template,grow)
 	if base then
 		font:CopyFontObject(base)
 		local path,size,flags=base:GetFont()
+		-- The site's text face when it ships (Theme.lua), the template's
+		-- own otherwise; the size is the template's plus the growth either way.
+		if ns.Theme and ns.Theme.haveBody then path=ns.Theme.Face("body") end
 		if path and size then font:SetFont(path,size+grow,flags) end
 	end
 	return name
@@ -1354,7 +1357,7 @@ local function CreateConfig()
 	title:SetText(L.WINDOW_TITLE)
 
 	local close=ns.CloseButton(frame)
-	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0)
+	close:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-8,-8)
 
 	local y=44
 	frame.checks={}

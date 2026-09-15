@@ -47,6 +47,7 @@ SpecSpells.lua
 SpecFixups.lua
 HistorySeed.lua
 Core.lua
+Theme.lua
 
 # Modules
 Modules\MinimapButton.lua

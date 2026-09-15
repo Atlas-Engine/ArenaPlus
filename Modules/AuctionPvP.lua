@@ -284,6 +284,7 @@ local function BuildPanel()
 		tab:SetSize(50, 20)
 		tab:SetPoint("TOPLEFT", 18 + (index - 1) * 54, -80)
 		tab:SetText(name)
+		if ns.Theme then ns.Theme.Button(tab) end
 		tab.bracket = index
 
 		tab:SetScript("OnClick", function(self)
@@ -326,6 +327,7 @@ local function BuildPanel()
 			tab:SetSize(40, 20)
 			tab:SetPoint("TOPLEFT", 18 + (index - 1) * 44, -104)
 			tab.region = region
+			if ns.Theme then ns.Theme.Button(tab) end
 			tab:SetText(ns.RegionShort and ns.RegionShort(region) or region:upper())
 		end
 
@@ -853,6 +855,7 @@ local function PlaceButton()
 	local button = CreateFrame("Button", "ArenaPlus_AuctionPvPButton", parent, "UIPanelButtonTemplate")
 	button:SetSize(56, 22)
 	button:SetText(L.AH_PVP_BUTTON)
+	if ns.Theme then ns.Theme.Button(button) end
 	button:SetPoint(place[1], place[2], place[3], place[4], place[5])
 
 	-- The button is now a way to put it *back*, since it opens with the house.
