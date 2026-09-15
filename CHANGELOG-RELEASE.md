@@ -1,6 +1,5 @@
-﻿- Every ArenaPlus window can now be moved: drag it anywhere, and it goes back to its usual place when you close it.
-- Bigger, easier to read text on the ladder and in match history.
-- Match history marks the first player to die with a greyed-out portrait and a cross, instead of tinting everyone who died red.
-- The inspect window shows a player's rank-one titles (Undisputed, the season's named Gladiator, Hero) as icons you can hover, and lists their alts in class colour.
-- Rating on the ladder can be sorted lowest first as well as highest first.
-- Specs on the ladder stay current: a player who switches spec shows their new one after their next game, instead of a day or more later.
+﻿- New look: the ladder, match history, inspect and auction windows now match arenaplus.live, with its dark rounded cards, colours and typefaces, pill buttons with the active one in gold, and a proper search field.
+- Match history's win and loss marks use the site's green and red.
+- The ladder keeps everyone with 20 or more games this season, not only players above the Challenger cutoff.
+- The inspect window shows a season's Gladiator title alongside the rank-one titles.
+- Specs on the ladder keep up with active players daily; characters who have not played in a month are refreshed once a month.

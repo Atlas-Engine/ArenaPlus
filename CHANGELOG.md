@@ -1,5 +1,13 @@
 ﻿# Changelog
 
+## 1.7b
+
+- New look: the ladder, match history, inspect and auction windows now match arenaplus.live, with its dark rounded cards, colours and typefaces, pill buttons with the active one in gold, and a proper search field.
+- Match history's win and loss marks use the site's green and red.
+- The ladder keeps everyone with 20 or more games this season, not only players above the Challenger cutoff.
+- The inspect window shows a season's Gladiator title alongside the rank-one titles.
+- Specs on the ladder keep up with active players daily; characters who have not played in a month are refreshed once a month.
+
 ## 1.7a
 
 - Every ArenaPlus window can now be moved: drag it anywhere, and it goes back to its usual place when you close it.
@@ -138,6 +146,7 @@
 - Fixed characters with the same name on different realms showing each other's rank and rating.
 - Press Enter in the ladder search to step between characters sharing a name.
 - Changing page in the ladder now returns to the top of the list.
+
 
 
 
