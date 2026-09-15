@@ -63,6 +63,12 @@ param(
     # over ninety-six runs is about sixty a run, against an hourly budget of
     # thirty-six thousand that currently sees four and a half.
     [int]$RefreshDays = 1,
+    # Characters nobody has seen play for this long are re-asked about once
+    # in this many days instead of daily: a spec is what somebody logged out
+    # in, and somebody who has not logged in for a month has no new one.
+    # Measured 2026-09-15: about two thirds of the roster, and most of this
+    # pass's requests, were such characters.
+    [int]$IdleRefreshDays = 30,
     # How sure the armour has to be before it overrules the armory. See the
     # note beside the correction itself; 0 turns it off entirely.
     [double]$SetSpecConfidence = 0.70,
@@ -260,6 +266,16 @@ if (Test-Path $cacheFile) {
                 # when the character was last on the ladder. A cache from before
                 # this field falls back to Seen, which is the best it knew.
                 Asked  = if ($bits.Count -ge 7 -and $bits[6]) { $bits[6] } else { $bits[2] }
+                # Guild realm, slug and name, added later still. Guild says
+                # whether it was asked at all: a line from before it was kept
+                # knows nothing, which is not the same as "no guild".
+                Guild      = ($bits.Count -ge 10)
+                GuildRealm = if ($bits.Count -ge 10) { $bits[7] } else { '' }
+                GuildSlug  = if ($bits.Count -ge 10) { $bits[8] } else { '' }
+                GuildName  = if ($bits.Count -ge 10) { $bits[9] } else { '' }
+                # When Blizzard last wrote the profile (its Last-Modified), so
+                # the next ask can be conditional: see Since below.
+                Written    = if ($bits.Count -ge 11) { $bits[10] } else { '' }
             }
         }
     }
@@ -286,40 +302,34 @@ elseif (Test-Path $specFile) {
         $seen.Count, $lastFull.ToString('yyyy-MM-dd HH:mm'))
 }
 
+# Who has played lately: characters with a game in the last -IdleRefreshDays,
+# from the activity logs the tracker and the ladder pass write beside this
+# script ("bracket|name|realm" in the third column; the cache keys on
+# "name-realm"). The rest come round once in -IdleRefreshDays.
+$active = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+$dataKey = if ($Version -eq "tbc") { "tbc-$Region" } else { $Region }
+$activeSince = [long][math]::Floor(((Get-Date).ToUniversalTime() - [datetime]'1970-01-01').TotalSeconds) - $IdleRefreshDays * 86400
+foreach ($monthsBack in 0..1) {
+    $activityPath = Join-Path $PSScriptRoot ("Activity-" + $dataKey + "-" + (Get-Date).AddMonths(-$monthsBack).ToString('yyyy-MM') + ".tsv")
+    if (-not (Test-Path $activityPath)) { continue }
+    foreach ($line in [System.IO.File]::ReadLines($activityPath)) {
+        $bits = $line.Split([char]9)
+        if ($bits.Count -lt 3) { continue }
+        $at = 0L
+        if (-not [long]::TryParse($bits[0], [ref]$at) -or $at -lt $activeSince) { continue }
+        $who = $bits[2].Split('|')
+        if ($who.Count -ge 3) { $null = $active.Add((ConvertTo-LuaLower ($who[1] + '-' + $who[2]))) }
+    }
+}
+
 # How many known characters to re-ask about this run.
 #
 # Sized from the clock rather than from a count of runs, because nothing here
 # knows the cadence: at a quarter-hourly beat this is eight characters, hourly
 # it is thirty, and a run after a long gap catches up in one go. Either way the
-# oldest reading on file is never older than -RefreshDays.
-$slice = 0
-if ($RefreshDays -gt 0 -and $seen.Count -gt 0) {
-    $sinceLast = ((Get-Date) - $lastFull).TotalMinutes
-    if ($sinceLast -lt 0) { $sinceLast = 0 }
-
-    # Clamped BEFORE the cast, not after.
-    #
-    # A cache that exists with no recorded full pass leaves $lastFull at
-    # DateTime.MinValue, which makes $sinceLast about 739,000 days. Times a few
-    # thousand known characters that is ~3.3e9, and [int] on it throws
-    # "Value was either too large or too small for an Int32" -- so the run died
-    # here rather than being clamped by the very line meant to bound it. Seen on
-    # the first TBC US pass, whose cache had been written by a run that never
-    # finished a full sweep.
-    $want = [math]::Ceiling($seen.Count * $sinceLast / ($RefreshDays * 1440.0))
-
-    # Never the whole roster in one run, whatever the gap: that is the spike
-    # this exists to avoid. A month of downtime comes round over a week.
-    if ($want -gt $seen.Count) { $want = $seen.Count }
-    $slice = [int]$want
-}
-
-$full = [bool]$Force
-if ($full) {
-    Write-Host "Full pass: re-asking about everybody."
-    $slice = 0
-}
-
+# oldest reading on file is never older than -RefreshDays for somebody who
+# plays, or -IdleRefreshDays for somebody who does not.
+#
 # The oldest readings first, which is what makes this a rotation rather than a
 # random sample. Ordinal, to match the dictionary they came from.
 #
@@ -330,13 +340,42 @@ if ($full) {
 # slice was spent entirely on people it would not ask about, and nobody on the
 # ladder was ever refreshed. Measured 2026-09-12: "118 due a refresh", asked 0.
 # That is how Oxy stayed Discipline.
+$slice = 0
+$full = [bool]$Force
+if ($full) {
+    Write-Host "Full pass: re-asking about everybody."
+}
 $stale = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
-if ($slice -gt 0) {
+if ($RefreshDays -gt 0 -and $seen.Count -gt 0 -and -not $full) {
+    $sinceLast = ((Get-Date) - $lastFull).TotalMinutes
+    if ($sinceLast -lt 0) { $sinceLast = 0 }
+
     $onLadder = @($seen.Keys | Where-Object { $wanted.Contains($_) })
-    foreach ($key in ($onLadder | Sort-Object { $seen[$_].Asked } | Select-Object -First $slice)) {
-        $null = $stale.Add($key)
-    }
-    Write-Host ("{0} of {1} known characters due a refresh this run." -f $stale.Count, $seen.Count)
+    $playing  = @($onLadder | Where-Object { $active.Contains($_) })
+    $idle     = @($onLadder | Where-Object { -not $active.Contains($_) })
+
+    # Clamped BEFORE the cast, not after.
+    #
+    # A cache that exists with no recorded full pass leaves $lastFull at
+    # DateTime.MinValue, which makes $sinceLast about 739,000 days. Times a few
+    # thousand known characters that is ~3.3e9, and [int] on it throws
+    # "Value was either too large or too small for an Int32" -- so the run died
+    # here rather than being clamped by the very line meant to bound it. Seen on
+    # the first TBC US pass, whose cache had been written by a run that never
+    # finished a full sweep.
+    #
+    # Never the whole roster in one run, whatever the gap: that is the spike
+    # this exists to avoid. A month of downtime comes round over a week.
+    $wantPlaying = [math]::Ceiling($playing.Count * $sinceLast / ($RefreshDays * 1440.0))
+    if ($wantPlaying -gt $playing.Count) { $wantPlaying = $playing.Count }
+    $wantIdle = [math]::Ceiling($idle.Count * $sinceLast / ($IdleRefreshDays * 1440.0))
+    if ($wantIdle -gt $idle.Count) { $wantIdle = $idle.Count }
+
+    foreach ($key in ($playing | Sort-Object { $seen[$_].Asked } | Select-Object -First ([int]$wantPlaying))) { $null = $stale.Add($key) }
+    foreach ($key in ($idle    | Sort-Object { $seen[$_].Asked } | Select-Object -First ([int]$wantIdle)))    { $null = $stale.Add($key) }
+    $slice = $stale.Count
+    Write-Host ("{0} of {1} known characters due a refresh this run: {2} of {3} who played this month, {4} of {5} who did not." -f `
+        $stale.Count, $seen.Count, [int]$wantPlaying, $playing.Count, [int]$wantIdle, $idle.Count)
 }
 
 # ---------------------------------------------------------------- played since
@@ -376,6 +415,8 @@ foreach ($key in $playedSince) { $null = $stale.Add($key) }
 $asked = 0
 $found = 0
 $missing = 0
+# Answered 304: nothing to change, and on TBC no second request.
+$unchanged = 0
 $askedOn = Get-Date -Format 'yyyy-MM-dd' 
 
 # How many this run will actually ask about, so progress has a denominator.
@@ -495,24 +536,40 @@ foreach ($key in $wanted.Keys) {
     $specUri = $null
     if ($Version -eq "tbc") { $specUri = "$base/specializations?namespace=$profileNs&locale=en_US" }
 
+    # Asked conditionally. Blizzard writes a profile when the player logs out;
+    # one not written since it was last read answers 304 with no body, and
+    # the class, race, guild and talents in it cannot have changed either --
+    # so on TBC the second request, for the trees, is skipped as well.
+    # Measured 2026-09-15: the daily re-read of 17,000 TBC characters was the
+    # biggest fixed cost after the ladders, about 5,500 requests an hour, and
+    # most of those characters had not logged out since the day before.
+    $since = $null
+    if ($seen.ContainsKey($key) -and $seen[$key].Written) { $since = $seen[$key].Written }
+
     $work.Add([pscustomobject]@{
         Key = $key
         Uri = $base + "?namespace=$profileNs&locale=en_US"
         SpecUri = $specUri
+        Since = $since
     })
 }
 
 # One request, in its own runspace. Self-contained on purpose: a runspace
 # inherits nothing from here, so everything it needs arrives as an argument.
 $one = {
-    param($uri, $auth, $specUri)
+    param($uri, $auth, $specUri, $since)
 
     for ($attempt = 1; $attempt -le 2; $attempt++) {
         try {
             # Timed out rather than trusted: without this the call waits for
             # ever on a connection that is open and silent, and the loop
             # collecting answers waits with it.
-            $c = Invoke-RestMethod -Uri $uri -Headers @{ Authorization = $auth } -ErrorAction Stop -TimeoutSec 30
+            $ask = @{ Authorization = $auth }
+            if ($since) { $ask['If-Modified-Since'] = $since }
+            $response = Invoke-WebRequest -Uri $uri -Headers $ask -UseBasicParsing -ErrorAction Stop -TimeoutSec 30
+            $c = $response.Content | ConvertFrom-Json
+            # An array in PowerShell 7, a string in 5.1.
+            $written = @($response.Headers['Last-Modified']) -join ''
 
             $genderId = 0
             if ($c.gender.type -eq 'FEMALE') { $genderId = 1 }
@@ -541,12 +598,29 @@ $one = {
                 }
             }
 
+            # The guild, for arenaplus.live's guild pages and search: its name,
+            # and its realm and slug out of Blizzard's own link to it. Free --
+            # it comes with the profile already being read. Never shipped.
+            $guildRealm = ''
+            $guildSlug = ''
+            $guildName = ''
+            if ($c.guild -and $c.guild.key.href -match '/data/wow/guild/([^/?]+)/([^/?]+)') {
+                $guildRealm = [uri]::UnescapeDataString($Matches[1])
+                $guildSlug = [uri]::UnescapeDataString($Matches[2])
+                # A bar would split the cache line; WoW names cannot hold one.
+                $guildName = ([string]$c.guild.name) -replace '\|', ''
+            }
+
             [pscustomobject]@{
                 Status = 'ok'
                 Class  = $c.character_class.name
                 Spec   = $spec
                 Race   = $(if ($c.race.id) { [int]$c.race.id } else { 0 })
                 Gender = $genderId
+                GuildRealm = $guildRealm
+                GuildSlug  = $guildSlug
+                GuildName  = $guildName
+                Written    = $written
             }
         } catch {
             $code = $_.Exception.Response.StatusCode.value__
@@ -557,11 +631,17 @@ $one = {
                 continue
             }
 
-            # The code comes out with it. 404 means this character is gone --
-            # renamed, transferred, deleted -- and is worth remembering as
-            # unanswerable. Anything else is us being refused or timed out, and
-            # remembering THAT would blank a live character for good.
-            [pscustomobject]@{ Status = 'fail'; Code = $code }
+            if ($code -eq 304) {
+                # Not written since it was last read: everything remembered
+                # about them still holds.
+                [pscustomobject]@{ Status = 'same' }
+            } else {
+                # The code comes out with it. 404 means this character is gone --
+                # renamed, transferred, deleted -- and is worth remembering as
+                # unanswerable. Anything else is us being refused or timed out, and
+                # remembering THAT would blank a live character for good.
+                [pscustomobject]@{ Status = 'fail'; Code = $code }
+            }
         }
 
         break
@@ -602,7 +682,7 @@ try {
 
             $shell = [powershell]::Create()
             $shell.RunspacePool = $pool
-            $null = $shell.AddScript($one).AddArgument($item.Uri).AddArgument($headers.Authorization).AddArgument($item.SpecUri)
+            $null = $shell.AddScript($one).AddArgument($item.Uri).AddArgument($headers.Authorization).AddArgument($item.SpecUri).AddArgument($item.Since)
 
             $inFlight.Add([pscustomobject]@{
                 Shell   = $shell
@@ -638,13 +718,22 @@ try {
 
             $key = $job.Item.Key
 
-            if ($answer -and $answer.Status -eq 'ok' -and $answer.Class -and $answer.Spec) {
+            if ($answer -and $answer.Status -eq 'same' -and $seen.ContainsKey($key)) {
+                # Kept as it was; only that it was asked today is new.
+                $seen[$key].Seen = $askedOn
+                $seen[$key].Asked = $askedOn
+                $seen[$key].Games = $wanted[$key].Games
+                $unchanged++
+                if ($seen[$key].Slug) { $found++ } else { $missing++ }
+            } elseif ($answer -and $answer.Status -eq 'ok' -and $answer.Class -and $answer.Spec) {
                 $slug = (($answer.Class + '-' + $answer.Spec).ToLower()) -replace ' ', '-'
-                $seen[$key] = @{ Slug = $slug; Seen = $askedOn; Race = $answer.Race; Gender = $answer.Gender; Games = $wanted[$key].Games; Asked = $askedOn }
+                $seen[$key] = @{ Slug = $slug; Seen = $askedOn; Race = $answer.Race; Gender = $answer.Gender; Games = $wanted[$key].Games; Asked = $askedOn
+                                 Guild = $true; GuildRealm = $answer.GuildRealm; GuildSlug = $answer.GuildSlug; GuildName = $answer.GuildName; Written = $answer.Written }
                 $found++
             } elseif ($answer -and $answer.Status -eq 'ok') {
                 # Answered, but not about a class and a spec.
-                $seen[$key] = @{ Slug = ''; Seen = $askedOn; Race = $answer.Race; Gender = $answer.Gender; Games = $wanted[$key].Games; Asked = $askedOn }
+                $seen[$key] = @{ Slug = ''; Seen = $askedOn; Race = $answer.Race; Gender = $answer.Gender; Games = $wanted[$key].Games; Asked = $askedOn
+                                 Guild = $true; GuildRealm = $answer.GuildRealm; GuildSlug = $answer.GuildSlug; GuildName = $answer.GuildName; Written = $answer.Written }
                 $missing++
             } elseif ($answer -and $answer.Code -eq 404) {
                 # Gone for good: an empty slug is recorded so later runs stop
@@ -881,8 +970,14 @@ foreach ($key in ($seen.Keys | Sort-Object)) {
     if ($seen[$key].Seen -lt $stale) { $dropped++; continue }
     $games = if ($null -ne $seen[$key].Games) { $seen[$key].Games } else { -1 }
     $askedAt = if ($seen[$key].Asked) { $seen[$key].Asked } else { $seen[$key].Seen }
-    $null = $cacheLines.Add(("{0}|{1}|{2}|{3}|{4}|{5}|{6}" -f $key, $seen[$key].Slug, $seen[$key].Seen,
-        $seen[$key].Race, $seen[$key].Gender, $games, $askedAt))
+    $line = ("{0}|{1}|{2}|{3}|{4}|{5}|{6}" -f $key, $seen[$key].Slug, $seen[$key].Seen,
+        $seen[$key].Race, $seen[$key].Gender, $games, $askedAt)
+    # The guild only once it has been asked for, so the site can tell a
+    # character with no guild from one not re-read since guilds were kept.
+    if ($seen[$key].Guild) {
+        $line += ("|{0}|{1}|{2}|{3}" -f $seen[$key].GuildRealm, $seen[$key].GuildSlug, $seen[$key].GuildName, [string]$seen[$key].Written)
+    }
+    $null = $cacheLines.Add($line)
 }
 Set-Content -Path $cacheFile -Value ($cacheLines -join "`n") -Encoding utf8
 
@@ -946,8 +1041,10 @@ $rowBody
 
 Write-DataFile -Path $specFile -Value $out
 $note = if ($full) { " full pass," } else { "" }
-Write-Log ("{0}:{1} asked {2}, found {3}, missing {4}. {5} characters written, {6} remembered. requests={7}" -f `
-    $Region.ToUpper(), $note, $asked, $found, $missing, $rows.Count, ($cacheLines.Count - 3), ($asked * $perItem + 1))
+# Requests: one per ask, plus the trees only for the profiles that had changed.
+Write-Log ("{0}:{1} asked {2} ({3} unchanged), found {4}, missing {5}. {6} characters written, {7} remembered. requests={8}" -f `
+    $Region.ToUpper(), $note, $asked, $unchanged, $found, $missing, $rows.Count, ($cacheLines.Count - 3),
+    ($asked + ($asked - $unchanged) * ($perItem - 1) + 1))
 
 # Every other installed client gets the same files, so Anniversary is as fresh
 # as Mists instead of waiting on the next CurseForge publish.

@@ -6,6 +6,8 @@ tools/*.log
 # secret is a password: it must never reach a repository, and least of all one
 # that becomes a public addon.
 tools/blizzard-credentials.txt
+# Twitch API credentials for the site's live-on-Twitch check. Same rule.
+tools/twitch-credentials.txt
 
 # What the passes remember between runs. All of it rebuilds itself, none of it
 # means anything on another machine, and together it is about 1.5 MB -- more
@@ -21,6 +23,7 @@ tools/blizzard-credentials.txt
 #   Activity-*    what moved between polls; a log, one file per month
 tools/Baseline-*.txt
 tools/LiveCache-*.txt
+tools/BoardCache-*
 tools/SpecsSeen-*.txt
 tools/InspectSeen-*.txt
 tools/TitlesSeen-*.txt
@@ -37,11 +40,14 @@ tools/*.progress
 # Which intervals this machine's dashboard is set to, and where it puts itself.
 tools/dashboard-settings.txt
 
-# Built from ArenaPlusDashboard.cs by Build.cmd, using the csc.exe that ships
-# with the .NET Framework. The source is here; the binary is a build artefact,
-# and a committed .exe in an addon repository is a thing users are right to
-# distrust.
+# The dashboard, source and all. It controls the private ArenaPlus server over
+# SSH, so it stays on the machine that runs it and out of this public
+# repository; the exe is a build artefact besides. Earlier versions are still
+# in this repository's history.
 tools/ArenaPlusDashboard.exe
+tools/ArenaPlusDashboard.cs
+tools/ArenaPlusDashboard.ico
+tools/Build.cmd
 
 # Windows and macOS leave these lying about.
 Thumbs.db

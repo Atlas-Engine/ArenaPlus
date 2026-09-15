@@ -99,12 +99,28 @@ if (-not (Test-Path (Join-Path $Repo ".git"))) {
 # taken between them ships a leaderboard whose specs and gear belong to the
 # run before. Both are needed; neither alone is enough.
 #
-# Declines rather than waits. A pass can run for fourteen minutes, holding
-# this task open that long would overlap its own next run, and there is
-# nothing to gain by waiting: the data is published on the next tick, half
-# an hour later at worst, and the tick after a pass is exactly when there is
-# something new to publish.
+# Waits a few minutes, then declines. On the server a pass takes about a
+# minute, and with every ladder read each 15 minutes one is often running when
+# the hourly publish starts: declining at once skipped the whole hour
+# (2026-09-13 21:05, behind TBC EU). A pass that is still going after five
+# minutes is a slow one, and holding this task open longer would crowd its
+# own next run, so that hour is still skipped.
 $lockFile = Join-Path $PSScriptRoot "ArenaPlus-fetch.lock"
+$waitUntil = (Get-Date).AddMinutes(5)
+
+function Get-LiveLockOwner {
+    if (-not (Test-Path $lockFile)) { return 0 }
+    $id = 0
+    try { $id = [int](Get-Content $lockFile -TotalCount 1 -ErrorAction Stop) } catch { }
+    if ($id -gt 0 -and (Get-Process -Id $id -ErrorAction SilentlyContinue)) { return $id }
+    return 0
+}
+
+$said = $false
+while ((Get-LiveLockOwner) -gt 0 -and (Get-Date) -lt $waitUntil) {
+    if (-not $said) { Say "A pass is fetching; waiting up to 5 minutes for it to finish."; $said = $true }
+    Start-Sleep -Seconds 10
+}
 
 # The owner id, the same way the passes read each other: a lock whose
 # process is gone is a leftover from a run that died, and treating it as

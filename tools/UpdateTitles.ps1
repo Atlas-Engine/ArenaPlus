@@ -231,19 +231,24 @@ foreach ($id in $TitleIds.Keys) {
 #   Merciless Gladiator: Season 2            the same thing from the original seasons
 #   Hero of the Alliance: Malevolent         rated battleground rank one
 #
+# And beside them the season's plain Gladiator, "Gladiator: Season 13 (3v3)".
+# It was left out at first, as something the ladder colours already said -- but
+# the colours only say where a player stands now. A Gladiator from last season
+# who missed rank one had no mark of it at all.
+#
 # None of them are in the Arena category, so the whole achievement index is read
 # and they are picked out by name. The patterns are strict on purpose: the
 # reward mounts share the words ("Tyrannical Gladiator's Cloud Serpent") and
-# carry an apostrophe, and plain "Gladiator: Season 13" is Gladiator, which the
-# ladder colours already say.
+# carry an apostrophe.
 #
 # Achievements are account-wide, so a Mists Classic character carries whatever
 # the account earned years ago. That history is kept, not filtered out -- it is
 # the most interesting thing about somebody sitting at 2100.
 #
 # Ranked so a reader can show the best one: 1 Undisputed, 2 a named Gladiator,
-# 3 Hero. And each carries its own icon, from the achievement's media, so the
-# addon and the site both draw the game's art rather than a stand-in.
+# 3 Hero, 4 a season's Gladiator. And each carries its own icon, from the
+# achievement's media, so the addon and the site both draw the game's art
+# rather than a stand-in.
 $prestige = New-Object 'System.Collections.Generic.Dictionary[int,object]'
 try {
     $requests++
@@ -256,6 +261,7 @@ try {
         if ($name -match '^Undisputed Gladiator: Season \d+') { $rank = 1 }
         elseif ($name -match '^[A-Z][a-z]+ Gladiator: Season \d+( \([0-9v]+\))?$') { $rank = 2 }
         elseif ($name -match '^Hero of the (Alliance|Horde)(: [A-Z][a-z]+)?$') { $rank = 3 }
+        elseif ($name -match '^Gladiator: Season \d+( \([0-9v]+\))?$') { $rank = 4 }
         if ($rank -eq 0) { continue }
 
         $icon = ""
@@ -736,8 +742,9 @@ $null = $out.Add("")
 
 # The rank-one titles: which of the ids above they are, how they rank, and
 # the icon each one wears. Guarded the same way as the names.
-$null = $out.Add("-- Rank-one titles among the names above. rank: 1 Undisputed Gladiator,")
-$null = $out.Add("-- 2 a season's named Gladiator, 3 Hero of the Alliance or Horde. icon is")
+$null = $out.Add("-- Season titles among the names above. rank: 1 Undisputed Gladiator,")
+$null = $out.Add("-- 2 a season's named Gladiator, 3 Hero of the Alliance or Horde, 4 a")
+$null = $out.Add("-- season's Gladiator. icon is")
 $null = $out.Add("-- the achievement's own, as a file name under Interface\\Icons.")
 $null = $out.Add("ns.PVP_PRESTIGE = ns.PVP_PRESTIGE or {")
 foreach ($id in ($prestige.Keys | Sort-Object)) {

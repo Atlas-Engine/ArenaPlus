@@ -22,6 +22,12 @@ param(
     # How deep to keep. "challenger" is the last real title: below it the API
     # publishes people on 96 rating who played one game and lost.
     [string]$Depth = "challenger",
+    # Below the cutoff, players with at least this many games this season are
+    # kept as well; 0 keeps the cutoff alone. Added 2026-09-15 for 3v3 and
+    # 5v5, where the cutoff kept 658 of the 1,978 players Blizzard lists on
+    # US and left the site's teammate finding an eighth of the evidence 2v2
+    # gets. Twenty games is a player, not a placement.
+    [int]$KeepGames = 20,
     # Ask each character for their own rating rather than trusting the one in
     # the leaderboard snapshot.
     #
@@ -53,9 +59,39 @@ param(
     # The rest hit a rating and stopped playing; asking them again learns
     # nothing.
     #
-    # So: anyone whose profile was written within this many days is asked every
-    # run. 0 asks everybody, which is what the pass used to do.
+    # So: anyone whose profile was written within this many days is asked.
+    # 0 asks everybody, which is what the pass used to do.
     [int]$ActiveDays = 2,
+
+    # ...but not all of them every run. A profile is written when the player
+    # logs out, so asking again only learns something once they have logged in
+    # and out again, and most of the two days' players have not. Measured
+    # 2026-09-13 on TBC-US: 4,291 written within two days, 608 within three
+    # hours -- and every 304 from the other 3,700 still cost a request.
+    #
+    # Written within HotHours: asked every run, they are mid-evening.
+    # Older, within ActiveDays: asked once every WarmMinutes, spread evenly
+    #   over the runs in between so no one run carries them all.
+    # Anyone the leaderboard shows with more games than their last answer: asked
+    #   now, whatever their tier -- they have played since, and this is also
+    #   what brings back a player who went quiet for longer than ActiveDays.
+    [int]$HotHours = 3,
+    [int]$WarmMinutes = 60,
+    # ...and nobody in their first RestMinutes after Blizzard last wrote them.
+    #
+    # Blizzard writes a profile in batches, not after each game. Measured
+    # 2026-09-13: one write carried 10 games, another 4, the same player's
+    # writes about 48 minutes apart, and a write was readable within 10-53 s.
+    # Across 32,977 record changes over three days only 7% came within an hour
+    # of the one before. So the hot players were being asked every run through
+    # the hour that almost never has anything, and 96% of all the pass's
+    # requests answered 304. A board that moved still brings a resting player
+    # back only once the rest is over: games it shows inside the hour are
+    # nearly always the ones their last write already carried.
+    [int]$RestMinutes = 60,
+    # How often the scheduled task runs this pass, so the warm players can be
+    # shared out across the runs of one WarmMinutes.
+    [int]$CadenceMinutes = 15,
 
     # Which game this pass is scraping.
     #
@@ -70,10 +106,33 @@ param(
     # gives all of that at once, and leaves MoP writing exactly what it always
     # wrote, so nothing on disk needs migrating.
     [ValidateSet("mop","tbc")]
-    [string]$Version = "mop"
+    [string]$Version = "mop",
+
+    # Ask the proven teammates of anyone whose record moved this run, in a
+    # second round straight after the first. See the Partners file below.
+    [switch]$NoPartners,
+
+    # Ask Blizzard even while tracker.py is running. Normally a fresh tracker
+    # heartbeat means its live ratings are used and nothing is asked here.
+    [switch]$NoTracker
 )
 
 $ErrorActionPreference = "Stop"
+
+# Per game, unless given. Decided 2026-09-15 to catch returning players about
+# as fast as the busiest third-party site, inside the same hourly budget:
+#
+# Mists keeps a week of players on the hourly warm round rather than two days.
+# A player back after three days (Gc, 2026-09-14) sat unasked for hours, until
+# the leaderboard's own games caught up with them. The Mists ladders are about
+# 6,000 deep, so the week costs roughly 1,500 requests an hour across US and EU.
+#
+# TBC's hot round shrinks from three hours to one. Its ladders are 15,000 deep
+# and were most of the budget; the hour that matters is still asked every run,
+# players who went quiet come back through the board and their teammates, and
+# the savings pay for the Mists week.
+if ($Version -eq "mop" -and -not $PSBoundParameters.ContainsKey('ActiveDays')) { $ActiveDays = 7 }
+if ($Version -eq "tbc" -and -not $PSBoundParameters.ContainsKey('HotHours')) { $HotHours = 1 }
 
 # Dot-sourced here rather than beside Copy-ToOtherClients at the foot of
 # the file, because Write-DataFile is needed long before that -- every
@@ -166,22 +225,45 @@ $script:requests = 1   # the token exchange itself
 # stamp that used to be shown was ours, which overstated freshness.
 $script:snapshot = ""
 
-function Get-Api([string]$path) {
+# The Last-Modified stamp of the last answer, and its body as sent: what the
+# leaderboard cache below keeps.
+$script:lastStamp = ''
+$script:lastBody = ''
+
+function Note-Snapshot([string]$stamp) {
+    if (-not $stamp) { return }
+    # The newest of them, though all four brackets have always shared one.
+    $when = [datetime]::MinValue
+    if ([datetime]::TryParse($stamp, [ref]$when)) {
+        $asText = $when.ToUniversalTime().ToString('yyyy-MM-dd HH:mm')
+        if ($asText -gt $script:snapshot) { $script:snapshot = $asText }
+    }
+}
+
+# With -Since (an HTTP date), asked conditionally: $null back means Blizzard
+# answered 304, nothing newer than that. A 304 still costs a request.
+function Get-Api([string]$path, [string]$since = '') {
     $script:requests++
     $sep = if ($path.Contains("?")) { "&" } else { "?" }
     $uri = "{0}{1}{2}namespace={3}&locale=en_US" -f $apiRoot,$path,$sep,$namespace
 
-    $response = Invoke-WebRequest -Uri $uri -Headers $headers -UseBasicParsing
-
-    $stamp = $response.Headers['Last-Modified']
-    if ($stamp) {
-        # The newest of them, though all four brackets have always shared one.
-        $when = [datetime]::MinValue
-        if ([datetime]::TryParse($stamp, [ref]$when)) {
-            $asText = $when.ToUniversalTime().ToString('yyyy-MM-dd HH:mm')
-            if ($asText -gt $script:snapshot) { $script:snapshot = $asText }
-        }
+    $ask = $headers
+    if ($since) { $ask = @{ Authorization = $headers.Authorization; 'If-Modified-Since' = $since } }
+    try {
+        $response = Invoke-WebRequest -Uri $uri -Headers $ask -UseBasicParsing -ErrorAction Stop
+    } catch {
+        # Both PowerShells raise on a 304 rather than returning it.
+        $code = 0
+        if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
+        if ($since -and $code -eq 304) { return $null }
+        throw
     }
+
+    # Joined, because PowerShell 7 -- what the Linux server runs -- hands every
+    # header back as an array, where Windows PowerShell 5.1 gives a string.
+    $script:lastStamp = @($response.Headers['Last-Modified']) -join ''
+    $script:lastBody = $response.Content
+    Note-Snapshot $script:lastStamp
 
     return $response.Content | ConvertFrom-Json
 }
@@ -243,8 +325,18 @@ $passLabel = "ladder $Region"
 # "Does it exist? No? Make it" is two steps with a gap in the middle, and two
 # runs starting in the same instant both pass the check. CreateNew is one step:
 # the filesystem hands the file to exactly one caller and throws for the other.
+#
+# A pass that finds the lock held by a live run WAITS for it, up to two and a
+# half minutes, rather than leaving. It used to leave: with runs a quarter of
+# an hour apart, the next run was soon enough. Every five minutes and a minute
+# apart, the previous region's pass -- or the publish step -- can still be
+# finishing when this one starts, and a skipped run is five minutes of stale
+# ranks on the site for nothing.
 $held = $null
-for ($try = 1; $try -le 2; $try++) {
+$cleared = $false
+$saidWaiting = $false
+$deadline = (Get-Date).AddSeconds(150)
+while ($true) {
     try {
         $held = [System.IO.File]::Open($lockFile, [System.IO.FileMode]::CreateNew,
                                        [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
@@ -259,20 +351,30 @@ for ($try = 1; $try -le 2; $try++) {
             # rather than only that something is in the way.
             $busy = ""
             try { $busy = (Get-Content $lockFile -TotalCount 2)[1] } catch { }
-            if ($busy) { Write-Host ("Waiting: {0} is running (process {1})." -f $busy, $owner) }
-            else       { Write-Host ("Waiting: another pass is running (process {0})." -f $owner) }
-            return
+            if ((Get-Date) -ge $deadline) {
+                Write-Log ("{0}: still waiting for {1} (process {2}) after 150 s. Nothing to do." -f $Region.ToUpper(),
+                    $(if ($busy) { $busy } else { "another pass" }), $owner)
+                return
+            }
+            if (-not $saidWaiting) {
+                $saidWaiting = $true
+                if ($busy) { Write-Host ("Waiting: {0} is running (process {1})." -f $busy, $owner) }
+                else       { Write-Host ("Waiting: another pass is running (process {0})." -f $owner) }
+            }
+            Start-Sleep -Seconds 5
+            continue
         }
 
-        if ($try -eq 1) {
+        if (-not $cleared) {
             # The owner is gone, so this is a leftover from a run that died.
+            $cleared = $true
             Write-Host "Clearing a lock left by a run that did not finish."
             try { Remove-Item $lockFile -Force -ErrorAction Stop } catch { }
-        } else {
-            # Two runs racing to clear the same dead lock; the other won.
-            Write-Host "Another run claimed the lock first. Nothing to do."
-            return
+            continue
         }
+        # Two runs racing to clear the same dead lock; the other won.
+        Write-Host "Another run claimed the lock first. Nothing to do."
+        return
     }
 }
 
@@ -365,16 +467,46 @@ $fetched = @{}
 $slots   = @{}
 $total   = 0
 
+# Blizzard rebuilds the leaderboards every three hours and this runs every
+# five minutes, so eleven reads in twelve would fetch what is already on disk.
+# The first bracket is asked conditionally, with the stamp of the last copy
+# kept; a 304 means none of the four has changed, and the copies stand in
+# for the other three -- three requests and three multi-megabyte parses
+# saved per unchanged run. Any change, or a missing copy, and all four are
+# fetched and kept again. Not shipped; safe to delete.
+$boardStampFile = Join-Path $PSScriptRoot ("BoardCache-" + $Region + ".stamp")
+$boardFile = { param($api) Join-Path $PSScriptRoot ("BoardCache-" + $Region + "-" + $api + ".json") }
+$boardStamp = ''
+if (Test-Path $boardStampFile) { $boardStamp = [string](Get-Content $boardStampFile -TotalCount 1) }
+$boardCopies = @($brackets | ForEach-Object { Test-Path (& $boardFile $_.Api) }) -notcontains $false
+$boardUnchanged = $false
+$boardFresh = @()
+
 foreach ($bracket in $brackets) {
     Step-Progress
     $floor = $cutoffs[$bracket.Index][$Depth]
-    $board = Get-Api "/data/wow/pvp-season/$season/pvp-leaderboard/$($bracket.Api)"
+    $board = $null
+    if ($boardUnchanged) {
+        $board = Get-Content (& $boardFile $bracket.Api) -Raw | ConvertFrom-Json
+    } else {
+        $since = if ($boardStamp -and $boardCopies -and $boardFresh.Count -eq 0) { $boardStamp } else { '' }
+        $board = Get-Api "/data/wow/pvp-season/$season/pvp-leaderboard/$($bracket.Api)" $since
+        if ($null -eq $board) {
+            $boardUnchanged = $true
+            Note-Snapshot $boardStamp
+            $board = Get-Content (& $boardFile $bracket.Api) -Raw | ConvertFrom-Json
+        } else {
+            $boardFresh += @{ Api = $bracket.Api; Body = $script:lastBody; Stamp = $script:lastStamp }
+        }
+    }
     $all   = @($board.entries)
 
-    # Everything at or above the depth. 2v2 is capped by Blizzard at about five
-    # thousand places and stops short of Challenger, so this keeps all of it and
-    # the file says so rather than implying the ladder ends there.
-    $kept = if ($null -eq $floor) { $all } else { @($all | Where-Object { $_.rating -ge $floor }) }
+    # Everything at or above the depth, and below it anyone with -KeepGames
+    # games. 2v2 is capped by Blizzard at about five thousand places and stops
+    # short of Challenger, so this keeps all of it and the file says so rather
+    # than implying the ladder ends there.
+    $kept = if ($null -eq $floor) { $all } else { @($all | Where-Object {
+        $_.rating -ge $floor -or ($KeepGames -gt 0 -and ([int]$_.season_match_statistics.won + [int]$_.season_match_statistics.lost) -ge $KeepGames) }) }
     $lowest = if ($all.Count -gt 0) { ($all | Measure-Object rating -Minimum).Minimum } else { 0 }
     $capped = ($all.Count -gt 0 -and $null -ne $floor -and $lowest -gt $floor)
 
@@ -403,8 +535,9 @@ foreach ($bracket in $brackets) {
     }
     $slots[$bracket.Index] = $counts
 
-    Write-Host ("{0}: {1} of {2} kept, down to {3}{4}" -f `
-        $bracket.Api, $kept.Count, $all.Count, $floor, $(if ($capped) { ' (API stops above the cutoff)' } else { '' }))
+    Write-Host ("{0}: {1} of {2} kept, down to {3}{4}{5}" -f `
+        $bracket.Api, $kept.Count, $all.Count, $floor, $(if ($capped) { ' (API stops above the cutoff)' } else { '' }),
+        $(if ($KeepGames -gt 0 -and $null -ne $floor) { " plus anyone with $KeepGames games" } else { '' }))
 }
 
 # ---------------------------------------------------------------- live
@@ -445,6 +578,7 @@ $lastReason = ""
 # a few hundred characters into the unreadable pile.
 $throttled = 0
 
+$trackerFresh = $false
 if ($Live) {
     # What the last pass learned, so unchanged characters cost a 304 rather than
     # a full response -- and so a 304 still has a rating to keep.
@@ -455,10 +589,48 @@ if ($Live) {
             # the pipe fed the rating field a realm name.
             $bits = $line -split "`t"
             if ($bits.Count -ge 5) {
-                $cache[$bits[0]] = @{ Rating = [int]$bits[1]; Won = [int]$bits[2]; Lost = [int]$bits[3]; Written = $bits[4] }
+                # The sixth column, the leaderboard's games for them when they
+                # were last asked, came later; -1 is "not known yet".
+                $cachedBoard = -1
+                if ($bits.Count -ge 6) { $null = [int]::TryParse($bits[5], [ref]$cachedBoard) }
+                $cache[$bits[0]] = @{ Rating = [int]$bits[1]; Won = [int]$bits[2]; Lost = [int]$bits[3]; Written = $bits[4]; Board = $cachedBoard; Miss = ([int]$bits[1] -lt 0) }
             }
         }
     }
+
+    # Characters never readable, remembered as misses: key -> when, as HTTP date.
+    $missed = @{}
+    $nowStamp = (Get-Date).ToUniversalTime().AddHours(-$HotHours).ToString("r")
+
+    # tracker.py (arenaplus.live) asks these same questions continuously and
+    # keeps LiveCache-<region>.txt up to date as it goes, writing the activity
+    # rows itself the moment a record moves. While its heartbeat is fresh --
+    # written within five minutes -- this pass takes the cache as its answers,
+    # asks nothing and writes no activity, so the two never ask twice or log a
+    # game twice. A stale or missing heartbeat, and this pass is what it was.
+    $trackerFile = Join-Path $PSScriptRoot ("Tracker-" + $Region + ".txt")
+    if (-not $NoTracker -and (Test-Path $trackerFile)) {
+        $beat = 0
+        $first = Get-Content $trackerFile -TotalCount 1
+        if ([long]::TryParse([string]$first, [ref]$beat)) {
+            $epochNow = [long][math]::Floor(((Get-Date).ToUniversalTime() - [datetime]'1970-01-01').TotalSeconds)
+            $trackerFresh = ($epochNow - $beat) -lt 300
+        }
+    }
+
+    if ($trackerFresh) {
+        foreach ($bracket in $brackets) {
+            foreach ($entry in $fetched[$bracket.Index].Rows) {
+                $key = "{0}|{1}|{2}" -f $bracket.Index, $entry.character.name.ToLower(), $entry.character.realm.slug
+                $known = $cache[$key]
+                if ($known -and -not $known.Miss) {
+                    $liveRatings[$key] = @{ Rating = $known.Rating; Won = $known.Won; Lost = $known.Lost; Written = $known.Written }
+                }
+            }
+        }
+        $fresh = $liveRatings.Count
+        Write-Log ("{0}: tracker running; took its live ratings for {1} rows and asked nothing." -f $Region.ToUpper(), $liveRatings.Count)
+    } else {
 
     # Everything to ask about, flattened first so the work can be handed out.
     $work = New-Object System.Collections.Generic.List[object]
@@ -471,11 +643,34 @@ if ($Live) {
 
             $work.Add([pscustomobject]@{
                 Key   = $key
+                Games = [int]$entry.season_match_statistics.won + [int]$entry.season_match_statistics.lost
                 Uri   = "$apiRoot/profile/wow/character/$realm/$([uri]::EscapeDataString($lower))/pvp-bracket/$($bracket.Api)?namespace=$profileNs&locale=en_US"
-                Since = $(if ($known) { $known.Written } else { $null })
+                Since = $(if ($known -and -not $known.Miss) { $known.Written } else { $null })
             })
         }
     }
+
+    # Every ladder row by key, before any are left out: the teammate round
+    # below picks from all of them.
+    $allWork = New-KeyTable
+    foreach ($item in $work) { $allWork[$item.Key] = $item }
+
+    # Proven teammates, from the site (export_partners in arenaplus.live's
+    # server.py): "bracket|name|realm", a tab, the teammates' keys. A missing
+    # or old file only means no teammate round, never a failed pass.
+    $partners = New-KeyTable
+    $partnerFile = Join-Path $PSScriptRoot ("Partners-" + $Region + ".txt")
+    if (-not $NoPartners -and (Test-Path $partnerFile)) {
+        foreach ($line in Get-Content $partnerFile -Encoding utf8) {
+            $bits = $line -split "`t"
+            if ($bits.Count -ge 2 -and $bits[1]) { $partners[$bits[0]] = $bits[1] -split ',' }
+        }
+    }
+    # Whose record moved this run: their teammates are asked next.
+    $playedNow = New-Object 'System.Collections.Generic.HashSet[string]'
+    # Whose profile was written again this run, as "name|realm": their other
+    # brackets are asked next.
+    $touchedNow = New-Object 'System.Collections.Generic.HashSet[string]'
 
     # Everyone still playing, plus everyone we have never asked about.
     #
@@ -484,9 +679,23 @@ if ($Live) {
     # rule the moment their profile is written again -- until then the snapshot
     # covers them, which is exactly what it did before this pass existed.
     if ($ActiveDays -gt 0) {
-        $cutoff = (Get-Date).ToUniversalTime().AddDays(-$ActiveDays)
+        $nowUtc = (Get-Date).ToUniversalTime()
+        $cutoff = $nowUtc.AddDays(-$ActiveDays)
+        $hotSince = $nowUtc.AddHours(-$HotHours)
+        $restSince = $nowUtc.AddMinutes(-$RestMinutes)
         $hot = New-Object System.Collections.Generic.List[object]
         $cold = 0
+        $warmAsked = 0
+        $warmWaiting = 0
+        $moved = 0
+        $resting = 0
+
+        # Which share of the warm players is due this run: the runs of one
+        # WarmMinutes are numbered off the clock, and each character belongs to
+        # one of them by a hash of its key, so everyone comes round once per
+        # WarmMinutes without keeping any record of when they were last asked.
+        $warmSlots = [Math]::Max(1, [int][Math]::Floor($WarmMinutes / [Math]::Max(1, $CadenceMinutes)))
+        $slotNow = [int]([Math]::Floor(([DateTimeOffset]$nowUtc).ToUnixTimeSeconds() / 60 / [Math]::Max(1, $CadenceMinutes)) % $warmSlots)
 
         foreach ($item in $work) {
             $known = $cache[$item.Key]
@@ -495,7 +704,25 @@ if ($Live) {
             if ($known -and $known.Written) {
                 $when = [datetime]::MinValue
                 if ([datetime]::TryParse($known.Written, [ref]$when)) {
-                    if ($when.ToUniversalTime() -lt $cutoff) { $keep = $false }
+                    $when = $when.ToUniversalTime()
+                    if ($RestMinutes -gt 0 -and $when -gt $restSince) {
+                        # Written within the last RestMinutes: see RestMinutes.
+                        $keep = $false
+                        $resting++
+                    } elseif ($known.Board -ge 0 -and $item.Games -gt $known.Board) {
+                        # The board has games it did not have when they were
+                        # last asked. Measured against the board itself, not
+                        # against their answer: a hidden profile or one still
+                        # answering about an older season never catches up with
+                        # the board, and would have been asked every run.
+                        $moved++
+                    } elseif ($when -lt $cutoff) {
+                        $keep = $false
+                    } elseif ($when -lt $hotSince) {
+                        $hash = 0
+                        foreach ($c in $item.Key.ToCharArray()) { $hash = ($hash * 31 + [int]$c) % 1000003 }
+                        if (($hash % $warmSlots) -eq $slotNow) { $warmAsked++ } else { $keep = $false; $warmWaiting++ }
+                    }
                 }
             }
 
@@ -510,15 +737,15 @@ if ($Live) {
         # console. So the log recorded a total with no way to see what drove
         # it, and an audit done from the log alone read the budget wrong by
         # a factor of three.
-        Write-Host ("{0} of {1} characters played in the last {2} days; {3} skipped." -f `
-            $hot.Count, $work.Count, $ActiveDays, $cold)
-        Write-Log ("{0}: {1} of {2} characters hot within {3}d, {4} skipped." -f `
-            $Region.ToUpper(), $hot.Count, $work.Count, $ActiveDays, $cold)
+        Write-Host ("Asking {0} of {1}: {2} warm due this run, {3} with new games on the board; {4} resting, {5} warm wait, {6} skipped in all." -f `
+            $hot.Count, $work.Count, $warmAsked, $moved, $resting, $warmWaiting, $cold)
+        Write-Log ("{0}: asking {1} of {2} (hot {3}h, warm {4}m of {5}d: {6} due, {7} waiting; {8} moved on the board; {9} resting {10}m), {11} skipped." -f `
+            $Region.ToUpper(), $hot.Count, $work.Count, $HotHours, $WarmMinutes, $ActiveDays, $warmAsked, $warmWaiting, $moved, $resting, $RestMinutes, $cold)
 
         # Whatever is skipped keeps the reading it already had, so the addon
         # still shows a live figure for them -- just an older one.
         foreach ($item in $work) {
-            if ($cache.ContainsKey($item.Key) -and -not $liveRatings.ContainsKey($item.Key)) {
+            if ($cache.ContainsKey($item.Key) -and -not $cache[$item.Key].Miss -and -not $liveRatings.ContainsKey($item.Key)) {
                 $known = $cache[$item.Key]
                 $liveRatings[$item.Key] = @{ Rating = $known.Rating; Won = $known.Won; Lost = $known.Lost; Written = $known.Written }
             }
@@ -526,6 +753,18 @@ if ($Live) {
 
         $work = $hot
     }
+
+    # The board's games for everyone, and who is being asked this run: what the
+    # cache's sixth column is written from below.
+    $boardNow = @{}
+    foreach ($bracket in $brackets) {
+        foreach ($entry in $fetched[$bracket.Index].Rows) {
+            $k = "{0}|{1}|{2}" -f $bracket.Index, $entry.character.name.ToLower(), $entry.character.realm.slug
+            $boardNow[$k] = [int]$entry.season_match_statistics.won + [int]$entry.season_match_statistics.lost
+        }
+    }
+    $askedNow = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($item in $work) { $null = $askedNow.Add($item.Key) }
 
     Write-Host ("Asking {0} characters for their own rating, {1} at a time." -f $work.Count, $Concurrency)
     Live-Progress 0 $work.Count
@@ -563,7 +802,8 @@ if ($Live) {
                     Rating  = [int]$body.rating
                     Won     = [int]$body.season_match_statistics.won
                     Lost    = [int]$body.season_match_statistics.lost
-                    Written = $response.Headers['Last-Modified']
+                    # An array in PowerShell 7, a string in 5.1; see Get-Api.
+                    Written = @($response.Headers['Last-Modified']) -join ''
                 }
             } catch {
                 $code = $_.Exception.Response.StatusCode.value__
@@ -616,7 +856,10 @@ if ($Live) {
         # line is.
         $windowStart = [datetime]::UtcNow
         $windowCount = 0
+        $round = 1
 
+        # Two rounds at most: everyone due, then the teammates of whoever moved.
+        do {
         while ($next -lt $work.Count -or $inFlight.Count -gt 0) {
 
             # Fill every free slot.
@@ -694,12 +937,16 @@ if ($Live) {
                 # An exact test, where the games-played guard below is only an
                 # inference: that one let Kjx through, because a stale season
                 # has *more* games rather than fewer.
+                if ($known -and $known.Miss) { $known = $null }
                 if ($answer -and $answer.Status -eq 'ok' -and $answer.Season -ne $season) {
                     $staleSeason++
                     if ($known) { $liveRatings[$job.Item.Key] = @{ Rating = $known.Rating; Won = $known.Won; Lost = $known.Lost; Written = $known.Written } }
                 } elseif ($answer -and $answer.Status -eq 'ok') {
                     $liveRatings[$job.Item.Key] = @{ Rating = $answer.Rating; Won = $answer.Won; Lost = $answer.Lost; Written = $answer.Written }
                     $fresh++
+                    if ($known -and ($answer.Won -ne $known.Won -or $answer.Lost -ne $known.Lost)) { $null = $playedNow.Add($job.Item.Key) }
+                    # A new write at all -- a logout -- for the character's other brackets.
+                    if ($known -and $answer.Written -and $answer.Written -ne $known.Written) { $null = $touchedNow.Add(($job.Item.Key -split '\|', 2)[1]) }
                 } elseif ($answer -and $answer.Status -eq 'same' -and $known) {
                     # Nothing new since last time: keep what we had.
                     $liveRatings[$job.Item.Key] = @{ Rating = $known.Rating; Won = $known.Won; Lost = $known.Lost; Written = $known.Written }
@@ -709,6 +956,12 @@ if ($Live) {
                     # said is still better than the snapshot's guess.
                     if ($known) {
                         $liveRatings[$job.Item.Key] = @{ Rating = $known.Rating; Won = $known.Won; Lost = $known.Lost; Written = $known.Written }
+                    } elseif ($answer -and $answer.Reason -and $answer.Reason -ne "HTTP 429") {
+                        # Never readable -- a hidden profile, mostly. Remembered
+                        # as a miss so it is not asked again every run: dated
+                        # HotHours ago, it comes round with the warm players for
+                        # ActiveDays, then only when the board moves.
+                        $missed[$job.Item.Key] = $nowStamp
                     }
                     if ($answer -and $answer.Reason) {
                         $lastReason = $answer.Reason
@@ -737,6 +990,59 @@ if ($Live) {
                 Write-Host ("  {0} of {1}: {2} new, {3} unchanged, {4} unreadable" -f $done, $work.Count, $fresh, $unchanged, $gone)
             }
         }
+
+        # The teammate round. Arena is played in teams: whoever's record moved
+        # this run queued with somebody, and a proven teammate the round above
+        # left out -- gone quiet for longer than ActiveDays, or waiting for their
+        # warm slot -- has most likely just played too. Asked now rather than
+        # hours later when the leaderboard's own games catch up. Skipped: anyone
+        # already asked this run, not on the ladder, or written within
+        # RestMinutes (their last write already carries those games).
+        #
+        # And the character's other brackets. Blizzard writes a character's
+        # profile when they log out, every bracket at once, so a fresh write on
+        # one bracket means the others may have moved too. Measured 2026-09-15:
+        # Gc's 2v2 was written at 04:22 after a 3v3 session, while the 3v3
+        # entry -- waiting for its hourly slot -- still said the day before, and
+        # another site already showed the games.
+        $followUps = New-Object System.Collections.Generic.List[object]
+        $siblings = 0
+        if ($round -eq 1 -and $touchedNow.Count -gt 0) {
+            foreach ($who in @($touchedNow)) {
+                foreach ($bracket in $brackets) {
+                    $k = "{0}|{1}" -f $bracket.Index, $who
+                    if ($allWork.ContainsKey($k) -and -not $askedNow.Contains($k)) {
+                        $null = $askedNow.Add($k)
+                        $followUps.Add($allWork[$k])
+                        $siblings++
+                    }
+                }
+            }
+        }
+        if ($round -eq 1 -and $playedNow.Count -gt 0) {
+            $restAgo = (Get-Date).ToUniversalTime().AddMinutes(-$RestMinutes)
+            foreach ($who in @($playedNow)) {
+                if (-not $partners.ContainsKey($who)) { continue }
+                foreach ($mate in $partners[$who]) {
+                    if (-not $allWork.ContainsKey($mate) -or $askedNow.Contains($mate)) { continue }
+                    $mc = $cache[$mate]
+                    if ($RestMinutes -gt 0 -and $mc -and $mc.Written) {
+                        $w = [datetime]::MinValue
+                        if ([datetime]::TryParse($mc.Written, [ref]$w) -and $w.ToUniversalTime() -gt $restAgo) { continue }
+                    }
+                    $null = $askedNow.Add($mate)
+                    $followUps.Add($allWork[$mate])
+                }
+            }
+        }
+        if ($followUps.Count -gt 0) {
+            Write-Log ("{0}: follow-up round: {1} other brackets of {2} logged out, {3} teammates of {4} who moved." -f `
+                $Region.ToUpper(), $siblings, $touchedNow.Count, ($followUps.Count - $siblings), $playedNow.Count)
+        }
+        $work = $followUps
+        $next = 0
+        $round++
+        } while ($work.Count -gt 0)
     } finally {
         $pool.Close()
         $pool.Dispose()
@@ -748,7 +1054,27 @@ if ($Live) {
     $null = $keep.Add("# conditionally. Not shipped; safe to delete, at the cost of one cold pass.")
     foreach ($key in ($liveRatings.Keys | Sort-Object)) {
         $it = $liveRatings[$key]
-        $null = $keep.Add(("{0}`t{1}`t{2}`t{3}`t{4}" -f $key, $it.Rating, $it.Won, $it.Lost, $it.Written))
+        # The board's games as of the last time they were asked. Someone skipped
+        # keeps the old figure, so a move on the board while they wait is still
+        # a move next run; someone never measured starts from today's.
+        $boardWas = if ($cache.ContainsKey($key)) { $cache[$key].Board } else { -1 }
+        $boardGames = if ($askedNow.Contains($key) -or $boardWas -lt 0) { $boardNow[$key] } else { $boardWas }
+        if ($null -eq $boardGames) { $boardGames = $boardWas }
+        $null = $keep.Add(("{0}`t{1}`t{2}`t{3}`t{4}`t{5}" -f $key, $it.Rating, $it.Won, $it.Lost, $it.Written, $boardGames))
+    }
+    # Misses: new ones from this run, and old ones not asked this run. A miss
+    # asked again and still unreadable was re-dated above; one on the board no
+    # more is dropped.
+    foreach ($key in $cache.Keys) {
+        if ($cache[$key].Miss -and -not $askedNow.Contains($key) -and -not $liveRatings.ContainsKey($key) -and $boardNow.ContainsKey($key)) {
+            $missed[$key] = $cache[$key].Written
+        }
+    }
+    foreach ($key in ($missed.Keys | Sort-Object)) {
+        if ($liveRatings.ContainsKey($key)) { continue }
+        $boardWas = if ($cache.ContainsKey($key)) { $cache[$key].Board } else { -1 }
+        $boardGames = if ($askedNow.Contains($key) -or $boardWas -lt 0) { $boardNow[$key] } else { $boardWas }
+        $null = $keep.Add(("{0}`t-1`t0`t0`t{1}`t{2}" -f $key, $missed[$key], $boardGames))
     }
     Set-Content -Path $liveFile -Value ($keep -join "`n") -Encoding utf8
 
@@ -768,6 +1094,7 @@ if ($Live) {
     if ($fresh -eq 0 -and $unchanged -eq 0 -and $gone -gt 0) {
         Write-Log ("{0}: LIVE PASS FAILED -- every one of {1} characters was unreadable. Last reason: {2}" -f `
             $Region.ToUpper(), $gone, $lastReason)
+    }
     }
 }
 
@@ -936,6 +1263,18 @@ $activity = New-Object System.Collections.Generic.List[string]
 # [double]::Parse reads it in the current culture -- on a machine whose
 # decimal separator is a comma that either throws or silently misreads, and
 # this runs unattended where nobody would see either.
+
+# The leaderboards as Blizzard sent them, for the next run to ask about
+# conditionally; the stamp last, so a run that dies between the two leaves
+# the old stamp with old copies rather than a new stamp with some.
+if ($boardFresh.Count -eq $brackets.Count) {
+    foreach ($copy in $boardFresh) { [System.IO.File]::WriteAllText((& $boardFile $copy.Api), [string]$copy.Body) }
+    if ($boardFresh[0].Stamp) { [System.IO.File]::WriteAllText($boardStampFile, [string]$boardFresh[0].Stamp) }
+} elseif (-not $boardUnchanged -and $boardFresh.Count -gt 0) {
+    # Some fetched, some not: unexpected; leave no half set behind.
+    Remove-Item -ErrorAction SilentlyContinue $boardStampFile
+}
+if ($boardUnchanged) { Write-Host ("Leaderboards unchanged since {0}: the copies on disk stood in for three requests." -f $script:snapshot) }
 
 # ---------------------------------------------------------------- best
 #
@@ -1212,7 +1551,8 @@ local ns = ArenaPlusData
 -- API. Do not edit by hand: rerun the script to refresh.
 --
 -- Down to the $Depth cutoff, which is the last real title -- below it the API
--- publishes people on 96 rating who played one game and lost.
+-- publishes people on 96 rating who played one game and lost -- and, below
+-- it, anyone with $KeepGames games this season.
 --
 -- No class or spec: the leaderboard endpoint carries neither.
 --
@@ -1283,7 +1623,8 @@ if ($baselineAge -ge 7) {
 # activity -- otherwise the next run would diff against a stale poll and
 # report one long session covering both gaps.
 if ($Live) {
-    if ($activity.Count -gt 0) {
+    # Not while tracker.py runs: it has written these rows already, as it saw them.
+    if ($activity.Count -gt 0 -and -not $trackerFresh) {
         Add-Content -Path $activityFile -Value ($activity -join "`n") -Encoding utf8
     }
     Set-Content -Path $lastFile -Value ($nextPoll -join "`n") -Encoding utf8
