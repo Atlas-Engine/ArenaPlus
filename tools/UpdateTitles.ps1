@@ -135,6 +135,12 @@ $ladderFile = Join-Path $data ("Leaderboard-" + $Region + ".lua")
 $titleFile  = Join-Path $data ("Titles-" + $Region + ".lua")
 $cacheFile  = Join-Path $PSScriptRoot ("TitlesSeen-" + $Region + ".txt")
 $credFile   = Join-Path $PSScriptRoot "blizzard-credentials.txt"
+# One client a region when the switch is on (ARENAPLUS_REGIONAL_CREDS=1, set
+# by run-pass.sh from /srv/arenaplus/regional-creds) and this region's own
+# blizzard-credentials-<us|eu>.txt is beside the shared file; the shared
+# file otherwise. The tracker and the site follow the same rule.
+$regionalCred = Join-Path $PSScriptRoot "blizzard-credentials-$apiRegion.txt"
+if ($env:ARENAPLUS_REGIONAL_CREDS -eq "1" -and (Test-Path $regionalCred)) { $credFile = $regionalCred }
 
 if (-not (Test-Path $ladderFile)) { Write-Log "No ladder file -- run UpdateFromBlizzard.ps1 first."; return }
 if (-not (Test-Path $credFile))   { Write-Log "No blizzard-credentials.txt."; return }

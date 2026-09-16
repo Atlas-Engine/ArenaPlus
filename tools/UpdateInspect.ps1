@@ -98,6 +98,12 @@ $ladderFile = Join-Path $data ("Leaderboard-" + $Region + ".lua")
 $outFile    = Join-Path $data ("Inspect-" + $Region + ".lua")
 $logFile    = Join-Path $PSScriptRoot "UpdateInspect.log"
 $credFile   = Join-Path $PSScriptRoot "blizzard-credentials.txt"
+# One client a region when the switch is on (ARENAPLUS_REGIONAL_CREDS=1, set
+# by run-pass.sh from /srv/arenaplus/regional-creds) and this region's own
+# blizzard-credentials-<us|eu>.txt is beside the shared file; the shared
+# file otherwise. The tracker and the site follow the same rule.
+$regionalCred = Join-Path $PSScriptRoot "blizzard-credentials-$apiRegion.txt"
+if ($env:ARENAPLUS_REGIONAL_CREDS -eq "1" -and (Test-Path $regionalCred)) { $credFile = $regionalCred }
 
 $TimeFormat = 'yyyy-MM-dd hh:mm tt'
 
