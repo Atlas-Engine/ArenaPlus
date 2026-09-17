@@ -1276,6 +1276,12 @@ $activity = New-Object System.Collections.Generic.List[string]
 if ($boardFresh.Count -eq $brackets.Count) {
     foreach ($copy in $boardFresh) { [System.IO.File]::WriteAllText((& $boardFile $copy.Api), [string]$copy.Body) }
     if ($boardFresh[0].Stamp) { [System.IO.File]::WriteAllText($boardStampFile, [string]$boardFresh[0].Stamp) }
+    # A rebuilt board, so the run after this one ingests it straight away
+    # rather than after the specs and activity passes: about half a minute
+    # off the wait before the tracker sees the new ladder. The unit's
+    # ingest-if-fetched.sh reads this file and removes it; nothing else
+    # depends on it, so it is safe to delete.
+    [System.IO.File]::WriteAllText((Join-Path $PSScriptRoot ("Fetched-" + $Region)), [string]$boardFresh[0].Stamp)
 } elseif (-not $boardUnchanged -and $boardFresh.Count -gt 0) {
     # Some fetched, some not: unexpected; leave no half set behind.
     Remove-Item -ErrorAction SilentlyContinue $boardStampFile
