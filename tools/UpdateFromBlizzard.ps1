@@ -342,6 +342,14 @@ $held = $null
 $cleared = $false
 $saidWaiting = $false
 $deadline = (Get-Date).AddSeconds(150)
+# Half a second between tries, not five: a rebuilt board waits here behind the
+# previous ladder's pass, and five-second steps were adding two and a half
+# seconds on average to a path the whole point of which is to be under two
+# minutes. The owner is still only asked about every five seconds -- nine
+# waiters checking ten times a second would be three hundred Get-Process calls
+# a minute for an answer that does not change.
+$ownerAlive = $true
+$lastProbe = [datetime]::MinValue
 while ($true) {
     try {
         $held = [System.IO.File]::Open($lockFile, [System.IO.FileMode]::CreateNew,
@@ -352,7 +360,12 @@ while ($true) {
         $owner = 0
         try { $owner = [int](Get-Content $lockFile -TotalCount 1 -ErrorAction Stop) } catch { }
 
-        if ($owner -gt 0 -and (Get-Process -Id $owner -ErrorAction SilentlyContinue)) {
+        if ($owner -gt 0 -and ((Get-Date) - $lastProbe).TotalSeconds -ge 5) {
+            $lastProbe = Get-Date
+            $ownerAlive = [bool](Get-Process -Id $owner -ErrorAction SilentlyContinue)
+        }
+
+        if ($owner -gt 0 -and $ownerAlive) {
             # Line two names the pass, so the log says what to wait for
             # rather than only that something is in the way.
             $busy = ""
@@ -367,7 +380,7 @@ while ($true) {
                 if ($busy) { Write-Host ("Waiting: {0} is running (process {1})." -f $busy, $owner) }
                 else       { Write-Host ("Waiting: another pass is running (process {0})." -f $owner) }
             }
-            Start-Sleep -Seconds 5
+            Start-Sleep -Milliseconds 500
             continue
         }
 

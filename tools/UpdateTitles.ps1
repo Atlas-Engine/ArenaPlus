@@ -1,4 +1,4 @@
-# Which PvP titles each character on the ladder has actually earned.
+﻿# Which PvP titles each character on the ladder has actually earned.
 #
 # The ladder says what somebody's rating is today. It cannot say that they were
 # a Gladiator two seasons ago, and that is often the more interesting fact --
@@ -178,9 +178,55 @@ $apiRoot   = "https://$apiRegion.api.blizzard.com"
 # among them 2091 Gladiator, 2092 Duelist, 2093 Rival, 2090 Challenger and the
 # rating milestones. There is no Undisputed Gladiator and no expansion-specific
 # Gladiator in it; those are later titles and asking for them would invent them.
-$requests++
-$category = Invoke-RestMethod -Uri "$apiRoot/data/wow/achievement-category/165?namespace=$staticNs&locale=en_US" `
-                              -Headers @{ Authorization = $auth } -TimeoutSec 30
+#
+# Read once a week rather than once a run. The list does not change between
+# seasons, and reading it costs 69 requests before a single character is asked
+# about: the category, the whole achievement index, and one media read per
+# prestige title. Measured over 30 runs that asked about nobody, that was
+# 1,380 of each region's 1,450 requests a day, 95% of this pass, spent on an
+# answer that had not moved. The tracker takes whatever the passes leave
+# (tracker.py, adapt), so each request saved here becomes a character read.
+# It is rebuilt when the file is a week old, when -Force is passed, or when a
+# character turns up carrying an achievement the cached index has never heard
+# of, which is how a new season's Gladiator is noticed within one run.
+$prestigeFile = Join-Path $PSScriptRoot ("TitlesPrestige-" + $apiRegion + ".txt")
+$allIds = New-Object 'System.Collections.Generic.HashSet[int]'
+$cachedEvery = New-Object 'System.Collections.Generic.List[object]'
+$cachedPrestige = New-Object 'System.Collections.Generic.Dictionary[int,object]'
+$cacheFresh = $false
+if (-not $Force -and (Test-Path $prestigeFile)) {
+    try {
+        $built = 0
+        foreach ($line in [System.IO.File]::ReadAllLines($prestigeFile)) {
+            if ($line.StartsWith("#built ")) { $built = [long]$line.Substring(7); continue }
+            if ($line.StartsWith("#")) { continue }
+            $f = $line.Split("`t")
+            if ($f[0] -eq "all") {
+                foreach ($id in $f[1].Split(",")) { if ($id) { $null = $allIds.Add([int]$id) } }
+            } elseif ($f[0] -eq "every") {
+                $null = $cachedEvery.Add([pscustomobject]@{ id = [int]$f[1]; name = $f[2] })
+            } elseif ($f[0] -eq "prestige") {
+                $cachedPrestige[[int]$f[1]] = @{ Rank = [int]$f[2]; Icon = $f[3]; Name = $f[4] }
+            }
+        }
+        $age = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $built
+        $cacheFresh = ($built -gt 0 -and $age -lt (7 * 86400) -and $cachedEvery.Count -gt 0 -and $allIds.Count -gt 0)
+        if ($cacheFresh) {
+            Write-Host ("Achievement list from the cache ({0:N1} days old): {1} arena achievements, {2} prestige titles." -f `
+                ($age / 86400), $cachedEvery.Count, $cachedPrestige.Count)
+        }
+    } catch {
+        $cacheFresh = $false
+    }
+}
+
+$category = $null
+if (-not $cacheFresh) {
+    $requests++
+    $category = Invoke-RestMethod -Uri "$apiRoot/data/wow/achievement-category/165?namespace=$staticNs&locale=en_US" `
+                                  -Headers @{ Authorization = $auth } -TimeoutSec 30
+}
+$categoryRows = if ($cacheFresh) { $cachedEvery } else { @($category.achievements) }
 
 # The ones worth keeping, out of the 27.
 #
@@ -206,7 +252,7 @@ $TitleIds = @{
 
 $titleName = New-Object 'System.Collections.Generic.Dictionary[int,string]'
 $everything = New-Object 'System.Collections.Generic.Dictionary[int,string]'
-foreach ($a in @($category.achievements)) {
+foreach ($a in $categoryRows) {
     if (-not ($a.id -and $a.name)) { continue }
 
     $id = [int]$a.id
@@ -256,11 +302,23 @@ foreach ($id in $TitleIds.Keys) {
 # achievement's media, so the addon and the site both draw the game's art
 # rather than a stand-in.
 $prestige = New-Object 'System.Collections.Generic.Dictionary[int,object]'
+if ($cacheFresh) {
+    foreach ($id in $cachedPrestige.Keys) {
+        $prestige[[int]$id] = @{ Rank = $cachedPrestige[$id].Rank; Icon = $cachedPrestige[$id].Icon }
+        # The name as well as the rank and the icon: $titleName's keys are the
+        # signature every cached character is checked against further down, so
+        # a cache that dropped the prestige names would re-queue every
+        # character on every run and ship a title table without them.
+        $titleName[[int]$id] = $cachedPrestige[$id].Name
+    }
+}
 try {
+    if ($cacheFresh) { throw [System.OperationCanceledException]::new("cached") }
     $requests++
     $index = Invoke-RestMethod -Uri "$apiRoot/data/wow/achievement/index?namespace=$staticNs&locale=en_US" `
                                -Headers @{ Authorization = $auth; 'Accept-Encoding' = 'gzip' } -TimeoutSec 60
     foreach ($a in @($index.achievements)) {
+        if ($a.id) { $null = $allIds.Add([int]$a.id) }
         if (-not ($a.id -and $a.name)) { continue }
         $name = [string]$a.name
         $rank = 0
@@ -282,6 +340,25 @@ try {
         $prestige[[int]$a.id] = @{ Rank = $rank; Icon = $icon }
         $titleName[[int]$a.id] = $name
     }
+    # Kept for the next run, with the full id set the index returned: the
+    # names are what $keepSignature is built from, and the id set is what an
+    # unknown achievement on a character is judged against.
+    $lines = New-Object 'System.Collections.Generic.List[string]'
+    $null = $lines.Add("# Blizzard's arena achievements and the prestige titles, as they were read")
+    $null = $lines.Add("# on the date below. Not shipped; safe to delete, at the cost of 69 requests")
+    $null = $lines.Add("# on the next run. Rebuilt weekly, on -Force, and when a character carries an")
+    $null = $lines.Add("# achievement id that is not in the set below. See the note in UpdateTitles.ps1.")
+    $null = $lines.Add("#built " + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
+    $null = $lines.Add("all`t" + (($allIds | Sort-Object) -join ","))
+    foreach ($id in ($everything.Keys | Sort-Object)) { $null = $lines.Add("every`t$id`t" + $everything[$id]) }
+    foreach ($id in ($prestige.Keys | Sort-Object)) {
+        # The whole format expression in its own brackets: inside a method
+        # call the commas would be Add()'s arguments, not the format's.
+        $null = $lines.Add(("prestige`t{0}`t{1}`t{2}`t{3}" -f $id, $prestige[$id].Rank, $prestige[$id].Icon, $titleName[$id]))
+    }
+    [System.IO.File]::WriteAllLines($prestigeFile, $lines)
+} catch [System.OperationCanceledException] {
+    # The cache answered; nothing was read and nothing is rewritten.
 } catch {
     Write-Log ("Could not read the achievement index for rank-one titles: " + $_.Exception.Message)
 }
@@ -528,6 +605,7 @@ $found = 0
 $none = 0
 $gone = 0
 $failed = 0
+$unknownId = 0          # an achievement the cached index does not have (see above)
 $askedOn = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 
 try {
@@ -541,7 +619,7 @@ try {
         # filtering happens here rather than in the collecting loop so the big
         # object is dropped inside the runspace and never crosses back.
         $one = {
-            param($uri, $auth, $keepIds)
+            param($uri, $auth, $keepIds, $allIds)
 
             for ($attempt = 1; $attempt -le 2; $attempt++) {
                 try {
@@ -579,9 +657,15 @@ try {
                     $M = [uint64]4294967296
                     $hashes = New-Object 'System.Collections.Generic.HashSet[uint64]'
 
+                    $unknown = 0
                     foreach ($a in $body.achievements) {
                         $id = [int]$a.id
                         if ($keepIds.Contains($id)) { $null = $mine.Add($id) }
+                        # An id the cached achievement index has never heard of
+                        # means Blizzard has added achievements since it was
+                        # read -- a new season's Gladiator, for instance. The
+                        # id itself is not wanted here, only that there was one.
+                        if ($allIds.Count -gt 0 -and -not $allIds.Contains($id)) { $unknown = $id }
 
                         if ($a.completed_timestamp) {
                             $ts = [uint64]$a.completed_timestamp
@@ -591,7 +675,7 @@ try {
 
                     $sketch = @($hashes | Sort-Object | Select-Object -First 64)
 
-                    return [pscustomobject]@{ Status = 'ok'; Ids = $mine; Sketch = ($sketch -join ',') }
+                    return [pscustomobject]@{ Status = 'ok'; Ids = $mine; Sketch = ($sketch -join ','); Unknown = $unknown }
                 } catch {
                     $code = 0
                     try { $code = [int]$_.Exception.Response.StatusCode } catch { }
@@ -645,7 +729,7 @@ try {
 
                     $shell = [powershell]::Create()
                     $shell.RunspacePool = $pool
-                    $null = $shell.AddScript($one).AddArgument($item.Uri).AddArgument($auth).AddArgument($keepIds)
+                    $null = $shell.AddScript($one).AddArgument($item.Uri).AddArgument($auth).AddArgument($keepIds).AddArgument($allIds)
 
                     $inFlight.Add([pscustomobject]@{
                         Shell   = $shell
@@ -680,6 +764,7 @@ try {
                     $rating = $wanted[$key].Rating
 
                     if ($answer -and $answer.Status -eq 'ok') {
+                        if ($answer.Unknown) { $unknownId = [int]$answer.Unknown }
                         $ids = New-Object 'System.Collections.Generic.List[int]'
                         foreach ($id in $answer.Ids) { $null = $ids.Add([int]$id) }
 
@@ -711,6 +796,14 @@ try {
 } finally {
     # The lock is kept: the cache still has to be written. See the note where
     # it is taken.
+}
+
+# A character carried an achievement the cached index does not have, so
+# Blizzard has added some since it was read -- a new season's Gladiator, most
+# likely. The file goes, and the next run reads the list again.
+if ($unknownId -gt 0 -and (Test-Path $prestigeFile)) {
+    Write-Log ("Achievement {0} is not in the cached index; the next run will read the list again." -f $unknownId)
+    Remove-Item $prestigeFile -Force -ErrorAction SilentlyContinue
 }
 
 # ---------------------------------------------------------------- write
