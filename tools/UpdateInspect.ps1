@@ -349,6 +349,19 @@ for ($try = 1; $try -le 2; $try++) {
             return
         }
 
+        # No id in it yet: a pass between creating the file and writing its
+        # id -- milliseconds, but on Linux the file can be read in them, and
+        # taken for a dead run's leftover it was deleted from under its owner
+        # and two passes ran at once. Empty for half a minute is a leftover.
+        if ($owner -le 0) {
+            $age = 0
+            try { $age = ((Get-Date) - (Get-Item $lockFile -ErrorAction Stop).LastWriteTime).TotalSeconds } catch { }
+            if ($age -lt 30) {
+                Write-Host "Waiting: another pass is starting."
+                return
+            }
+        }
+
         if ($try -eq 1) {
             # The owner is gone, so this is a leftover from a run that died.
             Write-Host "Clearing a lock left by a run that did not finish."

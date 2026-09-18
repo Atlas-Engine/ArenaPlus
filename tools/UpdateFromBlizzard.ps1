@@ -196,7 +196,8 @@ foreach ($line in Get-Content $credFile) {
 if (-not $clientId -or -not $clientSecret) { Write-Log "Credentials file is incomplete."; return }
 
 $pair  = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$clientId`:$clientSecret"))
-$token = (Invoke-RestMethod -Method Post -Uri "https://oauth.battle.net/token" `
+# A timeout, like every request below: PowerShell 7's default is none at all.
+$token = (Invoke-RestMethod -Method Post -Uri "https://oauth.battle.net/token" -TimeoutSec 30 `
             -Headers @{ Authorization = "Basic $pair" } -Body @{ grant_type = "client_credentials" }).access_token
 if (-not $token) { Write-Log "No access token."; return }
 
@@ -248,21 +249,37 @@ function Note-Snapshot([string]$stamp) {
 
 # With -Since (an HTTP date), asked conditionally: $null back means Blizzard
 # answered 304, nothing newer than that. A 304 still costs a request.
+#
+# A timeout, and two more tries. These are the multi-megabyte boards, the
+# season and the rewards: with PowerShell 7's default of no timeout a stalled
+# download held the fetch lock -- every ladder, specs, inspect, titles and the
+# publish -- until systemd ended the unit 45 minutes later, and one refused or
+# failed answer ended the whole pass, the rebuild it was started for with it.
+# The per-character reads further down already had their 30 seconds.
+# Only for what may pass: a 429, a 5xx, or no answer at all; each try counts.
 function Get-Api([string]$path, [string]$since = '') {
-    $script:requests++
     $sep = if ($path.Contains("?")) { "&" } else { "?" }
     $uri = "{0}{1}{2}namespace={3}&locale=en_US" -f $apiRoot,$path,$sep,$namespace
 
     $ask = $headers
     if ($since) { $ask = @{ Authorization = $headers.Authorization; 'If-Modified-Since' = $since } }
-    try {
-        $response = Invoke-WebRequest -Uri $uri -Headers $ask -UseBasicParsing -ErrorAction Stop
-    } catch {
-        # Both PowerShells raise on a 304 rather than returning it.
-        $code = 0
-        if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
-        if ($since -and $code -eq 304) { return $null }
-        throw
+    $tries = 0
+    while ($true) {
+        $tries++
+        $script:requests++
+        try {
+            $response = Invoke-WebRequest -Uri $uri -Headers $ask -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+            break
+        } catch {
+            # Both PowerShells raise on a 304 rather than returning it.
+            $code = 0
+            if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
+            if ($since -and $code -eq 304) { return $null }
+            if ($tries -ge 3 -or -not ($code -eq 0 -or $code -eq 429 -or $code -ge 500)) { throw }
+            Write-Log ("{0}: {1} answered {2}; trying again in {3} s." -f $Region.ToUpper(), $path,
+                $(if ($code) { $code } else { $_.Exception.Message }), (3 * $tries))
+            Start-Sleep -Seconds (3 * $tries)
+        }
     }
 
     # Joined, because PowerShell 7 -- what the Linux server runs -- hands every
@@ -359,6 +376,20 @@ while ($true) {
         # Somebody has it. Whether that somebody still exists is the question.
         $owner = 0
         try { $owner = [int](Get-Content $lockFile -TotalCount 1 -ErrorAction Stop) } catch { }
+
+        # No id in it yet: the run that made it is between creating the file
+        # and writing its id, a few milliseconds on Linux, where the file can
+        # be read while it is open. Taken for a dead run's leftover, it was
+        # deleted from under its owner and two passes ran at once. Only a
+        # file that has stayed empty for half a minute is a leftover.
+        if ($owner -le 0) {
+            $age = 0
+            try { $age = ((Get-Date) - (Get-Item $lockFile -ErrorAction Stop).LastWriteTime).TotalSeconds } catch { }
+            if ($age -lt 30 -and (Get-Date) -lt $deadline) {
+                Start-Sleep -Milliseconds 500
+                continue
+            }
+        }
 
         if ($owner -gt 0 -and ((Get-Date) - $lastProbe).TotalSeconds -ge 5) {
             $lastProbe = Get-Date
@@ -515,7 +546,31 @@ foreach ($bracket in $brackets) {
             Note-Snapshot $boardStamp
             $board = Get-Content (& $boardFile $bracket.Api) -Raw | ConvertFrom-Json
         } else {
-            $boardFresh += @{ Api = $bracket.Api; Body = $script:lastBody; Stamp = $script:lastStamp }
+            # A board cut short -- a 200 with part of the list, mid-rebuild
+            # or in a fault -- was kept for the three hours to the next
+            # rebuild: the site's ladder, the tracker's roster and the addon
+            # users' file all shrank to it. Under 60% of the kept copy's
+            # players, in the same season, and the kept copy stands in; it
+            # is not marked fresh, so the stamp is dropped below and the next
+            # run asks Blizzard again. Counts from BoardCount-<region>-<api>.
+            # Only while that copy is under six hours old: a board still short
+            # after two rebuilds is what the ladder now is, and is taken.
+            $countFile = Join-Path $PSScriptRoot ("BoardCount-" + $Region + "-" + $bracket.Api + ".txt")
+            $boardWas = @()
+            if (Test-Path $countFile) {
+                if (((Get-Date) - (Get-Item $countFile).LastWriteTime).TotalHours -lt 6) {
+                    $boardWas = @(([string](Get-Content $countFile -TotalCount 1)) -split ' ')
+                }
+            }
+            $boardNow = @($board.entries).Count
+            if ($boardWas.Count -eq 2 -and $boardWas[0] -eq [string]$season -and [int]$boardWas[1] -ge 200 -and
+                    $boardNow -lt 0.6 * [int]$boardWas[1] -and (Test-Path (& $boardFile $bracket.Api))) {
+                Write-Log ("{0}: the {1} board came back with {2} players against {3} before, in season {4}; kept the copy on disk." -f
+                    $Region.ToUpper(), $bracket.Api, $boardNow, $boardWas[1], $season)
+                $board = Get-Content (& $boardFile $bracket.Api) -Raw | ConvertFrom-Json
+            } else {
+                $boardFresh += @{ Api = $bracket.Api; Body = $script:lastBody; Stamp = $script:lastStamp; Count = $boardNow }
+            }
         }
     }
     $all   = @($board.entries)
@@ -1287,7 +1342,12 @@ $activity = New-Object System.Collections.Generic.List[string]
 # conditionally; the stamp last, so a run that dies between the two leaves
 # the old stamp with old copies rather than a new stamp with some.
 if ($boardFresh.Count -eq $brackets.Count) {
-    foreach ($copy in $boardFresh) { [System.IO.File]::WriteAllText((& $boardFile $copy.Api), [string]$copy.Body) }
+    foreach ($copy in $boardFresh) {
+        [System.IO.File]::WriteAllText((& $boardFile $copy.Api), [string]$copy.Body)
+        # What the next run's copy is measured against (see BoardCount above).
+        [System.IO.File]::WriteAllText((Join-Path $PSScriptRoot ("BoardCount-" + $Region + "-" + $copy.Api + ".txt")),
+            ("{0} {1}" -f $season, $copy.Count))
+    }
     if ($boardFresh[0].Stamp) { [System.IO.File]::WriteAllText($boardStampFile, [string]$boardFresh[0].Stamp) }
     # A rebuilt board, so the run after this one ingests it straight away
     # rather than after the specs and activity passes: about half a minute
