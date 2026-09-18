@@ -14,9 +14,11 @@
 #   .../collections/mounts 404 on both
 #
 # So this is MISTS ONLY and says so below rather than logging fifteen thousand
-# failures on Anniversary. There are no reward mounts to be had either: the
-# collections endpoint is not served for Classic at all, so the Cloud Serpent
-# and its kin cannot be read at any price.
+# failures on Anniversary. The collections endpoint is not served for Classic,
+# but the arena reward mounts are achievements as well -- Feats of Strength,
+# account-wide, one a season from the Swift Nether Drake to the Prideful
+# Gladiator's Cloud Serpent -- so they come back in the same document with the
+# time each was earned, and are kept (see $mountIds). Verified 2026-09-18.
 #
 # ---------------------------------------------------------------- the cost
 #
@@ -193,6 +195,11 @@ $prestigeFile = Join-Path $PSScriptRoot ("TitlesPrestige-" + $apiRegion + ".txt"
 $allIds = New-Object 'System.Collections.Generic.HashSet[int]'
 $cachedEvery = New-Object 'System.Collections.Generic.List[object]'
 $cachedPrestige = New-Object 'System.Collections.Generic.Dictionary[int,object]'
+# The arena reward mounts, kept beside the titles: id -> season, icon, name and
+# Blizzard's own description. Not titles and never shipped to the addon; the
+# site reads them (titles.py) to show when an account was Gladiator.
+$mountInfo = New-Object 'System.Collections.Generic.Dictionary[int,object]'
+$mountIds = New-Object 'System.Collections.Generic.HashSet[int]'
 $cacheFresh = $false
 if (-not $Force -and (Test-Path $prestigeFile)) {
     try {
@@ -207,10 +214,13 @@ if (-not $Force -and (Test-Path $prestigeFile)) {
                 $null = $cachedEvery.Add([pscustomobject]@{ id = [int]$f[1]; name = $f[2] })
             } elseif ($f[0] -eq "prestige") {
                 $cachedPrestige[[int]$f[1]] = @{ Rank = [int]$f[2]; Icon = $f[3]; Name = $f[4] }
+            } elseif ($f[0] -eq "mount" -and $f.Count -ge 6) {
+                $mountInfo[[int]$f[1]] = @{ Season = [int]$f[2]; Icon = $f[3]; Name = $f[4]; Description = $f[5] }
+                $null = $mountIds.Add([int]$f[1])
             }
         }
         $age = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $built
-        $cacheFresh = ($built -gt 0 -and $age -lt (7 * 86400) -and $cachedEvery.Count -gt 0 -and $allIds.Count -gt 0)
+        $cacheFresh = ($built -gt 0 -and $age -lt (7 * 86400) -and $cachedEvery.Count -gt 0 -and $allIds.Count -gt 0 -and $mountIds.Count -gt 0)
         if ($cacheFresh) {
             Write-Host ("Achievement list from the cache ({0:N1} days old): {1} arena achievements, {2} prestige titles." -f `
                 ($age / 86400), $cachedEvery.Count, $cachedPrestige.Count)
@@ -302,6 +312,13 @@ foreach ($id in $TitleIds.Keys) {
 # achievement's media, so the addon and the site both draw the game's art
 # rather than a stand-in.
 $prestige = New-Object 'System.Collections.Generic.Dictionary[int,object]'
+# The fifteen arena reward mounts, by name: the Nether Drakes of the first four
+# seasons, then the Frost Wyrms, Twilight Drakes and Cloud Serpents.
+$mountRx = '^([A-Z][a-z]+ Gladiator''s (Frost Wyrm|Twilight Drake|Cloud Serpent)|(Swift|Merciless|Vengeful|Brutal) Nether Drake)$'
+# Their seasons where a description does not name one, measured 2026-09-18
+# from the index and from Acx-Raden's dates, which run in season order.
+$mountSeason = @{ 886 = 1; 887 = 2; 888 = 3; 2316 = 4; 3096 = 5; 3756 = 6; 3757 = 7; 4600 = 8;
+                  6003 = 9; 6322 = 10; 6741 = 11; 8216 = 12; 8678 = 13; 8705 = 14; 8707 = 15 }
 if ($cacheFresh) {
     foreach ($id in $cachedPrestige.Keys) {
         $prestige[[int]$id] = @{ Rank = $cachedPrestige[$id].Rank; Icon = $cachedPrestige[$id].Icon }
@@ -326,6 +343,35 @@ try {
         elseif ($name -match '^[A-Z][a-z]+ Gladiator: Season \d+( \([0-9v]+\))?$') { $rank = 2 }
         elseif ($name -match '^Hero of the (Alliance|Horde)(: [A-Z][a-z]+)?$') { $rank = 3 }
         elseif ($name -match '^Gladiator: Season \d+( \([0-9v]+\))?$') { $rank = 4 }
+
+        # An arena reward mount: its season from Blizzard's own description
+        # ("... from Arena Season 12 of Mists of Pandaria."), and its icon from
+        # the achievement's media, like the titles'. $mountSeason covers a
+        # description that does not name its season.
+        if ($name -match $mountRx) {
+            $detail = $null
+            try {
+                $requests++
+                $detail = Invoke-RestMethod -Uri "$apiRoot/data/wow/achievement/$($a.id)?namespace=$staticNs&locale=en_US" `
+                                            -Headers @{ Authorization = $auth } -TimeoutSec 30
+            } catch { }
+            $description = if ($detail) { [string]$detail.description } else { "" }
+            $season = 0
+            $m = [regex]::Match($description, 'Arena Season (\d+)')
+            if ($m.Success) { $season = [int]$m.Groups[1].Value }
+            elseif ($mountSeason.ContainsKey([int]$a.id)) { $season = $mountSeason[[int]$a.id] }
+            $mountIcon = ""
+            try {
+                $requests++
+                $media = Invoke-RestMethod -Uri "$apiRoot/data/wow/media/achievement/$($a.id)?namespace=$staticNs" `
+                                           -Headers @{ Authorization = $auth } -TimeoutSec 30
+                $url = [string](@($media.assets | Where-Object { $_.key -eq 'icon' })[0].value)
+                if ($url) { $mountIcon = [IO.Path]::GetFileNameWithoutExtension($url) }
+            } catch { }
+            $mountInfo[[int]$a.id] = @{ Season = $season; Icon = $mountIcon; Name = $name; Description = $description }
+            $null = $mountIds.Add([int]$a.id)
+            continue
+        }
         if ($rank -eq 0) { continue }
 
         $icon = ""
@@ -355,6 +401,13 @@ try {
         # The whole format expression in its own brackets: inside a method
         # call the commas would be Add()'s arguments, not the format's.
         $null = $lines.Add(("prestige`t{0}`t{1}`t{2}`t{3}" -f $id, $prestige[$id].Rank, $prestige[$id].Icon, $titleName[$id]))
+    }
+    foreach ($id in ($mountInfo.Keys | Sort-Object)) {
+        $mi = $mountInfo[$id]
+        $null = $lines.Add(("mount`t{0}`t{1}`t{2}`t{3}`t{4}" -f $id, $mi.Season, $mi.Icon, $mi.Name, ($mi.Description -replace "[`t`r`n]", " ")))
+    }
+    if ($mountInfo.Count -ne 15) {
+        Write-Log ("{0} arena reward mounts found in the achievement index, where 15 were expected." -f $mountInfo.Count)
     }
     [System.IO.File]::WriteAllLines($prestigeFile, $lines)
 } catch [System.OperationCanceledException] {
@@ -504,7 +557,9 @@ $seen = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([Syst
 # and the ordinary -Limit works through it over the next few runs.
 # "sketch64" is part of it: a cache written before the account sketch existed
 # has none, and every character in it has to be asked once more to get one.
-$keepSignature = "sketch64;" + (($titleName.Keys | Sort-Object) -join ",")
+# The mounts are part of it too, so every cached character is asked once more
+# for theirs when they are first looked for.
+$keepSignature = "sketch64;" + (($titleName.Keys | Sort-Object) -join ",") + ";mounts:" + (($mountIds | Sort-Object) -join ",")
 $cacheCurrent = $false
 
 if ((Test-Path $cacheFile) -and -not $Force) {
@@ -526,7 +581,11 @@ if ((Test-Path $cacheFile) -and -not $Force) {
         $null = [datetime]::TryParse($bits[1], [ref]$when)
 
         $sketch = if ($bits.Count -ge 5) { $bits[4] } else { "" }
-        $seen[$bits[0]] = @{ When = $when; Rating = [int]$bits[2]; Ids = $ids; Sketch = $sketch }
+        # The sixth column: "id@epoch seconds" for each arena reward mount the
+        # account earned. Carried through as it is, so a character not asked
+        # this run keeps theirs; absent in a cache written before it existed.
+        $mounts = if ($bits.Count -ge 6) { $bits[5] } else { "" }
+        $seen[$bits[0]] = @{ When = $when; Rating = [int]$bits[2]; Ids = $ids; Sketch = $sketch; Mounts = $mounts }
     }
 
     if (-not $cacheCurrent) {
@@ -619,7 +678,7 @@ try {
         # filtering happens here rather than in the collecting loop so the big
         # object is dropped inside the runspace and never crosses back.
         $one = {
-            param($uri, $auth, $keepIds, $allIds)
+            param($uri, $auth, $keepIds, $allIds, $mountIds)
 
             for ($attempt = 1; $attempt -le 2; $attempt++) {
                 try {
@@ -658,6 +717,7 @@ try {
                     $hashes = New-Object 'System.Collections.Generic.HashSet[uint64]'
 
                     $unknown = 0
+                    $mounts = New-Object System.Collections.Generic.List[string]
                     foreach ($a in $body.achievements) {
                         $id = [int]$a.id
                         if ($keepIds.Contains($id)) { $null = $mine.Add($id) }
@@ -670,12 +730,18 @@ try {
                         if ($a.completed_timestamp) {
                             $ts = [uint64]$a.completed_timestamp
                             $null = $hashes.Add(((($ts % $M) * [uint64]2654435761) + ([uint64]$id * [uint64]40503)) % $M)
+                            # An arena reward mount, with when it was earned, in
+                            # whole seconds: integer division on a uint64 would
+                            # hand back a double and write decimals.
+                            if ($mountIds.Contains($id)) {
+                                $null = $mounts.Add("$id@" + [int64][Math]::Floor([double]$a.completed_timestamp / 1000))
+                            }
                         }
                     }
 
                     $sketch = @($hashes | Sort-Object | Select-Object -First 64)
 
-                    return [pscustomobject]@{ Status = 'ok'; Ids = $mine; Sketch = ($sketch -join ','); Unknown = $unknown }
+                    return [pscustomobject]@{ Status = 'ok'; Ids = $mine; Sketch = ($sketch -join ','); Unknown = $unknown; Mounts = ($mounts -join ',') }
                 } catch {
                     $code = 0
                     try { $code = [int]$_.Exception.Response.StatusCode } catch { }
@@ -729,7 +795,7 @@ try {
 
                     $shell = [powershell]::Create()
                     $shell.RunspacePool = $pool
-                    $null = $shell.AddScript($one).AddArgument($item.Uri).AddArgument($auth).AddArgument($keepIds).AddArgument($allIds)
+                    $null = $shell.AddScript($one).AddArgument($item.Uri).AddArgument($auth).AddArgument($keepIds).AddArgument($allIds).AddArgument($mountIds)
 
                     $inFlight.Add([pscustomobject]@{
                         Shell   = $shell
@@ -768,10 +834,10 @@ try {
                         $ids = New-Object 'System.Collections.Generic.List[int]'
                         foreach ($id in $answer.Ids) { $null = $ids.Add([int]$id) }
 
-                        $seen[$key] = @{ When = (Get-Date); Rating = $rating; Ids = $ids; Sketch = [string]$answer.Sketch }
+                        $seen[$key] = @{ When = (Get-Date); Rating = $rating; Ids = $ids; Sketch = [string]$answer.Sketch; Mounts = [string]$answer.Mounts }
                         if ($ids.Count -gt 0) { $found++ } else { $none++ }
                     } elseif ($answer -and $answer.Status -eq 'gone') {
-                        $seen[$key] = @{ When = (Get-Date); Rating = $rating; Ids = (New-Object 'System.Collections.Generic.List[int]') }
+                        $seen[$key] = @{ When = (Get-Date); Rating = $rating; Ids = (New-Object 'System.Collections.Generic.List[int]'); Sketch = ""; Mounts = "" }
                         $gone++
                     } else {
                         # Nothing was learned, so nothing is remembered and the
@@ -1004,12 +1070,13 @@ $null = $cacheLines.Add("# Safe to delete, at the cost of one cold pass -- which
 $null = $cacheLines.Add("# keep: " + $keepSignature)
 foreach ($key in ($seen.Keys | Sort-Object)) {
     $it = $seen[$key]
-    $null = $cacheLines.Add(("{0}`t{1}`t{2}`t{3}`t{4}" -f `
+    $null = $cacheLines.Add(("{0}`t{1}`t{2}`t{3}`t{4}`t{5}" -f `
         $key,
         $it.When.ToString('yyyy-MM-dd HH:mm:ss'),
         $it.Rating,
         (($it.Ids | Sort-Object) -join ","),
-        $it.Sketch))
+        $it.Sketch,
+        $it.Mounts))
 }
 Set-Content -Path $cacheFile -Value ($cacheLines -join "`n") -Encoding utf8
 
