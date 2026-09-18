@@ -469,9 +469,9 @@ $talentOfSpell = @{}
 # on arenaplus.live, measured there on real characters 2026-09-18 -- keep the
 # two in step. Gathering professions and Alchemy leave none.
 #
-# The TBC ring enchants are the four seen on TBC rings in the shipped files
-# (2026-09-17); every other mark is a Mists thing and never turns up there.
-$markRingEnchant       = 4359, 4360, 4361, 4807, 2928, 2929, 2930, 2931   # enchanting
+# Mists only: TBC's one mark is a ring enchant, and the addon draws no
+# professions for a TBC character anyway, so that pass writes p={}.
+$markRingEnchant       = 4359, 4360, 4361, 4807                           # enchanting
 $markCloakEmbroidery   = 4892, 4893, 4894, 4118                           # tailoring
 $markFurLining         = 4875, 4877, 4878                                 # leatherworking, on the wrists
 $markShoulderInscribed = 4913, 4914, 4915                                 # inscription's secret ones
@@ -1010,17 +1010,19 @@ foreach ($key in $wanted.Keys) {
         # 550 and Tailoring 550.
         # The belt buckle is a BONUS_SOCKETS too, and anybody can use one.
         $slotName = ($item.slot.type -replace '[^A-Za-z0-9_]','').ToLower()
-        if ($tinker -gt 0) { $professions['engineering'] = $true }
-        if ($markEngineerHead -contains $item.item.id) { $professions['engineering'] = $true }
-        foreach ($g in $gemsBySlot.Values) {
-            if ($markCogwheel -contains $g) { $professions['engineering'] = $true }
-            if ($markSerpentsEye -contains $g) { $professions['jewelcrafting'] = $true }
+        if ($Version -eq 'mop') {
+            if ($tinker -gt 0) { $professions['engineering'] = $true }
+            if ($markEngineerHead -contains $item.item.id) { $professions['engineering'] = $true }
+            foreach ($g in $gemsBySlot.Values) {
+                if ($markCogwheel -contains $g) { $professions['engineering'] = $true }
+                if ($markSerpentsEye -contains $g) { $professions['jewelcrafting'] = $true }
+            }
+            if ($slotName -like 'finger_*' -and $markRingEnchant -contains $enchant) { $professions['enchanting'] = $true }
+            if ($slotName -eq 'back' -and ($markCloakEmbroidery -contains $enchant -or $enchantSays -match 'Embroidery')) { $professions['tailoring'] = $true }
+            if ($slotName -eq 'wrist' -and $markFurLining -contains $enchant) { $professions['leatherworking'] = $true }
+            if ($slotName -eq 'shoulder' -and $markShoulderInscribed -contains $enchant) { $professions['inscription'] = $true }
+            if ($slotName -eq 'wrist' -and $bsWristSocket -and $gemsBySlot.Count -gt 0) { $professions['blacksmithing'] = $true }
         }
-        if ($slotName -like 'finger_*' -and $markRingEnchant -contains $enchant) { $professions['enchanting'] = $true }
-        if ($slotName -eq 'back' -and ($markCloakEmbroidery -contains $enchant -or $enchantSays -match 'Embroidery')) { $professions['tailoring'] = $true }
-        if ($slotName -eq 'wrist' -and $markFurLining -contains $enchant) { $professions['leatherworking'] = $true }
-        if ($slotName -eq 'shoulder' -and $markShoulderInscribed -contains $enchant) { $professions['inscription'] = $true }
-        if ($slotName -eq 'wrist' -and $bsWristSocket -and $gemsBySlot.Count -gt 0) { $professions['blacksmithing'] = $true }
 
         $bits = New-Object System.Collections.Generic.List[string]
         $null = $bits.Add([string]$item.item.id)
