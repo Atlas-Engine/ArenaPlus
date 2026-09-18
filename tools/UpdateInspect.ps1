@@ -464,6 +464,22 @@ $talentNames = New-Object 'System.Collections.Generic.Dictionary[string,string]'
 $talentMax = @{}
 $talentOfSpell = @{}
 
+# What only a profession can put on its own character's gear, by the ids
+# Blizzard's equipment document carries. The same sets as armory.py's MARK_*
+# on arenaplus.live, measured there on real characters 2026-09-18 -- keep the
+# two in step. Gathering professions and Alchemy leave none.
+#
+# The TBC ring enchants are the four seen on TBC rings in the shipped files
+# (2026-09-17); every other mark is a Mists thing and never turns up there.
+$markRingEnchant       = 4359, 4360, 4361, 4807, 2928, 2929, 2930, 2931   # enchanting
+$markCloakEmbroidery   = 4892, 4893, 4894, 4118                           # tailoring
+$markFurLining         = 4875, 4877, 4878                                 # leatherworking, on the wrists
+$markShoulderInscribed = 4913, 4914, 4915                                 # inscription's secret ones
+$markCogwheel          = 77541, 77543, 77545, 77547                       # engineering's own gems
+$markEngineerHead      = 77533, 77534, 77536                              # engineering-only helms
+$markSerpentsEye       = 83141, 83142, 83143, 83146, 83148, 83149, 83150, 83151, 83152   # jewelcrafting
+$markBsWristSocket     = 3717                                             # blacksmithing, with a gem in it
+
 $records = New-Object System.Collections.Generic.List[string]
 
 # ---------------------------------------------------------------- carry over
@@ -899,6 +915,7 @@ foreach ($key in $wanted.Keys) {
     #   (blank) no src the socket bonus, which the client works out itself
     #   BONUS_SOCKETS  a belt buckle, or a blacksmith's extra socket
     #   ON_USE_SPELL   a tinker, which only an engineer can fit
+    #   TEMPORARY      an oil or an imbue, never a gem even if it names an item
     $gear = New-Object System.Collections.Generic.List[string]
     $tinkers = New-Object System.Collections.Generic.List[string]
     $professions = @{}
@@ -909,7 +926,7 @@ foreach ($key in $wanted.Keys) {
         $enchant = 0
         $enchantSays = ""
         $tinker = 0
-        $bonusSocket = $false
+        $bsWristSocket = $false
         $gemsBySlot = @{}
 
         foreach ($e in $item.enchantments) {
@@ -958,8 +975,8 @@ foreach ($key in $wanted.Keys) {
                     $enchantText[[string]$tinker] = $e.display_string
                 }
             } elseif ($type -eq 'BONUS_SOCKETS') {
-                $bonusSocket = $true
-            } elseif ($e.source_item.id) {
+                if ($e.enchantment_id -eq $markBsWristSocket) { $bsWristSocket = $true }
+            } elseif ($type -ne 'TEMPORARY' -and $e.source_item.id) {
                 $gemsBySlot[[int]$e.enchantment_slot.id] = $e.source_item.id
             }
         }
@@ -971,20 +988,39 @@ foreach ($key in $wanted.Keys) {
         }
 
         # Professions, read off the gear because the API has no professions
-        # endpoint for classic -- it 404s. Only what the gear proves:
-        #   a tinker            only an engineer can fit one
-        #   an enchanted ring   only an enchanter can enchant their own
-        #   an extra socket on
-        #   wrist or hands      a blacksmith's, unlike a belt buckle, which
-        #                       anybody can use and so proves nothing
-        #   an embroidered
-        #   cloak               a tailor's, and the embroideries name themselves
-        #                       in the display string
+        # endpoint for classic -- it 404s. Only what the gear proves (the
+        # $mark* sets above):
+        #   a tinker, a cogwheel
+        #   or an engineer's helm   engineering
+        #   a ring enchant          enchanting -- only an enchanter can do their own
+        #   an embroidered cloak    tailoring; the embroideries also name
+        #                           themselves in the display string
+        #   fur lining on wrists    leatherworking
+        #   a secret inscription    inscription
+        #   a Serpent's Eye         jewelcrafting
+        #   the wrist socket, with
+        #   a gem on that wrist     blacksmithing
+        #
+        # The Blacksmith's rule used to be any extra socket on wrist or hands,
+        # and that was wrong twice over. An empty socket proves nothing -- it is
+        # still on the item after the smith who added it has dropped the trade
+        # -- and the hands one (3723) is not decisive either. Gcdsk-Raden wears
+        # empty Blacksmith sockets and was shipped as a Blacksmith with three
+        # professions, while the character's own statistics say Engineering
+        # 550 and Tailoring 550.
+        # The belt buckle is a BONUS_SOCKETS too, and anybody can use one.
         $slotName = ($item.slot.type -replace '[^A-Za-z0-9_]','').ToLower()
         if ($tinker -gt 0) { $professions['engineering'] = $true }
-        if ($enchant -gt 0 -and $slotName -like 'finger_*') { $professions['enchanting'] = $true }
-        if ($bonusSocket -and ($slotName -eq 'wrist' -or $slotName -eq 'hands')) { $professions['blacksmithing'] = $true }
-        if ($slotName -eq 'back' -and $enchantSays -match 'Embroidery') { $professions['tailoring'] = $true }
+        if ($markEngineerHead -contains $item.item.id) { $professions['engineering'] = $true }
+        foreach ($g in $gemsBySlot.Values) {
+            if ($markCogwheel -contains $g) { $professions['engineering'] = $true }
+            if ($markSerpentsEye -contains $g) { $professions['jewelcrafting'] = $true }
+        }
+        if ($slotName -like 'finger_*' -and $markRingEnchant -contains $enchant) { $professions['enchanting'] = $true }
+        if ($slotName -eq 'back' -and ($markCloakEmbroidery -contains $enchant -or $enchantSays -match 'Embroidery')) { $professions['tailoring'] = $true }
+        if ($slotName -eq 'wrist' -and $markFurLining -contains $enchant) { $professions['leatherworking'] = $true }
+        if ($slotName -eq 'shoulder' -and $markShoulderInscribed -contains $enchant) { $professions['inscription'] = $true }
+        if ($slotName -eq 'wrist' -and $bsWristSocket -and $gemsBySlot.Count -gt 0) { $professions['blacksmithing'] = $true }
 
         $bits = New-Object System.Collections.Generic.List[string]
         $null = $bits.Add([string]$item.item.id)

@@ -126,6 +126,9 @@ local PROFESSION_ICONS = {
 	enchanting     = "Interface/Icons/Trade_Engraving",
 	blacksmithing  = "Interface/Icons/Trade_BlackSmithing",
 	tailoring      = "Interface/Icons/Trade_Tailoring",
+	leatherworking = "Interface/Icons/Trade_LeatherWorking",
+	inscription    = "Interface/Icons/INV_Inscription_Tradeskill01",
+	jewelcrafting  = "Interface/Icons/INV_Misc_Gem_01",
 }
 
 -- Blizzard's own paper doll order, so the panel reads the way the character
