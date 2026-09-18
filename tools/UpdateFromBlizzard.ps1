@@ -1150,7 +1150,7 @@ if ($Live) {
         $boardGames = if ($askedNow.Contains($key) -or $boardWas -lt 0) { $boardNow[$key] } else { $boardWas }
         $null = $keep.Add(("{0}`t-1`t0`t0`t{1}`t{2}" -f $key, $missed[$key], $boardGames))
     }
-    Set-Content -Path $liveFile -Value ($keep -join "`n") -Encoding utf8
+    Write-DataFile -Path $liveFile -Value ($keep -join "`n")
 
     Write-Host ("Live pass: {0} new, {1} unchanged, {2} unreadable, {3} answering about an older season." -f `
         $fresh, $unchanged, $gone, $staleSeason)
@@ -1680,7 +1680,9 @@ $null = $bestLines.Add("# season = $season")
 foreach ($key in ($best.Keys | Sort-Object)) {
     $null = $bestLines.Add(("{0}`t{1}" -f $key, $best[$key]))
 }
-Set-Content -Path $bestFile -Value ($bestLines -join "`n") -Encoding utf8
+# A temp file and a move, like the tables: Set-Content truncates first, and a
+# pass killed in the middle lost a season of peaks with it.
+Write-DataFile -Path $bestFile -Value ($bestLines -join "`n")
 
 if ($refused -gt 0) {
     Write-Host ("Kept the ladder's own figure for {0} rows whose character reported fewer games than the ladder." -f $refused)
@@ -1690,7 +1692,7 @@ if ($refused -gt 0) {
 # measured against. Written after the file, so a run that fails partway leaves
 # the old baseline intact rather than resetting everybody's change to zero.
 if ($baselineAge -ge 7) {
-    Set-Content -Path $baselineFile -Value ($nextBaseline -join "`n") -Encoding utf8
+    Write-DataFile -Path $baselineFile -Value ($nextBaseline -join "`n")
     Write-Host ("Baseline replaced: the change columns now measure from today.")
 }
 
@@ -1712,7 +1714,7 @@ if ($Live) {
     if ($activity.Count -gt 0 -and -not $trackerFresh) {
         Add-Content -Path $activityFile -Value ($activity -join "`n") -Encoding utf8
     }
-    Set-Content -Path $lastFile -Value ($nextPoll -join "`n") -Encoding utf8
+    Write-DataFile -Path $lastFile -Value ($nextPoll -join "`n")
     Write-Log ("  activity: {0} character(s) played since the last poll" -f $activity.Count)
 }
 
