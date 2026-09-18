@@ -657,8 +657,12 @@ if ($Live) {
     # What the last pass learned, so unchanged characters cost a 304 rather than
     # a full response -- and so a 304 still has a rating to keep.
     $cache = New-KeyTable
+    $cacheSeason = 0
     if (Test-Path $liveFile) {
         foreach ($line in Get-Content $liveFile) {
+            # The season the figures belong to, a line of its own (tracker.py
+            # writes it third, and so does this pass below).
+            if ($line -match '^# season=(\d+)') { $cacheSeason = [int]$Matches[1]; continue }
             # Tabs, not pipes: the key is "bracket|name|realm", and splitting on
             # the pipe fed the rating field a realm name.
             $bits = $line -split "`t"
@@ -670,6 +674,16 @@ if ($Live) {
                 $cache[$bits[0]] = @{ Rating = [int]$bits[1]; Won = [int]$bits[2]; Lost = [int]$bits[3]; Written = $bits[4]; Board = $cachedBoard; Miss = ([int]$bits[1] -lt 0) }
             }
         }
+    }
+
+    # Last season's figures are not this season's. At a turnover the cache
+    # still held everyone's final rating and record, and with more games than
+    # the new board they won the merge below, for weeks: the ladder, the addon
+    # and the site showed last season. A file with no season line is from
+    # before it existed and is taken as it is.
+    if ($cacheSeason -and $cacheSeason -ne $season) {
+        Write-Log ("{0}: LiveCache is from season {1}, this is season {2}; not used." -f $Region.ToUpper(), $cacheSeason, $season)
+        $cache = New-KeyTable
     }
 
     # Characters never readable, remembered as misses: key -> when, as HTTP date.
@@ -1126,6 +1140,7 @@ if ($Live) {
     $keep = New-Object System.Collections.Generic.List[string]
     $null = $keep.Add("# What each character last said about themselves, so the next pass can ask")
     $null = $keep.Add("# conditionally. Not shipped; safe to delete, at the cost of one cold pass.")
+    $null = $keep.Add("# season=$season")
     foreach ($key in ($liveRatings.Keys | Sort-Object)) {
         $it = $liveRatings[$key]
         # The board's games as of the last time they were asked. Someone skipped
