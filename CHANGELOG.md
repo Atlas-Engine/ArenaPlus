@@ -1,5 +1,10 @@
 ﻿# Changelog
 
+## 1.7d
+
+- Fixed the ladder window's heading row coming out blank: History, Home, the bracket buttons and the line beside the title are back. It happened wherever the Mists/Anniversary picker is not drawn, which is now every install, and in the My alts view.
+- The Activity button greys out while you are in the activity view, instead of lighting up gold.
+
 ## 1.7c
 
 - Much lighter on memory: ArenaPlus Data drops from about 47 MB to about 11 MB on Mists. Each game now loads only its own ladder, and ladder rows are stored more compactly. Update ArenaPlus Data as well to get the full saving.
@@ -152,6 +157,7 @@
 - Fixed characters with the same name on different realms showing each other's rank and rating.
 - Press Enter in the ladder search to step between characters sharing a name.
 - Changing page in the ladder now returns to the top of the list.
+
 
 
 

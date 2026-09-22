@@ -1,3 +1,2 @@
-﻿- Much lighter on memory: ArenaPlus Data drops from about 47 MB to about 11 MB on Mists. Each game now loads only its own ladder, and ladder rows are stored more compactly. Update ArenaPlus Data as well to get the full saving.
-- The ladder window shows your own game's ladder only; the Mists and Anniversary switch is gone.
-- The inspect window shows Leatherworking, Inscription and Jewelcrafting, and only lists a profession when the character's gear proves it.
+﻿- Fixed the ladder window's heading row coming out blank: History, Home, the bracket buttons and the line beside the title are back. It happened wherever the Mists/Anniversary picker is not drawn, which is now every install, and in the My alts view.
+- The Activity button greys out while you are in the activity view, instead of lighting up gold.
