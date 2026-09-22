@@ -1828,6 +1828,24 @@ local function CreateWindow()
 
 		frame.gameButton:SetShown(offer and true or false)
 
+		-- The row that hangs off the picker, anchored to the heading instead
+		-- while there is no picker to hang off.
+		--
+		-- The picker is only given a width where it has a label to measure, and
+		-- a frame with one anchor and no width has no right edge: History,
+		-- which is pinned to that edge, cannot be placed, and nor can Home, the
+		-- brackets or the subtitle behind them. The whole left of the heading
+		-- came out blank. It took the data addon splitting per game on
+		-- 2026-09-22 to show up -- before that every install had both games and
+		-- the picker was all but always drawn, and the alts view, which hides
+		-- it too, was reached from a window that had already measured it.
+		frame.swapButton:ClearAllPoints()
+		if offer then
+			frame.swapButton:SetPoint("LEFT",frame.gameButton,"RIGHT",12,0)
+		else
+			frame.swapButton:SetPoint("TOPLEFT",frame,"TOPLEFT",BRACKET_X,HEADER_TOP)
+		end
+
 		-- Re-anchored rather than left with a gap: a hidden frame keeps its
 		-- place, so a subtitle pinned to the picker would still sit a picker's
 		-- width away from the title with nothing in between.
@@ -2477,11 +2495,6 @@ local function CreateWindow()
 		-- it from activityWindow rather than leaving it looking unpressed
 		-- over a view that is still open.
 		--
-		-- Disable() and a gold label, which is exactly what the 2v2 and 3v3
-		-- buttons do for the bracket in force -- see ns.BuildBracketPicker.
-		-- Greying the label alone was a quieter version of the same idea and
-		-- did not match anything else in the window.
-		--
 		-- Disabled means it cannot be clicked back off, the same as a bracket
 		-- button. Home is the way out, which is what Home is for and what it
 		-- already does.
@@ -2491,11 +2504,15 @@ local function CreateWindow()
 			frame.activityButton:Enable()
 		end
 
-		local label=frame.activityButton.GetFontString and frame.activityButton:GetFontString()
-		if label then
-			if activityWindow then label:SetTextColor(1,0.82,0)
-			else label:SetTextColor(0.75,0.75,0.75) end
-		end
+		-- Greyed out while the view is up, and the theme does it: paint in
+		-- Theme.lua writes a disabled button's label faint and an enabled
+		-- one's muted, off the same OnDisable and OnEnable hooks as the pill
+		-- behind it.
+		--
+		-- Nothing written over it here any more. A gold label was, which is
+		-- the mark the bracket buttons use for the bracket in force, so the
+		-- one button in the window that could not be clicked was also the one
+		-- that looked lit.
 
 		-- Shown with the view it belongs to. Here rather than in Refresh
 		-- because this runs on every redraw too and the two would otherwise
