@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+## 1.7c
+
+- Much lighter on memory: ArenaPlus Data drops from about 47 MB to about 11 MB on Mists. Each game now loads only its own ladder, and ladder rows are stored more compactly. Update ArenaPlus Data as well to get the full saving.
+- The ladder window shows your own game's ladder only; the Mists and Anniversary switch is gone.
+- The inspect window shows Leatherworking, Inscription and Jewelcrafting, and only lists a profession when the character's gear proves it.
+
 ## 1.7b
 
 - New look: the ladder, match history, inspect and auction windows now match arenaplus.live, with its dark rounded cards, colours and typefaces, pill buttons with the active one in gold, and a proper search field.
@@ -146,6 +152,7 @@
 - Fixed characters with the same name on different realms showing each other's rank and rating.
 - Press Enter in the ladder search to step between characters sharing a name.
 - Changing page in the ladder now returns to the top of the list.
+
 
 
 

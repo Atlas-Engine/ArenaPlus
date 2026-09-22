@@ -1,5 +1,3 @@
-﻿- New look: the ladder, match history, inspect and auction windows now match arenaplus.live, with its dark rounded cards, colours and typefaces, pill buttons with the active one in gold, and a proper search field.
-- Match history's win and loss marks use the site's green and red.
-- The ladder keeps everyone with 20 or more games this season, not only players above the Challenger cutoff.
-- The inspect window shows a season's Gladiator title alongside the rank-one titles.
-- Specs on the ladder keep up with active players daily; characters who have not played in a month are refreshed once a month.
+﻿- Much lighter on memory: ArenaPlus Data drops from about 47 MB to about 11 MB on Mists. Each game now loads only its own ladder, and ladder rows are stored more compactly. Update ArenaPlus Data as well to get the full saving.
+- The ladder window shows your own game's ladder only; the Mists and Anniversary switch is gone.
+- The inspect window shows Leatherworking, Inscription and Jewelcrafting, and only lists a profession when the character's gear proves it.
