@@ -21,6 +21,79 @@ if ArenaPlusData then
 	end
 end
 
+-- Every field a ladder row carries, and where it sits once packed.
+--
+-- The first ten come from the data file; the rest are written onto a row later,
+-- by AttachSpec, and have a place kept for them so writing one does not give
+-- the row a hash part after all.
+local LADDER_FIELDS = {
+	"rank", "name", "realm", "rating", "won", "lost", "faction", "mr", "dr", "dk",
+	"class", "spec", "specSeen", "race", "gender", "hidden",
+}
+ns.LADDER_FIELDS = LADDER_FIELDS
+
+local LADDER_SLOT = {}
+for at, key in ipairs(LADDER_FIELDS) do LADDER_SLOT[key] = at end
+
+-- Reads and writes by name, so a packed row answers entry.rating exactly as
+-- the table it replaced did and none of the readers had to change. A name not
+-- listed above falls through to an ordinary key.
+local PACKED_ROW = {
+	__index = function(row, key)
+		local at = LADDER_SLOT[key]
+		if at then return rawget(row, at) end
+	end,
+	__newindex = function(row, key, value)
+		rawset(row, LADDER_SLOT[key] or key, value)
+	end,
+}
+
+-- A copy of a row with its fields by name, for a caller that wants its own
+-- table to edit. pairs() cannot do this on a packed row: it walks the slots and
+-- would hand back [1], [2] and so on.
+function ns.CopyLadderRow(entry)
+	local copy = {}
+	for _, key in ipairs(LADDER_FIELDS) do copy[key] = entry[key] end
+	return copy
+end
+
+-- The ladder rows, packed into lists as they arrive.
+--
+-- As shipped, each row is a table of named fields, and a table with seven to
+-- ten names costs about 700 bytes in the client. Measured on the 2026-09-21
+-- data, the four ladders came to 30 of the data addon's 47 MB, 10 MB of it on
+-- each Anniversary ladder alone. The same row as a list is about a third of
+-- that.
+--
+-- Packed here rather than written that way. The data files are also read as
+-- text -- by the other passes in tools\ and by the site's ingest -- and every
+-- one of those matches rows by rank=, name= and realm=. The named tables that
+-- are replaced here are ordinary garbage and go at the next collection.
+--
+-- In place, inside the lists the data addon left, before anything has had the
+-- chance to hold onto a row: this runs as Core.lua loads, and the name index
+-- and ns.LEADERBOARD are both built later.
+--
+-- One constructor naming the ten shipped fields, not a loop: a constructor
+-- sizes the list once at exactly ten, where filling an empty table grows it
+-- in steps and leaves it at sixteen.
+if type(ns.LEADERBOARD_BY_REGION) == "table" then
+	for _, board in pairs(ns.LEADERBOARD_BY_REGION) do
+		for bracket = 1, 4 do
+			local rows = type(board) == "table" and board[bracket]
+			if type(rows) == "table" then
+				for i, e in ipairs(rows) do
+					if getmetatable(e) == nil then
+						rows[i] = setmetatable({
+							e.rank, e.name, e.realm, e.rating, e.won, e.lost, e.faction, e.mr, e.dr, e.dk,
+						}, PACKED_ROW)
+					end
+				end
+			end
+		end
+	end
+end
+
 local CURRENT_DB_VERSION = 1
 
 -- What the four brackets are called, everywhere.

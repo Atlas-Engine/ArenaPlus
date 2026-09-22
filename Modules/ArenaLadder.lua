@@ -294,8 +294,7 @@ local function ActivityRows(bracket)
 			-- A copy. The numbers below describe the window rather than the
 			-- season, and the ladder's own row has to go on saying what it
 			-- says -- it is the same table every other view is drawing from.
-			local row={}
-			for key,value in pairs(entry) do row[key]=value end
+			local row=ns.CopyLadderRow(entry)
 
 			-- Won, lost and rating moved, all three for the window. The
 			-- weekly rank movement is dropped rather than left standing: a row
@@ -820,8 +819,7 @@ local function AltRows(bracket)
 		if listed then
 			-- Copied rather than used directly: the rank is about to be
 			-- rewritten, and the ladder's own table must not be edited.
-			row={}
-			for key,value in pairs(listed) do row[key]=value end
+			row=ns.CopyLadderRow(listed)
 		else
 			-- Not on the ladder, which for an alt is the normal case: the
 			-- leaderboard stops at the challenger cutoff and most alts are

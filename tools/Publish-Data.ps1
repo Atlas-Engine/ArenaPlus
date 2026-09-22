@@ -221,10 +221,15 @@ try {
 
     # The TOC's version is what the game shows in the AddOns list, so it should
     # say the same thing as the tag.
-    $tocPath = Join-Path $Repo "ArenaPlus_Data.toc"
-    $toc = Get-Content $tocPath -Raw
-    $toc = [regex]::Replace($toc, '(?m)^## Version:.*$', "## Version: $version")
-    if (-not $WhatIf) { Set-Content -Path $tocPath -Value $toc -Encoding utf8 -NoNewline }
+    #
+    # Every .toc, not just ArenaPlus_Data.toc: each game reads its own
+    # (ArenaPlus_Data_Mists.toc, ArenaPlus_Data_TBC.toc), and the one it reads
+    # is the version it shows.
+    foreach ($tocFile in (Get-ChildItem -Path $Repo -Filter *.toc -File)) {
+        $toc = Get-Content $tocFile.FullName -Raw
+        $toc = [regex]::Replace($toc, '(?m)^## Version:.*$', "## Version: $version")
+        if (-not $WhatIf) { Set-Content -Path $tocFile.FullName -Value $toc -Encoding utf8 -NoNewline }
+    }
 
     if ($WhatIf) {
         Say ""
