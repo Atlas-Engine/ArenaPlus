@@ -330,10 +330,28 @@ try {
     # terminating NativeCommandError -- a failed push would die here
     # instead of reaching the check below. Relaxed for the one call and
     # put straight back.
-    $was = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    $said = & git push -q origin HEAD "refs/tags/$version" @refs 2>&1
-    $ErrorActionPreference = $was
+    #
+    # Three tries, a few seconds apart, because the far end is a service and
+    # not a certainty: on 2026-09-23 at 10:02 GitHub answered one push with
+    # "Permission denied (publickey)" -- the fetch in that same run, over the
+    # same key, had just succeeded -- and the release was skipped for the hour.
+    # Once in every push this log records, and the hour after it went through
+    # untouched, so it is worth another try rather than an alert.
+    #
+    # Pushing the same refs again is harmless where the first try did land
+    # something: git says "Everything up-to-date" and exits 0.
+    $said = $null
+    for ($try = 1; $try -le 3; $try++) {
+        $was = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $said = & git push -q origin HEAD "refs/tags/$version" @refs 2>&1
+        $ErrorActionPreference = $was
+        if ($LASTEXITCODE -eq 0) { break }
+        if ($try -lt 3) {
+            Say ("  git refused the push; trying again in {0}s." -f (5 * $try))
+            Start-Sleep -Seconds (5 * $try)
+        }
+    }
 
     # Checked rather than assumed. -q means a failure here says nothing at all,
     # and saying nothing is how the prune bug lasted three days.
@@ -348,6 +366,20 @@ try {
             $text = "$line".Trim()
             if ($text) { Say "  git: $text" }
         }
+
+        # The tag this run made goes with it, where it never reached origin.
+        #
+        # It names a commit that was never published, nothing will ever push it
+        # -- the next run tags its own version -- and the prune below reads the
+        # tag list from ORIGIN, so a local-only one is invisible to the thing
+        # meant to clear it. 2026.09.23.1001 is still sitting on the server for
+        # exactly that reason.
+        #
+        # Only after asking origin, because a push can fail on the tag
+        # deletions with the tag itself already landed.
+        $landed = @(git ls-remote --tags origin "refs/tags/$version")
+        if (-not $landed) { git tag -d $version | Out-Null }
+
         throw ("git refused the push of $version" +
                $(if ($drop.Count) { " and {0} tag deletion(s)" -f $drop.Count } else { "" }) + ".")
     }
