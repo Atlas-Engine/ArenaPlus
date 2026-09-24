@@ -248,7 +248,12 @@ function ns.ObservedSpecs()
 	observed={}
 	local at={}
 
-	for _,store in pairs((module.db and module.db.chars) or {}) do
+	for charKey,store in pairs((module.db and module.db.chars) or {}) do
+		-- The recording character's own realm, for the players the client
+		-- named without one: it leaves the realm off everybody on your own,
+		-- which is every teammate and half the opponents, and without it none
+		-- of them ever got a key here.
+		local ownRealm=charKey:match("^[^%-]+%-(.+)$")
 		for _,list in pairs(store.matches or {}) do
 			for _,match in ipairs(list) do
 				local when=match.at or 0
@@ -258,7 +263,8 @@ function ns.ObservedSpecs()
 						-- Character names cannot contain a hyphen, so the
 						-- first one separates the realm -- which can.
 						local name,realm=(player.n or ""):match("^([^-]+)-(.+)$")
-						local key=spec and name and ns.SpecKey and ns.SpecKey(name,realm)
+						if not name and player.n and player.n~="" then name,realm=player.n,ownRealm end
+						local key=spec and name and realm and ns.SpecKey and ns.SpecKey(name,realm)
 
 						-- The most recent sighting wins, so somebody who
 						-- respecced reads as what they are now.
@@ -283,33 +289,6 @@ local function History(bracket)
 	return list
 end
 
--- The bracket this character played most recently, or nil having played none.
---
--- This character's own record rather than the account's: which bracket to open
--- on is a question about the character in front of you, and an alt that has
--- only ever played 2v2 should not be shown 3v3 because the main was there last
--- night.
---
--- The newest match in each list decides, since the lists are kept in the order
--- they were recorded. A tie cannot really happen -- two matches ending in the
--- same second in different brackets -- but the comparison is written so the
--- lower bracket wins rather than left to the order pairs() happens to walk.
-function ns.LastPlayedBracket()
-	local best,newest
-
-	for bracket=1,4 do
-		local list=History(bracket)
-		local last=list[#list]
-		local at=last and tonumber(last.at)
-
-		if at and (not newest or at>newest) then
-			best,newest=bracket,at
-		end
-	end
-
-	return best
-end
-
 -- The season record is the authority on how many matches exist. Holding more
 -- than that means the character was deleted and restored -- the rating and the
 -- record start again, and the older rows describe a life that no longer counts.
@@ -323,7 +302,10 @@ local function Trimmed(bracket)
 	local list=History(bracket)
 
 	local played=Played(bracket)
-	if played then
+	-- Zero is not an answer: the client reports zero games until the rated
+	-- stats arrive after login, and a window opened before then trimmed the
+	-- whole bracket away.
+	if played and played>0 then
 		while #list>played do table.remove(list,1) end
 	end
 
@@ -350,13 +332,6 @@ function ns.LastPlayedBracket()
 	end
 
 	return best
-end
-
--- The matches themselves, for anything that wants to reason about them rather
--- than draw them -- the MMR estimate reads these instead of keeping a second,
--- smaller list of its own.
-function ns.ArenaMatches(bracket)
-	return Trimmed(bracket)
 end
 
 ----------------------------------------------------------------
@@ -445,8 +420,6 @@ local function SpecIndex()
 	return nil
 end
 
-ns.SpecIndex=SpecIndex
-
 local function OwnSpecID(index)
 	if not HasSpecs() then return nil end
 	index=index or SpecIndex()
@@ -473,7 +446,7 @@ end
 
 ns.OwnSpecID=OwnSpecID
 
-local function Sample()
+local function Sample(request)
 	if not InArena() then return end
 	current=current or { mine={}, theirs={} }
 
@@ -587,7 +560,12 @@ local function Sample()
 	if (current.deaths or 0)==0 and not current.decided then return end
 
 	-- The numbers only arrive after being asked for.
-	if RequestBattlefieldScoreData then RequestBattlefieldScoreData() end
+	--
+	-- Not when this is the answer to an earlier ask. UPDATE_BATTLEFIELD_SCORE
+	-- is what the server sends back for RequestBattlefieldScoreData, and
+	-- reading it here used to ask again, so once anybody had died the two
+	-- chased each other round for the rest of the match.
+	if request~=false and RequestBattlefieldScoreData then RequestBattlefieldScoreData() end
 
 	if GetNumBattlefieldScores and GetBattlefieldScore then
 		for index=1,(GetNumBattlefieldScores() or 0) do
@@ -819,9 +797,14 @@ end
 local function CloseOpenCC()
 	if not (current and current.ccOpen) then return end
 
+	-- Banked directly rather than through NoteCC with no spell name: that
+	-- re-asked whether the id was crowd control, and one that had only been
+	-- recognised by its name -- the whole reason the name tables exist --
+	-- was answered no and never credited.
 	for key in pairs(current.ccOpen) do
-		local destGUID,spellID=key:match("^(.+)|(%d+)$")
-		NoteCC(current.ccBy and current.ccBy[key],destGUID,tonumber(spellID),nil,false)
+		local destGUID=key:match("^(.+)|%d+$")
+		local target=destGUID and PlayerByGUID(destGUID)
+		if target then Bank(key,target) end
 	end
 
 	current.ccOpen,current.ccBy=nil,nil
@@ -831,7 +814,7 @@ end
 -- damage done and healing done and nothing about what landed on you. Summed
 -- here instead, so soaking a match's pressure and living through it can count
 -- for something.
-local function NoteDamage(destGUID,amount)
+local function NoteDamage(sourceGUID,destGUID,amount)
 	amount=tonumber(amount) or 0
 	if amount<=0 then return end
 
@@ -871,20 +854,24 @@ local function OnCombatLog()
 	if not (current and InArena()) then return end
 	if not CombatLogGetCurrentEventInfo then return end
 
-	local _,event,_,sourceGUID,_,_,_,destGUID,_,_,_,spellID,spellName=CombatLogGetCurrentEventInfo()
+	-- The fifteenth value is a spell's damage; a swing carries its amount in
+	-- the twelfth, where a spell carries its id.
+	local _,event,_,sourceGUID,_,_,_,destGUID,_,_,_,spellID,spellName,_,spellAmount=CombatLogGetCurrentEventInfo()
 
-	-- Ahead of the damage handling below, which returns early.
-	NoteSpec(sourceGUID,spellID,spellName)
+	-- Ahead of the damage handling below, which returns early -- and only for
+	-- events that carry a spell. A swing puts its damage where the id goes,
+	-- and a white hit for 1079 read as Rip and named the attacker Feral.
+	if event:sub(1,6)=="SPELL_" or event:sub(1,6)=="RANGE_" then
+		NoteSpec(sourceGUID,spellID,spellName)
+	end
 
 	if event=="SWING_DAMAGE" then
-		-- A swing carries its amount where a spell carries its id, so the two
-		-- are read from different places in the same list.
-		return NoteDamage(destGUID,select(12,CombatLogGetCurrentEventInfo()))
+		return NoteDamage(sourceGUID,destGUID,spellID)
 	end
 
 	if event=="SPELL_DAMAGE" or event=="SPELL_PERIODIC_DAMAGE"
 		or event=="RANGE_DAMAGE" or event=="SPELL_BUILDING_DAMAGE" then
-		return NoteDamage(destGUID,select(15,CombatLogGetCurrentEventInfo()))
+		return NoteDamage(sourceGUID,destGUID,spellAmount)
 	end
 
 	-- The cast, before the death it causes.
@@ -1142,12 +1129,12 @@ local function SelectedBracket()
 	-- chosen on yet -- see the pre-selection in PvPDefaultPage -- and the lists
 	-- follow the light rather than the record behind it. Once a row is clicked
 	-- the two agree again and this stops answering.
-	local pending=ns.PendingBracket and ns.PendingBracket()
-	if pending then return pending end
+	local lit=ns.PendingBracket and ns.PendingBracket()
+	if lit then return lit end
 
 	local frame=ConquestQueueFrame
-	local button=frame and frame.selectedButton
-	return (button and button.id) or 1
+	local selected=frame and frame.selectedButton
+	return (selected and selected.id) or 1
 end
 
 -- Shared, so the ladder window lists whichever bracket the page is on rather
@@ -1356,12 +1343,11 @@ end
 local function SpecIcon(player)
 	local spec=tonumber(player.spec)
 	if not spec then return nil end
-
-	if ns.SPEC_ICON and ns.SPEC_ICON[spec] then return ns.SPEC_ICON[spec] end
-	if not (HasSpecs() and GetSpecializationInfoByID) then return nil end
-
-	local _,_,_,icon=GetSpecializationInfoByID(spec)
-	return icon
+	-- The one place an icon is chosen for a spec id. This kept its own chain
+	-- -- the eight overrides, then the Mists API -- and on Anniversary, where
+	-- that API does not exist, twenty-six specs drew nothing here while the
+	-- ladder beside it drew the shipped art.
+	return ns.SpecIconForID and ns.SpecIconForID(spec)
 end
 
 local function DetailLine(detail,index)
@@ -3220,19 +3206,24 @@ watcher:SetScript("OnEvent",function(self,event,name)
 	-- those rows with nobody in them. Past the first half minute in an arena it
 	-- is left alone, so reloading mid-match does not throw away the match you
 	-- are standing in.
-	local running=GetBattlefieldInstanceRunTime and GetBattlefieldInstanceRunTime() or 0
+	-- Only on zoning. The same handler answers ARENA_OPPONENT_UPDATE and the
+	-- scoreboard, and before this gate those cleared the match too whenever
+	-- they arrived in its first half minute.
+	if event=="PLAYER_ENTERING_WORLD" then
+		local running=GetBattlefieldInstanceRunTime and GetBattlefieldInstanceRunTime() or 0
 
-	if not InArena() then
-		if Gathered(current) then
-			pending={ match=current, at=time() }
+		if not InArena() then
+			if Gathered(current) then
+				pending={ match=current, at=time() }
+			end
+			current=nil
+		elseif running<30000 then
+			-- A fresh arena. Whatever was parked belongs to a match that is over
+			-- and cannot be claimed by this one -- which is the rule that stopped
+			-- two games being recorded as one.
+			current=nil
+			pending=nil
 		end
-		current=nil
-	elseif running<30000 then
-		-- A fresh arena. Whatever was parked belongs to a match that is over
-		-- and cannot be claimed by this one -- which is the rule that stopped
-		-- two games being recorded as one.
-		current=nil
-		pending=nil
 	end
 
 	-- The character is only known once the world is up, so the import waits for
@@ -3241,7 +3232,7 @@ watcher:SetScript("OnEvent",function(self,event,name)
 	ImportSeed()
 	ApplySpecFixups()
 	ClearMixedCCCounts()
-	Sample()
+	Sample(event~="UPDATE_BATTLEFIELD_SCORE")
 end)
 
 function module:OnEnable()
@@ -3259,7 +3250,7 @@ function module:OnEnable()
 
 	-- The units appear over the first seconds of a match, so it is watched
 	-- rather than read once.
-	C_Timer.NewTicker(2,Sample)
+	C_Timer.NewTicker(2,function() Sample(true) end)
 
 	-- The MMR tweak owns working out what a match did to the rating.
 	ns.On("ARENA_RESULT",function(info)

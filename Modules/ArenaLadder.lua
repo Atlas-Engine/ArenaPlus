@@ -211,10 +211,6 @@ local query=""   -- what is typed in the search box
 -- on Ra-den and a Jaffaar on Pagle, and searching found the first and gave
 -- no way to reach the second. Enter steps this on, and it wraps.
 local searchNth = 1
--- The realm the next search should land on, where something asked for a
--- particular character rather than a name. One-shot: cleared by the refresh
--- that honours it, so Enter cycles freely afterwards.
-local wantRealm
 
 ----------------------------------------------------------------
 -- Reading the data
@@ -302,7 +298,6 @@ local function ActivityRows(bracket)
 			-- "this week" is worse than one column short.
 			row.won,row.lost,row.dr=played[1],played[2],played[3]
 			row.dk=nil
-			row.played=nil
 			row.games=(played[1] or 0)+(played[2] or 0)
 
 			-- Turned back into a real time here, not into a printed age.
@@ -518,7 +513,7 @@ local function Searched(entry)
 	--
 	-- Assigned straight from the match. Putting a guard in front of it with an
 	-- `and` would collapse the two captures into one, which is exactly how the
-	-- realm went missing in ShowLadderFor.
+	-- realm went missing from a rank link once before.
 	local person,realm=query:match("^([^%-]+)%-(.+)$")
 
 	if not person then
@@ -1196,31 +1191,11 @@ local function Refresh()
 		if matches then
 			matchCount=#matches
 
-			-- A realm was asked for, so land on that character rather than on
-			-- whichever of the name-alikes happens to come first.
-			--
-			-- This is what sent a click on Bistwo-Pagle's rank to a Bistwo on
-			-- another realm: the rank link searches the bare name, because the
-			-- ladder matches on names and "Bistwo-Pagle" would match nothing,
-			-- and the bare name found the wrong one.
-			local pick
-			if wantRealm then
-				for position,index in ipairs(matches) do
-					if ns.PlainName(full[index].realm or "")==wantRealm then
-						pick=position
-						break
-					end
-				end
-				-- One-shot either way. Not on the ladder at all is an answer,
-				-- and holding it would bend every later search too.
-				wantRealm=nil
-			end
-
 			-- Wrapped, so Enter on the last match comes back round to the first
 			-- rather than stopping at an end nothing announces. Taken modulo the
 			-- count on every pass, so a counter left high by a longer search still
 			-- lands somewhere real when the query narrows.
-			hit=matches[pick or (((searchNth-1)%matchCount)+1)]
+			hit=matches[((searchNth-1)%matchCount)+1]
 		end
 	end
 
@@ -1328,7 +1303,6 @@ local function Refresh()
 			and L.LADDER_SUBTITLE_ALTS:format(#full)
 			or "")
 	end
-	if window.RefreshGame then window.RefreshGame() end
 	if window.LayoutSpecRow then window.LayoutSpecRow() end
 	if window.LayoutBody then window.LayoutBody() end
 	-- Said outright when there is nothing to show, rather than an empty window
@@ -1658,226 +1632,6 @@ local function CreateWindow()
 	frame.subtitle:SetPoint("LEFT",frame.title,"RIGHT",10,0)
 	ns.Theme.Text(frame.subtitle,"muted")
 
-	-- The game picker, standing where the place count used to.
-	--
-	-- Two games ship in the data addon now, and the window had no way to say
-	-- which one it was showing: the flags answer where, not what. The count came
-	-- out rather than moving over -- it was decoration, and this is a control
-	-- that changes what every row in the window means.
-	--
-	-- Hidden outright when only one game shipped, which is every install that
-	-- has not taken a data update yet. A picker with one entry is furniture.
-	frame.gameButton=CreateFrame("Button",nil,frame)
-	frame.gameButton:SetHeight(18)
-	frame.gameButton:SetPoint("LEFT",frame.title,"RIGHT",10,0)
-
-	frame.gameButton.label=frame.gameButton:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-	frame.gameButton.label:SetPoint("LEFT")
-
-	frame.gameButton.arrow=frame.gameButton:CreateTexture(nil,"OVERLAY")
-	frame.gameButton.arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
-	frame.gameButton.arrow:SetSize(12,12)
-	frame.gameButton.arrow:SetPoint("LEFT",frame.gameButton.label,"RIGHT",2,-1)
-
-	frame.gameMenu=CreateFrame("Frame",nil,frame)
-	frame.gameMenu:SetFrameStrata("DIALOG")
-
-	-- Above its siblings, explicitly.
-	--
-	-- The window itself is already DIALOG, so strata separates nothing here and
-	-- frame LEVEL decides. This menu is built early, near the title, while the
-	-- spec filter icons are built later -- and among children sharing a level the
-	-- later one draws on top. The symptom was a menu whose text was readable and
-	-- whose background was not: the labels sit on the row buttons, children of
-	-- this frame and so a level above the icons, while this frame's own
-	-- background sat under them.
-	frame.gameMenu:SetFrameLevel(frame:GetFrameLevel()+20)
-	frame.gameMenu:SetPoint("TOPLEFT",frame.gameButton,"BOTTOMLEFT",0,-2)
-	frame.gameMenu:SetSize(120,44)
-
-	-- Painted, not backdropped.
-	--
-	-- SetBackdrop's background is translucent -- StyleAsPanel has to lay a solid
-	-- texture behind its own for exactly this reason -- and a see-through menu
-	-- over a list of ladder rows is unreadable, which is how this first shipped.
-	-- A flat texture plus four hairlines is fewer moving parts than a backdrop
-	-- plus a patch for the backdrop, and it needs no frame template.
-	local menuBg=frame.gameMenu:CreateTexture(nil,"BACKGROUND")
-	menuBg:SetAllPoints()
-	ns.Theme.Fill(menuBg,"raised",1)
-
-	for _,edge in ipairs({
-		{ "TOPLEFT","TOPRIGHT",0,1 },
-		{ "BOTTOMLEFT","BOTTOMRIGHT",0,1 },
-		{ "TOPLEFT","BOTTOMLEFT",1,0 },
-		{ "TOPRIGHT","BOTTOMRIGHT",1,0 },
-	}) do
-		local line=frame.gameMenu:CreateTexture(nil,"BORDER")
-		line:SetPoint(edge[1])
-		line:SetPoint(edge[2])
-		if edge[3]>0 then line:SetWidth(edge[3]) else line:SetHeight(edge[4]) end
-		line:SetColorTexture(0.28,0.28,0.32,1)
-	end
-	frame.gameMenu:Hide()
-
-	-- Closed by picking something or by clicking the button again. No
-	-- click-anywhere-else catcher: that wants a full-screen frame above the
-	-- rows, and this menu has two entries and lives inside a window you can
-	-- already close.
-
-	-- Your own game first.
-	--
-	-- The addon ships for both Classic and Anniversary, so a fixed order puts
-	-- the other game at the top for half the players. The window already opens
-	-- on your own ladder; the menu should agree with it.
-	local GAMES
-	if (ns.ClientVersion and ns.ClientVersion())=="tbc" then
-		GAMES={
-			{ version="tbc", label=L.LADDER_GAME_ANNIVERSARY },
-			{ version="mop", label=L.LADDER_GAME_CLASSIC },
-		}
-	else
-		GAMES={
-			{ version="mop", label=L.LADDER_GAME_CLASSIC },
-			{ version="tbc", label=L.LADDER_GAME_ANNIVERSARY },
-		}
-	end
-
-	frame.gameMenu.rows={}
-	for index,game in ipairs(GAMES) do
-		local row=CreateFrame("Button",nil,frame.gameMenu)
-		row:SetPoint("TOPLEFT",frame.gameMenu,"TOPLEFT",4,-2-(index-1)*20)
-		row:SetPoint("TOPRIGHT",frame.gameMenu,"TOPRIGHT",-4,-2-(index-1)*20)
-		row:SetHeight(20)
-		row.version=game.version
-
-		row.label=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-		row.label:SetPoint("LEFT",4,0)
-		row.label:SetText(game.label)
-
-		row.highlight=row:CreateTexture(nil,"BACKGROUND")
-		row.highlight:SetAllPoints()
-		row.highlight:SetColorTexture(1,1,1,0.08)
-		row.highlight:Hide()
-		row:SetScript("OnEnter",function(self) self.highlight:Show() end)
-		row:SetScript("OnLeave",function(self) self.highlight:Hide() end)
-
-		row:SetScript("OnClick",function(self)
-			frame.gameMenu:Hide()
-			if ns.ViewVersion()==self.version then return end
-			ns.SetViewVersion(self.version)
-
-			-- Anniversary has no rated battlegrounds. Coming from 10v10 the
-			-- button for it disappears, so the window would sit on a bracket
-			-- with no rows and nothing pressed.
-			if self.version=="tbc" and ns.ViewBracket and ns.ViewBracket()==4
-				and ns.SetViewBracket then
-				ns.SetViewBracket(1)
-			end
-
-			-- Everything the region buttons reset, and for the same reasons: the
-			-- page, the search and the scroll all describe a place on the ladder
-			-- that was just replaced by a different one.
-			page=1
-			pageChosen=false
-			query=""
-			if frame.search then
-				frame.search:SetText("")
-				frame.search:ClearFocus()
-			end
-			if frame.scroll then frame.scroll:SetVerticalScroll(0) end
-			wantTop=true
-
-			-- The cutoffs box on the Rated page reads the same choice.
-			if ns.RefreshRatedPanel then ns.RefreshRatedPanel() end
-			Refresh()
-		end)
-
-		frame.gameMenu.rows[index]=row
-	end
-
-	frame.gameButton:SetScript("OnClick",function()
-		frame.gameMenu:SetShown(not frame.gameMenu:IsShown())
-	end)
-
-	frame.gameButton:SetScript("OnEnter",function(self)
-		self.label:SetTextColor(1,0.82,0)
-		GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
-		GameTooltip:SetText(L.LADDER_GAME_TOOLTIP,1,1,1,1,true)
-		GameTooltip:Show()
-	end)
-	frame.gameButton:SetScript("OnLeave",function(self)
-		self.label:SetTextColor(0.55,0.55,0.55)
-		GameTooltip:Hide()
-	end)
-
-	-- Called from Refresh, so the label follows a choice made anywhere.
-	function frame.RefreshGame()
-		local region=ns.ViewRegion()
-
-		-- Both games, not "is there TBC data": on an Anniversary client the
-		-- TBC ladder is simply the ladder, and a picker is only worth drawing
-		-- when there is a second one to pick.
-		local offer=ns.HasVersionData
-			and ns.HasVersionData("mop",region)
-			and ns.HasVersionData("tbc",region)
-
-		-- The alts view is your own characters across both ladders, so there is
-		-- no one game it could be showing and nothing for this to choose.
-		offer=offer and not showingAlts
-
-		frame.gameButton:SetShown(offer and true or false)
-
-		-- The row that hangs off the picker, anchored to the heading instead
-		-- while there is no picker to hang off.
-		--
-		-- The picker is only given a width where it has a label to measure, and
-		-- a frame with one anchor and no width has no right edge: History,
-		-- which is pinned to that edge, cannot be placed, and nor can Home, the
-		-- brackets or the subtitle behind them. The whole left of the heading
-		-- came out blank. It took the data addon splitting per game on
-		-- 2026-09-22 to show up -- before that every install had both games and
-		-- the picker was all but always drawn, and the alts view, which hides
-		-- it too, was reached from a window that had already measured it.
-		frame.swapButton:ClearAllPoints()
-		if offer then
-			frame.swapButton:SetPoint("LEFT",frame.gameButton,"RIGHT",12,0)
-		else
-			frame.swapButton:SetPoint("TOPLEFT",frame,"TOPLEFT",BRACKET_X,HEADER_TOP)
-		end
-
-		-- Re-anchored rather than left with a gap: a hidden frame keeps its
-		-- place, so a subtitle pinned to the picker would still sit a picker's
-		-- width away from the title with nothing in between.
-		frame.subtitle:ClearAllPoints()
-		if offer then
-			frame.subtitle:SetPoint("LEFT",frame.gameButton,"RIGHT",8,0)
-		else
-			frame.subtitle:SetPoint("LEFT",frame.title,"RIGHT",10,0)
-		end
-		frame.subtitle:SetPoint("RIGHT",frame.swapButton,"LEFT",-10,0)
-
-		if not offer then
-			frame.gameMenu:Hide()
-			return
-		end
-
-		local version=ns.ViewVersion()
-		local text=(version=="tbc") and L.LADDER_GAME_ANNIVERSARY or L.LADDER_GAME_CLASSIC
-		frame.gameButton.label:SetText(text)
-		frame.gameButton.label:SetTextColor(0.55,0.55,0.55)
-		frame.gameButton:SetWidth(frame.gameButton.label:GetStringWidth()+18)
-
-		for _,row in ipairs(frame.gameMenu.rows) do
-			if row.version==version then
-				row.label:SetTextColor(1,0.82,0)
-			else
-				row.label:SetTextColor(0.8,0.8,0.8)
-			end
-		end
-	end
-
-
 	-- Only of use when this is standing on its own; the helper hides it while
 	-- the Rated page is up.
 	-- Clear of the heading and its place count at their widest.
@@ -1904,7 +1658,6 @@ local function CreateWindow()
 	-- make room for it -- see the wrapper below, which does that only while
 	-- the tab is actually up.
 	local CUTOFF_TAB_W = 68
-	local BRACKET_ORIGIN_X = BRACKET_X+SWAP_W+ROW_GAP+HOME_W+ROW_GAP
 
 	local cutoffsButton=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
 	cutoffsButton:SetSize(CUTOFF_TAB_W,20)
@@ -2874,7 +2627,11 @@ local function CreateWindow()
 		showingAlts=not showingAlts
 
 		-- Exclusive with the activity view, which is everybody rather than you.
-		if showingAlts then activityWindow=nil end
+		if showingAlts then
+			activityWindow=nil
+			activitySort=nil
+			sortAscending=false
+		end
 
 		-- A different list entirely, so nothing about where you were in the old
 		-- one carries over.
@@ -2955,6 +2712,11 @@ local function CreateWindow()
 		-- go and would quietly do nothing.
 		showingAlts=false
 		activityWindow=nil
+		-- Whatever order the activity view was in goes with it: Last seen has
+		-- no meaning on the ladder, and left set it drew the arrow one way over
+		-- a list running the other.
+		activitySort=nil
+		sortAscending=false
 
 		query=""
 		if frame.search then frame.search:SetText("") end
@@ -2997,16 +2759,10 @@ local function CreateWindow()
 	-- OnHide the difference between being closed and being replaced, which is a
 	-- thing neither window can see.
 	frame.swapButton=PageButton(L.LADDER_SWAP,SWAP_W)
-	-- Off the game dropdown, not off a measured constant.
-	--
-	-- BRACKET_X was 208 because the subtitle beside it runs to about 195 at
-	-- its longest, and 182 had already been tried and landed under it. But
-	-- that label is not a fixed width -- it is the game being viewed, and
-	-- "Classic" is a good deal shorter than "Anniversary" -- so any one number
-	-- is either too far left for the longest or wasting room for the rest.
-	-- Anchored to the thing it has to clear, it is always as far left as it
-	-- can be, which leaves the most room at the other end for the flags.
-	frame.swapButton:SetPoint("LEFT",frame.gameButton,"RIGHT",12,0)
+	-- Where the bracket row starts. The Mists/Anniversary picker that once sat
+	-- between the title and this button is gone (1.7c), so the position is a
+	-- constant again: BRACKET_X clears the subtitle at its longest.
+	frame.swapButton:SetPoint("TOPLEFT",frame,"TOPLEFT",BRACKET_X,HEADER_TOP)
 
 	-- Home, in the bracket row rather than down among the page buttons.
 	--
@@ -3116,6 +2872,10 @@ local function CreateWindow()
 		-- job is the ladder and both My alts and Activity are detours from it.
 		showingAlts=false
 		activityWindow=nil
+		-- And the order, for the same reason: Rating turned over in one visit
+		-- came back turned over in the next, which the note above says it must not.
+		activitySort=nil
+		sortAscending=false
 		if self.search then
 			self.search:SetText("")
 			self.search:ClearFocus()
@@ -3195,50 +2955,6 @@ function ns.ToggleLadder()
 	Anchor(frame)
 	frame:Show()
 	Refresh()
-end
-
--- Open the ladder on a bracket, looking for one person.
---
--- Setting the search box's text is the whole implementation: its OnTextChanged
--- already sets the query, forgets whichever page was being read, refreshes, and
--- the refresh turns to the match and lights the row. Reaching past it to set
--- `query` directly would be a second copy of all that, out of step the first
--- time either changed.
---
--- The bare name, because that is what the ladder searches on -- a realm matches
--- hundreds of rows at once, which is the opposite of finding somebody.
-function ns.ShowLadderFor(bracket,name)
-	local frame=CreateWindow()
-	if not frame then return end
-
-	if bracket and ns.SetViewBracket then ns.SetViewBracket(bracket) end
-
-	-- Same rule as ToggleLadder: undocked the two windows both sit centred, so
-	-- without this they stack on each other.
-	if ns.CloseArenaHistory then ns.CloseArenaHistory() end
-
-	Anchor(frame)
-	frame:Show()
-
-	-- The name is searched without its realm, because the ladder matches on
-	-- names -- but the realm is remembered so the refresh can pick the right
-	-- one of several people called the same thing.
-	-- Split in an if, not with an and.
-	--
-	-- "local bare,realm = name and name:match(...)" reads fine and is wrong:
-	-- the and collapses the multiple return to one value, so realm was always
-	-- nil and the realm was never remembered at all. Written once already in
-	-- _brain/WOW-API.md, and written again here anyway.
-	local bare,realm
-	if name then bare,realm=name:match("^([^%-]+)%-(.+)$") end
-	bare=bare or (name and (name:match("^([^%-]+)") or name))
-	wantRealm=realm and ns.PlainName(realm) or nil
-
-	if frame.search and bare and bare~="" then
-		frame.search:SetText(bare)
-	else
-		Refresh()
-	end
 end
 
 function ns.CloseLadder()

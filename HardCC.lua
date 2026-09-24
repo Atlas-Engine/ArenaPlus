@@ -139,7 +139,6 @@ ns.HARD_CC = {
 	[69179  ] = true,  -- Arcane Torrent (Rage version)
 	[80483  ] = true,  -- Arcane Torrent (Focus version)
 	[102051 ] = true,  -- Frostjaw
-	[108194 ] = true,  -- Asphyxiate (TODO: check silence id)
 	[114237 ] = true,  -- Glyph of Fae Silence (TODO: verify id)
 	[115782 ] = true,  -- Optical Blast (Observer)
 	[116709 ] = true,  -- Spear Hand Strike
@@ -207,17 +206,20 @@ ns.SOFT_CC = {
 -- so a mob casting something similarly named cannot get in.
 ns.HARD_CC_NAMES = nil
 
+local function SpellName(spellID)
+	if C_Spell and C_Spell.GetSpellInfo then
+		local info=C_Spell.GetSpellInfo(spellID)
+		if info and info.name then return info.name end
+	end
+	if GetSpellInfo then return (GetSpellInfo(spellID)) end
+end
+
 function ns.BuildHardCCNames()
 	if ns.HARD_CC_NAMES then return end
 
 	local names={}
 	for spellID in pairs(ns.HARD_CC) do
-		local name
-		if C_Spell and C_Spell.GetSpellInfo then
-			local info=C_Spell.GetSpellInfo(spellID)
-			name=info and info.name
-		end
-		if not name and GetSpellInfo then name=GetSpellInfo(spellID) end
+		local name=SpellName(spellID)
 		if name then names[name]=true end
 	end
 
@@ -225,12 +227,7 @@ function ns.BuildHardCCNames()
 
 	local soft={}
 	for spellID in pairs(ns.SOFT_CC) do
-		local name
-		if C_Spell and C_Spell.GetSpellInfo then
-			local info=C_Spell.GetSpellInfo(spellID)
-			name=info and info.name
-		end
-		if not name and GetSpellInfo then name=GetSpellInfo(spellID) end
+		local name=SpellName(spellID)
 		-- A spell in both lists belongs to the hard one.
 		if name and not names[name] then soft[name]=true end
 	end

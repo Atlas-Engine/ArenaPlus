@@ -111,59 +111,6 @@ function ns.SpecIdForSlug(slug)
 	return alias and ns.SPEC_BY_SLUG and ns.SPEC_BY_SLUG[alias] or nil
 end
 
--- Icons this client returns wrongly for the spec in question. Taken from
--- ArenaAnalytics' own overrides for Mists, which exist for the same reason:
--- the API answers with art that belongs to a later version of the spec.
-ns.SPEC_ICON = {
-	[66]  = "Interface\\Icons\\spell_holy_devotionaura",        -- Protection Paladin
-	[263] = "Interface\\Icons\\spell_shaman_improvedstormstrike", -- Enhancement Shaman
-	[253] = "Interface\\Icons\\ability_hunter_bestialdiscipline", -- Beast Mastery
-	[254] = "Interface\\Icons\\ability_hunter_focusedaim",       -- Marksmanship
-	[255] = "Interface\\Icons\\ability_hunter_camouflage",       -- Survival
-	[259] = "Interface\\Icons\\Ability_rogue_deadlybrew",        -- Assassination
-	[71]  = "Interface\\Icons\\ability_warrior_savageblow",      -- Arms
-	[256] = "Interface\\Icons\\spell_holy_powerwordshield",      -- Discipline
-}
-
-
--- Every other spec's art, read out of the Mists client with /arena specicons.
---
--- The eight above are corrections and must win, so this only fills in ids they
--- do not already name.
---
--- Shipped rather than asked for at runtime: GetSpecializationInfoByID is a
--- Mists API and does not exist on the Anniversary client, so twenty-six of the
--- thirty-four specs drew no icon there at all. File ids, not paths -- that is
--- what this client answers with, and SetTexture takes one on either version.
-ns.SPEC_ICON_FILE = {
-	[250] = 135770, -- death-knight-blood
-	[251] = 135773, -- death-knight-frost
-	[252] = 135775, -- death-knight-unholy
-	[102] = 136096, -- druid-balance
-	[103] = 132115, -- druid-feral
-	[104] = 132276, -- druid-guardian
-	[105] = 136041, -- druid-restoration
-	[62] = 135932, -- mage-arcane
-	[63] = 135810, -- mage-fire
-	[64] = 135846, -- mage-frost
-	[268] = 608951, -- monk-brewmaster
-	[270] = 608952, -- monk-mistweaver
-	[269] = 608953, -- monk-windwalker
-	[65] = 135920, -- paladin-holy
-	[70] = 135873, -- paladin-retribution
-	[257] = 237542, -- priest-holy
-	[258] = 136207, -- priest-shadow
-	[260] = 132090, -- rogue-combat
-	[261] = 132320, -- rogue-subtlety
-	[262] = 136048, -- shaman-elemental
-	[264] = 136052, -- shaman-restoration
-	[265] = 136145, -- warlock-affliction
-	[266] = 136172, -- warlock-demonology
-	[267] = 136186, -- warlock-destruction
-	[72] = 132347, -- warrior-fury
-	[73] = 132341, -- warrior-protection
-}
-
 -- Classes a game never had.
 --
 -- Death knights arrived in Wrath and monks in Mists, so neither exists on the
@@ -190,31 +137,16 @@ end
 
 -- The one place an icon is chosen for a spec id.
 --
--- There were three copies of this chain -- the API, the ladder's own SpecIcon,
--- and the auction panel -- and only the API learned about SPEC_ICON_FILE. The
--- other two still asked GetSpecializationInfoByID, which does not exist on the
--- Anniversary client, so every row and every filter button fell through to a
--- question mark while the tooltip beside it drew the right art.
+-- Our own art, on every client. Three chains used to answer this -- the API,
+-- the ladder's own SpecIcon, and the auction panel -- each with its own set of
+-- hand-written overrides for art Mists reports wrongly and a fallback on a
+-- Mists API the Anniversary client does not have. The shipped set below
+-- covers every spec, so the overrides and the fallback are gone with the
+-- chains: one look on Mists and Anniversary alike, and nothing that can come
+-- back a green square.
 function ns.SpecIconForID(id)
-	if not id then return nil end
-
-	-- Our own art first, on every client.
-	--
-	-- It is the art we chose -- SPEC_ICON below exists precisely because the
-	-- client answers some specs with the wrong picture -- and shipping it means
-	-- one look on Mists and Anniversary alike, with no client-version branch
-	-- and nothing that can come back a green square.
-	local art = ns.SPEC_ART and ns.SPEC_ART[id]
+	local art = id and ns.SPEC_ART and ns.SPEC_ART[id]
 	if art then return "Interface\\AddOns\\ArenaPlus\\Media\\spec\\"..art end
-
-	if ns.SPEC_ICON and ns.SPEC_ICON[id] then return ns.SPEC_ICON[id] end
-	if ns.SPEC_ICON_FILE and ns.SPEC_ICON_FILE[id] then return ns.SPEC_ICON_FILE[id] end
-
-	if GetSpecializationInfoByID then
-		local _,_,_,icon = GetSpecializationInfoByID(id)
-		if icon then return icon end
-	end
-
 	return nil
 end
 
