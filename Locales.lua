@@ -137,9 +137,9 @@ L.HISTORY_PRUNE_NONE      = "No mixed matches to remove."
 -- The ladder cutoffs, read from Blizzard's API by the companion script and
 -- shown for whichever bracket is selected.
 -- Built by name rather than written out: the cutoffs box looks up
--- CUTOFF_<tier key>. Nothing in the
--- code mentions these spellings, so a search for unused strings will offer to
--- delete every one of them. It has already tried once.
+-- CUTOFF_<tier key>. Nothing in the code mentions these spellings, so a
+-- search for unused strings will offer to delete every one of them. It has
+-- already tried once.
 L.INHERITED               = "Brought %d setting group(s) across from QoLPlus, including your recorded matches. QoLPlus keeps its own copy."
 L.INHERIT_AGAIN           = "Copied again from QoLPlus. |cffffff00/reload|r to see it."
 L.REGION_MISMATCH         = "The cutoffs and ladder were read for |cffffff00%s|r, but you play on |cffffff00%s|r. Rerun the update scripts with |cffffff00-Region %s|r or the numbers are somebody else's."
@@ -215,7 +215,7 @@ L.LADDER_DATA_STALE       = "  |cffff8000ArenaPlus_Data update available on Curs
 -- talents and glyphs, so some of these say why there is nothing to show.
 L.INSPECT_RATING          = "%d rating"
 L.INSPECT_RANK            = "#%d"
--- Only when their race is not known, which is now the rare case.
+-- Always: the model is the viewer's own body (see Dress in InspectPanel).
 L.INSPECT_HINT_OWN_RACE   = "Drag to turn, wheel to zoom, right click to reset.  Shown on your own body, so only weapons your class can hold."
 L.INSPECT_NOT_COVERED     = "Gear and talents are only recorded for the top five of each spec in each bracket."
 
@@ -407,7 +407,7 @@ L.LADDER_NO_ALTS          = "None of your characters has a rating in this bracke
 --
 -- The window is named in the subtitle rather than in the heading, because
 -- the heading already carries the bracket and the flag and a third clause
--- would push it past the game picker.
+-- would push it into the button row.
 L.LADDER_ACTIVITY         = "Activity"
 L.LADDER_TITLE_ACTIVITY   = "%s activity"
 -- Both halves matter. The count is the answer; the "as of" is the caveat,

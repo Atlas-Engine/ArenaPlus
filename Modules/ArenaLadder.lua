@@ -95,10 +95,13 @@ local LIST_TOP     = DIVIDER_TOP-6                    -- the scrolling list
 local EMPTY_TOP    = DIVIDER_TOP-12                   -- and "nothing to show"
 -- Where the button row begins, and it begins late on purpose.
 --
--- The heading beside it is "10v10 <flag>  top 5006 players" at its longest, and
--- that runs to about 195 -- so the row starting at 250 was never the constraint
--- it looked like: the first button sat at 250 only until Home was put in front
--- of History and pulled the row back to 182, under the end of the subtitle.
+-- The heading beside it was "10v10 <flag>  top 5006 players" at its longest
+-- when this was measured, about 195 wide, and a row starting at 182 ran under
+-- the end of it. The count is gone and the subtitle now names the activity
+-- window, which is longer still -- so the subtitle is cut to the row rather
+-- than the row moved for it: it is anchored to History on its right with
+-- wrapping off, where the row is built, and ends where the row starts
+-- whatever it says.
 --
 -- 208 is as far right as the row can go. Past it the last bracket meets the
 -- region flags, which are anchored off the search box at the other end.
@@ -2761,7 +2764,7 @@ local function CreateWindow()
 	frame.swapButton=PageButton(L.LADDER_SWAP,SWAP_W)
 	-- Where the bracket row starts. The Mists/Anniversary picker that once sat
 	-- between the title and this button is gone (1.7c), so the position is a
-	-- constant again: BRACKET_X clears the subtitle at its longest.
+	-- constant again, and the subtitle is cut to it -- see BRACKET_X.
 	frame.swapButton:SetPoint("TOPLEFT",frame,"TOPLEFT",BRACKET_X,HEADER_TOP)
 
 	-- Home, in the bracket row rather than down among the page buttons.

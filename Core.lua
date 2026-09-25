@@ -141,9 +141,6 @@ end
 -- the average of the two, so each is a little wrong and neither is obviously
 -- so: the American squeezed by about a seventh, the European stretched by half
 -- that.
---
--- Each flag keeps its own aspect below, for anywhere that would rather be
--- accurate than tidy.
 ns.REGION_FLAG_ASPECT = 1.67
 
 ns.REGION_FLAG = {
@@ -586,6 +583,14 @@ end
 
 -- GetCurrentRegion's numbering.
 local REGION_NAMES = { [1]="us", [2]="kr", [3]="eu", [4]="tw", [5]="cn" }
+
+function ns.PlayerRegion()
+	if not GetCurrentRegion then return nil end
+	return REGION_NAMES[GetCurrentRegion()]
+end
+
+-- The short form, for headings with something else already on the same line.
+local REGION_SHORT = { us="NA", eu="EU", kr="KR", tw="TW", cn="CN" }
 
 function ns.RegionShort(region)
 	region=region or ns.ViewRegion()
