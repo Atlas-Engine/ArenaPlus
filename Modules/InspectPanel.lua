@@ -102,25 +102,6 @@ local function GlyphList(ids)
 	return out
 end
 
--- The body to show, by race and gender.
---
--- SetCustomRace does not exist on this client -- asked, and told no -- so the
--- model is set by display id instead, which does. These are the long-standing
--- player display ids; a wrong one here shows the wrong body, so a race not
--- listed falls back to the viewer's own rather than guessing at a number.
-local RACE_DISPLAY = {
-	[1]  = { 49, 50 },        -- human
-	[2]  = { 51, 52 },        -- orc
-	[3]  = { 53, 54 },        -- dwarf
-	[4]  = { 55, 56 },        -- night elf
-	[5]  = { 57, 58 },        -- undead
-	[6]  = { 59, 60 },        -- tauren
-	[7]  = { 1563, 1564 },    -- gnome
-	[8]  = { 1478, 1479 },    -- troll
-	[10] = { 15476, 15475 },  -- blood elf
-	[11] = { 16125, 16126 },  -- draenei
-}
-
 local PROFESSION_ICONS = {
 	engineering    = "Interface/Icons/Trade_Engineering",
 	enchanting     = "Interface/Icons/Trade_Engraving",
@@ -580,7 +561,6 @@ end
 local function FillSlot(button,record,tinker,slotKey)
 	button.itemID=nil
 	button.enchant=nil
-	button.gemIDs=nil
 	button.link=nil
 	button.tinker=nil
 	button.enchantText:SetText("")
@@ -653,7 +633,6 @@ local function FillSlot(button,record,tinker,slotKey)
 
 	local gems={}
 	for index=3,#record do gems[#gems+1]=record[index] end
-	button.gemIDs=gems
 
 	for index,gemID in ipairs(gems) do
 		local slot=button.gems[index]
@@ -676,7 +655,7 @@ end
 -- numeric id, so every piece was quietly declined.
 --
 -- Auto-dress is turned off first, which is what stops SetUnit dressing it.
-local function Dress(gear,look)
+local function Dress(gear)
 	local model=frame.model
 	if not model then return end
 
@@ -772,7 +751,7 @@ end
 -- Kept beside the character it belongs to: opening somebody else sets
 -- frame.showing before the page is shown, so a stale re-dress cannot put the
 -- last player's gear on the new one for a frame.
-local dressGear,dressLook,dressFor
+local dressGear,dressFor
 
 -- Dressed once now and once a moment later.
 --
@@ -780,13 +759,13 @@ local dressGear,dressLook,dressFor
 -- which is how it ended up standing there in its underwear: the panel was
 -- dressed before it was ever shown, so there was nothing to dress. Showing
 -- first fixes the common case and the second pass covers a slow load.
-local function DressWhenReady(gear,look)
-	dressGear,dressLook,dressFor=gear,look,frame and frame.showing
+local function DressWhenReady(gear)
+	dressGear,dressFor=gear,frame and frame.showing
 
-	Dress(gear,look)
+	Dress(gear)
 	if C_Timer and C_Timer.After then
 		C_Timer.After(0.1,function()
-			if frame and frame:IsShown() then Dress(gear,look) end
+			if frame and frame:IsShown() then Dress(gear) end
 		end)
 	end
 end
@@ -794,7 +773,7 @@ end
 -- Put the clothes back on, when this page comes back into view.
 local function RedressOnShow()
 	if not (dressGear and frame and frame.showing and dressFor==frame.showing) then return end
-	DressWhenReady(dressGear,dressLook)
+	DressWhenReady(dressGear)
 end
 
 -- ---------------------------------------------------------------- pages
@@ -948,7 +927,7 @@ local function BuildCharacterPage(parent)
 	-- FOOT is the room the tab row needs; sitting 4 INTO it put this line on
 	-- top of the tabs. Cleared above it instead.
 	page.hint:SetPoint("BOTTOM",page,"BOTTOM",0,FOOT+8)
-	page.hint:SetText(L.INSPECT_HINT)
+	page.hint:SetText(L.INSPECT_HINT_OWN_RACE)
 	ns.Theme.Text(page.hint,"faint")
 
 	return page
@@ -1414,7 +1393,7 @@ local function ExplainNoSearch(name)
 	elseif not CanSearch() then
 		ns.Print(L.INSPECT_AH_NEEDS_AUCTIONATOR,name)
 	else
-		ns.Print(L.INSPECT_AH_CLOSED,name)
+		ns.Print(L.INSPECT_AH_FAILED,name)
 	end
 end
 
@@ -1571,14 +1550,10 @@ local function Titled(slug)
 	return table.concat(words," ")
 end
 
-local function IsProfessionOnly(slotKey,applied,name,effect)
+local function IsProfessionOnly(name,effect)
 	local text=((name or "").." "..(effect or "")):lower()
 
 	if text:find("embroidery",1,true) then return true end
-
-	-- The id, not the name: a name that has not finished loading is not the
-	-- same thing as an enchant with nothing behind it.
-	if (slotKey=="finger_1" or slotKey=="finger_2") and not applied then return true end
 
 	return false
 end
@@ -1743,7 +1718,7 @@ local function SocketTally(gear)
 				-- and stay, so the expansion is the wrong thing to test: the
 				-- binding is, and the same test tidies Mists as well.
 				if Buyable(applied)
-					and not IsProfessionOnly(slotKey,applied,shopName,effect) then
+					and not IsProfessionOnly(shopName,effect) then
 					enchants[#enchants+1]={ slot=slotKey, id=enchant, item=tonumber(piece[1]) }
 				end
 			end
@@ -1872,6 +1847,7 @@ local function FillSockets(page,gear,glyphs,class)
 	if #gemOrder==0 and page.gems[1] then
 		page.gems[1].icon:SetTexture(nil)
 		page.gems[1].text:SetText(L.INSPECT_NO_GEMS)
+		page.gems[1].text:SetTextColor(0.7,0.7,0.7)
 		page.gems[1]:SetScript("OnEnter",nil)
 		page.gems[1]:SetScript("OnClick",nil)
 		page.gems[1]:Show()
@@ -1961,7 +1937,12 @@ local function FillSockets(page,gear,glyphs,class)
 	if #enchants==0 and page.enchants[1] then
 		page.enchants[1].icon:SetTexture(nil)
 		page.enchants[1].text:SetText(L.INSPECT_NO_ENCHANTS)
+		-- Colour and click cleared as well as the hover: the row is pooled, and
+		-- left with the last character's enchant on it a click here searched the
+		-- auction house for something the character shown does not wear.
+		page.enchants[1].text:SetTextColor(0.7,0.7,0.7)
 		page.enchants[1]:SetScript("OnEnter",nil)
+		page.enchants[1]:SetScript("OnClick",nil)
 		page.enchants[1]:Show()
 	end
 
@@ -2515,6 +2496,10 @@ local function BuildWindow()
 		-- watcher, and would stop filling in gem names halfway.
 		if shop and shop:IsShown() then return end
 		if socketWatcher then socketWatcher:UnregisterEvent("GET_ITEM_INFO_RECEIVED") end
+		-- And nothing for it to fill: with these left set, every item that
+		-- finished loading while the shopping window was up re-filled seventeen
+		-- hidden slots and re-summed the stats page behind it.
+		socketGear,socketTinkers,statsFor=nil,nil,nil
 	end)
 
 	-- The same band across the top as the ladder window, so the two read as
@@ -3243,7 +3228,6 @@ function ns.ShowInspect(entry,region,bracket)
 	-- top. Kept as a field because ShowPage reads it to decide whether a page
 	-- has anything to draw.
 	frame.hasData=true
-	for _,tab in pairs(frame.tabs) do tab:Show() end
 
 	-- Where the slot tooltips can reach them, keyed by set.
 	frame.setCounts={}
@@ -3545,9 +3529,7 @@ function ns.ShowInspect(entry,region,bracket)
 	WatchItems()
 
 	-- After Show, never before: see DressWhenReady.
-	local look={ race=data.r or 0, gender=data.x or 0 }
-	frame.pages.character.hint:SetText(L.INSPECT_HINT_OWN_RACE)
-	DressWhenReady(gear,look)
+	DressWhenReady(gear)
 end
 
 -- Third in the row, against the auction house's PvP panel.
@@ -3935,14 +3917,6 @@ function ns.ToggleShoppingList(entry,region)
 		return false
 	end
 	return ns.ShowShoppingList(entry,region) and true or false
-end
-
--- Open on a particular tab.
---
--- The auction house shortcut wants the gems, not the paper doll: somebody who
--- came from there is shopping, not admiring the transmog.
-function ns.InspectShowPage(which)
-	if frame and frame:IsShown() then ShowPage(which) end
 end
 
 function ns.ToggleInspect(entry,region,bracket)

@@ -30,7 +30,6 @@ local LADDER_FIELDS = {
 	"rank", "name", "realm", "rating", "won", "lost", "faction", "mr", "dr", "dk",
 	"class", "spec", "specSeen", "race", "gender", "hidden",
 }
-ns.LADDER_FIELDS = LADDER_FIELDS
 
 local LADDER_SLOT = {}
 for at, key in ipairs(LADDER_FIELDS) do LADDER_SLOT[key] = at end
@@ -142,9 +141,6 @@ end
 -- the average of the two, so each is a little wrong and neither is obviously
 -- so: the American squeezed by about a seventh, the European stretched by half
 -- that.
---
--- Each flag keeps its own aspect below, for anywhere that would rather be
--- accurate than tidy.
 ns.REGION_FLAG_ASPECT = 1.67
 
 ns.REGION_FLAG = {
@@ -153,14 +149,12 @@ ns.REGION_FLAG = {
 		coords  = { 0.1797, 0.8203, 0.1562, 0.8438 },
 		texels  = { 23, 105, 10, 54 },
 		file    = { 128, 64 },
-		aspect  = 1.86,
 	},
 	eu = {
 		texture = "Interface\\AddOns\\ArenaPlus\\Media\\region-eu",
 		coords  = { 0.1797, 0.8203, 0.0625, 0.9219 },
 		texels  = { 23, 105, 4, 59 },
 		file    = { 128, 64 },
-		aspect  = 1.49,
 	},
 }
 
@@ -173,7 +167,7 @@ ns.REGION_FLAG = {
 --
 --   |Tpath:height:width:xoff:yoff:texWidth:texHeight:left:right:top:bottom|t
 function ns.RegionFlagMarkup(region,height)
-	local flag = region and ns.REGION_FLAG[region]
+	local flag = region and ns.REGION_FLAG[ns.RegionOfKey(region)]
 	if not flag then return nil end
 
 	height = height or 12
@@ -188,7 +182,7 @@ end
 -- Draws one onto a texture, sized from the height asked for. Answers whether it
 -- had anything to draw, so a caller can keep its text when it does not.
 function ns.SetRegionFlag(texture,region,height)
-	local flag = region and ns.REGION_FLAG[region]
+	local flag = region and ns.REGION_FLAG[ns.RegionOfKey(region)]
 	if not (texture and flag) then return false end
 
 	texture:SetTexture(flag.texture)
@@ -223,15 +217,6 @@ local moduleOrder = {}
 
 local configFrame
 
-local COLUMN_X = 6
--- Sidebar of tweak names, then one tweak's settings beside it. The pane width
--- is what text wraps against, so it is fixed rather than measured: a frame
--- anchored to fill has no width yet while its contents are being built.
-local SIDEBAR_WIDTH = 170
-local ROW_HEIGHT    = 26
-local GROUP_HEIGHT  = 22
-local CONTENT_WIDTH = 400
-
 ----------------------------------------------------------------
 -- Helpers
 ----------------------------------------------------------------
@@ -249,23 +234,6 @@ function ns.IsAddOnLoaded(name)
 	if C_AddOns and C_AddOns.IsAddOnLoaded then return C_AddOns.IsAddOnLoaded(name) end
 	if IsAddOnLoaded then return IsAddOnLoaded(name) end
 	return false
-end
-
--- The same menu sounds TrackerPlus uses, guarded because SOUNDKIT entries vary
--- slightly by client version.
-local function PlayMenuOpenSound()
-	if SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPEN then PlaySound(SOUNDKIT.IG_MAINMENU_OPEN) end
-end
-
-local function PlayMenuCloseSound()
-	if SOUNDKIT and SOUNDKIT.IG_MAINMENU_CLOSE then PlaySound(SOUNDKIT.IG_MAINMENU_CLOSE) end
-end
-
--- Coin icons where the client has them, a plain number where it does not.
-function ns.Money(copper)
-	copper=copper or 0
-	if GetCoinTextureString then return GetCoinTextureString(copper) end
-	return tostring(copper)
 end
 
 ----------------------------------------------------------------
@@ -353,70 +321,6 @@ end
 -- Not GetNormalizedRealmName: that drops the punctuation -- Ra-den becomes
 -- Raden -- and it returns nothing early in the load, so the same character
 -- ended up filed under two different keys on different sessions.
--- Whether a name belongs to someone you know: a friend, or a guild member.
---
--- Only a name is ever offered by an invite or a challenge, so both tests are
--- made on the name. The guild roster answers from a cache that stays empty
--- until something asks for it, which is why the tweaks using this warm it when
--- they enable -- a cold cache reads as "not a guild member", which errs
--- towards declining rather than towards letting a stranger through.
--- Whoever a Battle.net friend is playing right now, across every game account
--- they have logged in. This is the list most people's friends are actually on:
--- the character friends list only knows people added on this character's realm,
--- so checking that alone turns a real friend's invite away.
-local function IsBattleNetFriend(bare)
-	if not (C_BattleNet and type(BNGetNumFriends)=="function") then return false end
-
-	local function Matches(gameAccount)
-		local character=gameAccount and gameAccount.characterName
-		return character and (character:match("^([^-]+)") or character)==bare
-	end
-
-	for index=1,(BNGetNumFriends() or 0) do
-		local account=C_BattleNet.GetFriendAccountInfo and C_BattleNet.GetFriendAccountInfo(index)
-		if account and Matches(account.gameAccountInfo) then return true end
-
-		-- A friend online on more than one account has the rest here.
-		local extra=C_BattleNet.GetFriendNumGameAccounts and C_BattleNet.GetFriendNumGameAccounts(index) or 0
-		for account_index=1,extra do
-			if Matches(C_BattleNet.GetFriendGameAccountInfo(index,account_index)) then return true end
-		end
-	end
-
-	return false
-end
-
-function ns.IsKnownPlayer(name)
-	if not name or name=="" then return false end
-	local bare=name:match("^([^-]+)") or name
-
-	if C_FriendList and C_FriendList.GetFriendInfo then
-		if C_FriendList.GetFriendInfo(bare) then return true end
-	end
-
-	if IsBattleNetFriend(bare) then return true end
-
-	if IsInGuild and IsInGuild() and GetNumGuildMembers and GetGuildRosterInfo then
-		for index=1,(GetNumGuildMembers() or 0) do
-			local member=GetGuildRosterInfo(index)
-			if member and (member:match("^([^-]+)") or member)==bare then return true end
-		end
-	end
-
-	return false
-end
-
--- Ask the server for the roster, so the test above has something to read.
-function ns.WarmGuildRoster()
-	if not (IsInGuild and IsInGuild()) then return end
-
-	if C_GuildInfo and C_GuildInfo.GuildRoster then
-		C_GuildInfo.GuildRoster()
-	elseif GuildRoster then
-		GuildRoster()
-	end
-end
-
 function ns.CharKey()
 	local name=UnitName("player") or "?"
 	local realm=GetRealmName() or "?"
@@ -460,56 +364,14 @@ function ns.Fire(event,...)
 	end
 end
 
--- Seventeen tweaks in one column is a list you read rather than scan. Grouped,
--- it is four short lists, and where a tweak sits says something about it before
--- the description does. Order here is the order they appear.
-ns.GROUP_ORDER = { "arena", "gear", "popups", "interface" }
-
--- A tweak may name another as its parent, and then it has no row of its own:
--- its switch and its options are drawn on the parent's page instead. Two
--- tweaks that only ever touch the same window are one page to the person
--- reading the list, however sensible they are as separate files.
+-- Every tweak gets one tick and one line in the settings window, in the
+-- order they registered. The `group` and `parent` fields a tweak may still
+-- carry are from an older window with pages and headings; nothing reads them.
 function ns.RegisterModule(key,module)
 	module.key=key
-	-- A tweak with no group of its own falls in at the end rather than
-	-- vanishing from the list.
-	module.group=module.group or "interface"
 	ns.modules[key]=module
 	moduleOrder[#moduleOrder+1]=key
 	return module
-end
-
--- The tweaks drawn on one page: the module itself, then anything naming it.
-function ns.ChildModules(key)
-	local children={}
-	for _,other in ipairs(moduleOrder) do
-		if ns.modules[other].parent==key then children[#children+1]=ns.modules[other] end
-	end
-	return children
-end
-
--- The tweaks in the order the list shows them: by group, and within a group in
--- the order they registered.
-function ns.OrderedModules()
-	local rank={}
-	for index,group in ipairs(ns.GROUP_ORDER) do rank[group]=index end
-
-	local position={}
-	for index,key in ipairs(moduleOrder) do position[key]=index end
-
-	local sorted={}
-	for _,key in ipairs(moduleOrder) do
-		if not ns.modules[key].parent then sorted[#sorted+1]=key end
-	end
-
-	table.sort(sorted,function(a,b)
-		local ra=rank[ns.modules[a].group] or #ns.GROUP_ORDER+1
-		local rb=rank[ns.modules[b].group] or #ns.GROUP_ORDER+1
-		if ra~=rb then return ra<rb end
-		return position[a]<position[b]
-	end)
-
-	return sorted
 end
 
 ----------------------------------------------------------------
@@ -649,13 +511,9 @@ local function InitDB()
 	db.version=db.version or CURRENT_DB_VERSION
 	db.modules=db.modules or {}
 
-	-- The spec icon harvest is read once and then done with.
-	--
-	-- /arena specicons writes its dump here because the copy box truncates it,
-	-- and it has to survive the reload that flushes SavedVariables to disk --
-	-- but no longer. Cleared on the way back in, so it is on disk exactly long
-	-- enough to be read and does not sit in every player's saved file forever
-	-- after one curious /arena specicons.
+	-- Left over from the /arena specicons harvest, which is gone now that the
+	-- art ships with the addon. Still cleared, so a dump from a curious run
+	-- does not sit in a saved file forever.
 	db.specIconDump=nil
 
 	InheritFromQoLPlus(db)
@@ -726,16 +584,6 @@ end
 -- GetCurrentRegion's numbering.
 local REGION_NAMES = { [1]="us", [2]="kr", [3]="eu", [4]="tw", [5]="cn" }
 
--- Written out rather than abbreviated. There is room for it in both headings,
--- and "NA" is a thing you decode where "North America" is a thing you read.
-local REGION_LABELS = {
-	us = "North America",
-	eu = "Europe",
-	kr = "Korea",
-	tw = "Taiwan",
-	cn = "China",
-}
-
 function ns.PlayerRegion()
 	if not GetCurrentRegion then return nil end
 	return REGION_NAMES[GetCurrentRegion()]
@@ -744,15 +592,10 @@ end
 -- The short form, for headings with something else already on the same line.
 local REGION_SHORT = { us="NA", eu="EU", kr="KR", tw="TW", cn="CN" }
 
-function ns.RegionLabel(region)
-	region=region or ns.ViewRegion()
-	if not region then return "?" end
-	return REGION_LABELS[region] or region:upper()
-end
-
 function ns.RegionShort(region)
 	region=region or ns.ViewRegion()
 	if not region then return "?" end
+	region=ns.RegionOfKey(region)
 	return REGION_SHORT[region] or region:upper()
 end
 
@@ -1038,11 +881,13 @@ function ns.VersionFromKey(key)
 	return (key and key:match("^(%a+)%-")) or "mop"
 end
 
--- Whether a ladder actually shipped for that game and region, so a picker
--- can leave out a choice that would only ever show an empty window.
-function ns.HasVersionData(version,region)
-	local key=ns.RegionKey(region or ns.ViewRegion(),version)
-	return (ns.LEADERBOARD_BY_REGION and ns.LEADERBOARD_BY_REGION[key])~=nil
+-- And the other half: the region a shipped key belongs to, so the flag and the
+-- short label can be asked with either. The inspect window is handed the key
+-- its data was read under, "tbc-us" on Anniversary, and asked the flag table
+-- with it directly -- which knows only "us" and "eu", so the subtitle there
+-- read "TBC-US" where every other window drew a flag.
+function ns.RegionOfKey(key)
+	return (key and key:match("[^%-]+$")) or key
 end
 
 -- Your own ladder means your region AND your game: an Anniversary ladder is
@@ -1549,10 +1394,13 @@ local CLASS_SLUGS = {
 --
 -- Lower-cased the way Lua lowers, which is A-Z and nothing else, because that
 -- is how every other key in this addon is built.
+-- At file scope rather than built per call: this runs once per ladder row
+-- when a bracket is first read, and per player in the history.
+local function SpecBare(text) return (tostring(text or ""):lower():gsub("[%-%s']","")) end
+
 function ns.SpecKey(name,realm)
 	if not name then return nil end
-	local function bare(text) return (tostring(text or ""):lower():gsub("[%-%s\']","")) end
-	return bare(name).."|"..bare(realm)
+	return SpecBare(name).."|"..SpecBare(realm)
 end
 
 -- Spec ids back to their slugs, built once from the table that maps the other
@@ -1571,7 +1419,7 @@ local SLUG_BY_SPEC
 -- The sighting also has to name a spec of the class already on the row. Two
 -- characters can normalise to the same key across regions, and without that
 -- check one of them could turn a druid into a mage.
-local function ObservedOverride(entry,region)
+local function ObservedOverride(entry)
 	if not (ns.ObservedSpecs and ns.SPEC_BY_SLUG and entry.class) then return end
 
 	local key=ns.SpecKey(entry.name,entry.realm)
@@ -1637,7 +1485,7 @@ local function AttachSpec(entry,region)
 			entry.class=class
 			entry.spec=slug:sub(#class+2)
 			-- After the class is known, because the check depends on it.
-			ObservedOverride(entry,region)
+			ObservedOverride(entry)
 			return
 		end
 	end
@@ -1647,6 +1495,11 @@ end
 -- window -- can have its class looked up the same way a row does.
 ns.AttachSpec=AttachSpec
 
+-- The region argument is a shipped KEY -- "eu", or "tbc-eu" for Anniversary --
+-- and so is the default: the bare region alone named the Mists ladder, which
+-- on an Anniversary client is the other game. Every caller that passes
+-- nothing (unit tooltips, the LFG hover, the history rank column, /arena
+-- who) got that ladder whenever a data addon carrying both was installed.
 -- Every row of one bracket, with class and spec joined on.
 --
 -- Exposed because two different readers want it and only one of them used to
@@ -1655,7 +1508,7 @@ ns.AttachSpec=AttachSpec
 --
 -- Done once per bracket and region; the flag lives on the list itself.
 function ns.LadderRows(bracket,region)
-	region=region or ns.PlayerRegion() or "us"
+	region=region or ns.RegionKey(ns.PlayerRegion() or "us",ns.ClientVersion())
 
 	local board=(ns.LEADERBOARD_BY_REGION and ns.LEADERBOARD_BY_REGION[region]) or ns.LEADERBOARD
 	local rows=(board and board[bracket]) or {}
@@ -1669,12 +1522,10 @@ function ns.LadderRows(bracket,region)
 end
 
 local function LadderFor(bracket,region)
-	region=region or ns.PlayerRegion() or "us"
+	region=region or ns.RegionKey(ns.PlayerRegion() or "us",ns.ClientVersion())
 
 	ladderIndex[region]=ladderIndex[region] or {}
 	if ladderIndex[region][bracket] then return ladderIndex[region][bracket] end
-
-	local board=(ns.LEADERBOARD_BY_REGION and ns.LEADERBOARD_BY_REGION[region]) or ns.LEADERBOARD
 
 	local index={}
 	for _,entry in ipairs(ns.LadderRows(bracket,region)) do
@@ -1788,8 +1639,9 @@ end
 -- GetCurrentRegion's numbering, which is also what a Battle.net game account
 -- reports, turned into the names the shipped files are keyed by.
 function ArenaPlusAPI.RegionFromID(id)
-	local names={ [1]="us", [2]="kr", [3]="eu", [4]="tw", [5]="cn" }
-	return names[tonumber(id) or 0]
+	-- REGION_NAMES, not a fresh table: SocialPlus asks this once per friend
+	-- per tooltip hover.
+	return REGION_NAMES[tonumber(id) or 0]
 end
 
 -- Which shipped ladder a Battle.net game account belongs to.
@@ -1878,17 +1730,7 @@ function ArenaPlusAPI.GetSpecIcon(entry)
 	local id=ns.SpecIdForSlug and ns.SpecIdForSlug(entry.class.."-"..entry.spec)
 	if not id then return nil end
 
-	-- On Anniversary the file id wins.
-	--
-	-- SPEC_ICON holds hand-written corrections for art MISTS reports wrongly,
-	-- and they are texture PATHS -- several naming Cataclysm or Mists art the
-	-- TBC client does not ship, which drew nothing at all (Assassination and
-	-- Enhancement, reported live). A file id is what the client itself answered
-	-- with, and an id survives a rename where a path does not.
-	--
-	-- Keyed on the CLIENT, not the ladder being viewed: this is about which
-	-- art is installed, so Mists looking at the TBC ladder still gets its own
-	-- corrected icons.
+	-- Our own art, on either client: see SpecIconForID.
 	return ns.SpecIconForID and ns.SpecIconForID(id)
 end
 
@@ -2090,52 +1932,6 @@ end
 --
 -- Here because the minimap button is itself one of the ticks: switching it off
 -- with no other way in would hide the only way to switch it back on.
--- Dump every spec's icon path, so they can be shipped instead of asked for.
---
--- GetSpecializationInfoByID is a Mists API. On the Anniversary client it does
--- not exist, so the 26 specs that rely on it drew no icon at all -- only the
--- eight in SPEC_ICON, which are hand-written overrides for wrong art rather
--- than a complete set.
---
--- Run this ON MISTS, where the API answers, and paste the result into
--- SpecData.lua. Harvested from the client rather than typed from memory for
--- the same reason the talent grid was: an icon path that looks right and is
--- not shows a blank square, and nothing here could tell you which.
-ns.SlashCommands["specicons"]=function()
-	if not GetSpecializationInfoByID then
-		ns.Print("This client has no GetSpecializationInfoByID -- run it on Mists.")
-		return
-	end
-
-	local slugs={}
-	for slug,id in pairs(ns.SPEC_BY_SLUG or {}) do slugs[#slugs+1]={slug=slug,id=id} end
-	table.sort(slugs,function(a,b) return a.slug<b.slug end)
-
-	local lines,missing={},0
-	for _,entry in ipairs(slugs) do
-		local _,_,_,icon=GetSpecializationInfoByID(entry.id)
-		if icon then
-			-- The number, not the path: this client answers with a file id, and a
-			-- file id is what SetTexture wants on either version.
-			lines[#lines+1]=("\t[%d] = %s, -- %s"):format(entry.id,tostring(icon),entry.slug)
-		else
-			missing=missing+1
-		end
-	end
-
-	-- Into SavedVariables, not the copy box.
-	--
-	-- That box is a one-line StaticPopup with a letter cap: thirty-odd lines
-	-- came out truncated mid-entry, and a dump you have to notice is short is
-	-- worse than no dump. This writes the whole thing to disk, where it can be
-	-- read without anybody copying anything.
-	ArenaPlus_SavedVars=ArenaPlus_SavedVars or {}
-	ArenaPlus_SavedVars.specIconDump=table.concat(lines,"\n")
-
-	ns.Print("%d spec icon(s) read, %d without art. Now /reload -- the client",#lines,missing)
-	ns.Print("only writes SavedVariables on reload or logout.")
-end
-
 ns.SlashCommands["config"]=function()
 	if ns.ToggleConfig then ns.ToggleConfig() end
 end

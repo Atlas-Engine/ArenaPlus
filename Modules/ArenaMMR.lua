@@ -158,7 +158,10 @@ local function Store()
 		class  = classFile and classFile:lower():gsub("%s",""),
 		race   = select(3,UnitRace("player")),
 		gender = (UnitSex("player")==3) and 1 or 0,
-		spec   = GetSpecialization and GetSpecializationInfo and
+		-- Not on Anniversary: the specialization family is present there and
+		-- raises when called (WOW-API.md), and this runs from the ticker every
+		-- three seconds. The client is the test, not the symbol.
+		spec   = ns.ClientVersion()=="mop" and GetSpecialization and GetSpecializationInfo and
 		         (function()
 		         	local index=GetSpecialization()
 		         	return index and GetSpecializationInfo(index) or nil

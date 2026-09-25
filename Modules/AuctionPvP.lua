@@ -51,7 +51,7 @@ end
 -- From the addon's own tables rather than from GetSpecializationInfo, which
 -- this client does not answer: asked for its specs it returned nothing at all,
 -- and the window came up empty saying so. The ladder has been drawing spec
--- icons all along through SPEC_BY_SLUG and SPEC_ICON, so those are what work
+-- icons all along through SPEC_BY_SLUG and SpecIconForID, so those are what work
 -- here, and this now uses the same road.
 --
 -- The slug carries the name: "priest-shadow" is a shadow priest, and the half

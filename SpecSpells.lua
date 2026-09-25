@@ -64,10 +64,13 @@ local SIGNATURES = {
 		{ 5217,   "Tiger's Fury" },
 		{ 52610,  "Savage Roar" },
 	},
+	-- Not Mangle and not Frenzied Regeneration: in Mists both are Bear Form
+	-- abilities every druid has, and a Feral uses Mangle from the front and
+	-- Frenzied Regeneration as a defensive. Listed here they named a Feral
+	-- as Guardian on the first sighting, and the first sighting sticks.
 	[104] = { -- Guardian
-		{ 33917,  "Mangle" },
 		{ 62606,  "Savage Defense" },
-		{ 22842,  "Frenzied Regeneration" },
+		{ 33745,  "Lacerate" },
 	},
 	[105] = { -- Restoration
 		{ 18562,  "Swiftmend" },

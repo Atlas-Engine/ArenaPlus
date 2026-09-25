@@ -415,9 +415,12 @@ watcher:SetScript("OnEvent",function(self,event,name)
 	end
 end)
 
-function module:OnEnable()
-	HookTabMemory()
-
+-- Both tweaks hang off the same Blizzard panel, so either one being on is
+-- enough to want the hooks. Each handler checks its own switch when it fires,
+-- and HookPvPUI installs once, so installing from both is safe -- and it has to
+-- be from both: with only the page tweak installing them, switching it off
+-- left the bracket tweak ticked and doing nothing.
+local function HookWhenLoaded()
 	-- Blizzard_PVPUI is load-on-demand: it arrives the first time the panel is
 	-- opened, and everything above only exists from then on.
 	if ns.IsAddOnLoaded("Blizzard_PVPUI") then
@@ -425,6 +428,15 @@ function module:OnEnable()
 	else
 		watcher:RegisterEvent("ADDON_LOADED")
 	end
+end
+
+function module:OnEnable()
+	HookTabMemory()
+	HookWhenLoaded()
+end
+
+function preselect:OnEnable()
+	HookWhenLoaded()
 end
 
 ----------------------------------------------------------------

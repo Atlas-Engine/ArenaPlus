@@ -25,11 +25,8 @@ L.CHAT_PREFIX             = "|cff33ff99ArenaPlus|r: "
 ----------------------------------------------------------------
 -- Settings window
 ----------------------------------------------------------------
--- The four headings the tweak list is broken into.
 
 L.WINDOW_TITLE            = "ArenaPlus"
-L.OPTIONS_OPEN            = "Open ArenaPlus"
-L.OPTIONS_DESC            = "Rated arena and battleground tracking: match history, title cutoffs and the ladder. Type |cffffff00/arenaplus|r or |cffffff00/arena|r to open this in its own window."
 
 ----------------------------------------------------------------
 -- PvP panel
@@ -38,10 +35,6 @@ L.PVP_TITLE               = "PvP panel"
 L.PVP_ENABLE              = "Open on Rated"
 L.PVP_DESC                = "The Player vs Player panel opens on Rated rather than Random Battleground."
 
-L.PVP_GROUPFINDER_LABEL   = "Group Finder opens on Dungeons"
-L.PVP_GROUPFINDER_TOOLTIP = "The Group Finder and the PvP panel are tabs of one window, and the game reopens whichever you used last. This sends it back to Dungeons and Raids, while opening the PvP panel deliberately still goes to Rated."
-
-L.PVP_BRACKET_GONE        = "The page cannot be opened on a chosen bracket: highlighting a row from an addon makes the game refuse to queue. Pick the bracket yourself and Join Battle works as normal."
 
 ----------------------------------------------------------------
 -- Rated page
@@ -56,8 +49,6 @@ L.RATED_TITLE             = "Rated page"
 L.RATED_ENABLE            = "Show rank and record"
 L.RATED_DESC              = "The Best column becomes your ladder position, coloured by the current title cutoffs, and Wins becomes your season record."
 
-L.RATED_TOOLTIP_LABEL     = "Hide the row tooltip"
-L.RATED_TOOLTIP_TOOLTIP   = "The weekly and season stats that open when you hover a bracket cover the arena history beside the panel, and say what the row already shows."
 
 L.RATED_RANK_LABEL        = "Rank"
 L.RATED_WINS_LABEL        = "W/L"
@@ -145,15 +136,14 @@ L.HISTORY_PRUNE_NONE      = "No mixed matches to remove."
 -- page tweak hides.
 -- The ladder cutoffs, read from Blizzard's API by the companion script and
 -- shown for whichever bracket is selected.
--- Built by name rather than written out: the settings window looks up
--- GROUP_<group> and the cutoffs box looks up CUTOFF_<tier key>. Nothing in the
--- code mentions these spellings, so a search for unused strings will offer to
--- delete every one of them. It has already tried once.
+-- Built by name rather than written out: the cutoffs box looks up
+-- CUTOFF_<tier key>. Nothing in the code mentions these spellings, so a
+-- search for unused strings will offer to delete every one of them. It has
+-- already tried once.
 L.INHERITED               = "Brought %d setting group(s) across from QoLPlus, including your recorded matches. QoLPlus keeps its own copy."
 L.INHERIT_AGAIN           = "Copied again from QoLPlus. |cffffff00/reload|r to see it."
 L.REGION_MISMATCH         = "The cutoffs and ladder were read for |cffffff00%s|r, but you play on |cffffff00%s|r. Rerun the update scripts with |cffffff00-Region %s|r or the numbers are somebody else's."
 
-L.GROUP_ARENA             = "Arena and battlegrounds"
 L.CUTOFF_R1               = "Rank one"
 -- Rated battlegrounds call the top title Hero of the Alliance or Hero of the
 -- Horde, so it is named for whichever the reader plays. The neutral wording is
@@ -168,7 +158,6 @@ L.CUTOFF_CHALLENGER       = "Challenger"
 
 L.CUTOFF_TITLE            = "%s title cutoffs"
 L.LADDER_CUTOFFS          = "Cutoffs"
-L.LADDER_CUTOFFS_READ     = "Read from the ladder %s"
 -- Appended to a heading so both windows say whose numbers these are. Gold
 -- rather than grey: which region you are reading changes every figure under it,
 -- and a grey aside is exactly what the eye skips.
@@ -226,8 +215,7 @@ L.LADDER_DATA_STALE       = "  |cffff8000ArenaPlus_Data update available on Curs
 -- talents and glyphs, so some of these say why there is nothing to show.
 L.INSPECT_RATING          = "%d rating"
 L.INSPECT_RANK            = "#%d"
-L.INSPECT_HINT            = "Drag to turn, wheel to zoom, right click to reset."
--- Only when their race is not known, which is now the rare case.
+-- Always: the model is the viewer's own body (see Dress in InspectPanel).
 L.INSPECT_HINT_OWN_RACE   = "Drag to turn, wheel to zoom, right click to reset.  Shown on your own body, so only weapons your class can hold."
 L.INSPECT_NOT_COVERED     = "Gear and talents are only recorded for the top five of each spec in each bracket."
 
@@ -273,6 +261,9 @@ L.INSPECT_AH_NEEDS_AUCTIONATOR = "%s -- searching the auction house needs Auctio
 L.INSPECT_AH_SEARCHED     = "Searching the auction house for %s."
 L.INSPECT_AH_SEARCHED_COUNT = "Searching the auction house for %d x %s."
 L.INSPECT_AH_CLOSED       = "%s -- open the auction house and click again to search for it."
+-- The house is open and the search itself threw, which is a different thing
+-- from the house being closed and was reported as it until now.
+L.INSPECT_AH_FAILED       = "%s -- the auction house search failed. Try again."
 -- Shown while the client fetches an item's name, which it does not have until
 -- something asks for it.
 L.INSPECT_LOADING         = "loading..."
@@ -344,7 +335,6 @@ L.INSPECT_PROFESSION_LEATHERWORKING = "Leatherworking"
 L.INSPECT_PROFESSION_INSCRIPTION   = "Inscription"
 L.INSPECT_PROFESSION_JEWELCRAFTING = "Jewelcrafting"
 L.INSPECT_PROFESSION_NOTE          = "Read from their gear, not from the armoury."
-L.INSPECT_PVP_NONE        = "not on this ladder"
 
 L.HISTORY_BEST_SEASON     = "Season best"
 L.HISTORY_BEST_VALUE      = "%s |cff808080%d games|r"
@@ -378,18 +368,7 @@ L.LADDER_BUTTON_TOOLTIP   = "This bracket's ladder, read from Blizzard's API."
 -- The bracket alone. "2v2 ladder" against "Rated BG ladder" is a heading that
 -- changes width with the bracket, which shifted everything anchored after it.
 L.LADDER_TITLE            = "%s"
--- "top 5006 players", not "top 5006". The bare number read as a rank or a
--- rating rather than as how many people are on the ladder.
-L.LADDER_SUBTITLE         = "top %d players"
 
--- The game picker that replaced that count in the ladder window.
---
--- Blizzard's own names for the two, not "MoP" and "TBC": the launcher and the
--- realm list call them Classic and Anniversary, and a window is a bad place to
--- introduce private shorthand.
-L.LADDER_GAME_CLASSIC     = "Classic"
-L.LADDER_GAME_ANNIVERSARY = "Anniversary"
-L.LADDER_GAME_TOOLTIP     = "Which game's ladder to show"
 -- The button that goes to your own place, which the window used to do by
 -- itself every time it opened.
 L.LADDER_MINE             = "My rank"
@@ -428,7 +407,7 @@ L.LADDER_NO_ALTS          = "None of your characters has a rating in this bracke
 --
 -- The window is named in the subtitle rather than in the heading, because
 -- the heading already carries the bracket and the flag and a third clause
--- would push it past the game picker.
+-- would push it into the button row.
 L.LADDER_ACTIVITY         = "Activity"
 L.LADDER_TITLE_ACTIVITY   = "%s activity"
 -- Both halves matter. The count is the answer; the "as of" is the caveat,
