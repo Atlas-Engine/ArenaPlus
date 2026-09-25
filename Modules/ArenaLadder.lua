@@ -68,8 +68,8 @@ local REGIONS = { { key="eu" }, { key="us" } }
 -- top instead left every label sitting a couple of points high of the buttons
 -- beside it, which reads as sloppy rather than as a mistake.
 --
--- BRACKET_X is the same in both windows on purpose: the picker sits in the same
--- place whichever window you opened.
+-- The history window keeps a BRACKET_X of its own (260, in ArenaHistory): its
+-- heading is wider, and the two rows have never been asked to line up.
 -- A shade larger than the rest of the interface.
 --
 -- Scaled rather than rebuilt: every offset, font and icon in here is tuned
@@ -1235,8 +1235,8 @@ local function Refresh()
 
 	-- The heading, at the width of the widest bracket rather than its own.
 	--
-	-- Everything across the top hangs off it: the game picker, History, Home,
-	-- and the bracket buttons behind those. So a heading that says "10v10" in
+	-- Everything across the top hangs off it: the subtitle, and behind it
+	-- History, Home and the bracket buttons. So a heading that says "10v10" in
 	-- one bracket and "2v2" in the next dragged the whole row sideways every
 	-- time the bracket changed -- noticed as the icons moving, which is the
 	-- part you see, rather than as two words nobody was reading changing
@@ -1286,10 +1286,9 @@ local function Refresh()
 
 	window.title:SetWidth(math.ceil(widest))
 	window.title:SetText(heading..flag)
-	-- No place count on the ladder any more: the game picker stands where it
-	-- was. The alts view keeps its own count, which says how many of YOUR
-	-- characters are rated -- a different fact from how big somebody else's
-	-- ladder is, and the picker is hidden in that view anyway.
+	-- No place count on the ladder any more. The alts view keeps its own
+	-- count, which says how many of YOUR characters are rated -- a different
+	-- fact from how big somebody else's ladder is.
 	-- Three subtitles, because the three views answer different questions.
 	-- The activity one carries when the file was built as well as the count:
 	-- the passes run every fifteen minutes on Mists and hourly on Anniversary,
