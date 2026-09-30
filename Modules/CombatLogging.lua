@@ -119,7 +119,9 @@ local function Update(fresh)
 	elseif module.db.started and not Logging() then
 		-- Already off -- the log does not outlast the session, so this is a
 		-- flag left from the last one. Forgotten now rather than acted on
-		-- later, where it could stop a log you have just started yourself.
+		-- later, where it could stop a log you have just started yourself --
+		-- and the switch-off waiting for it is called off, for the same reason.
+		generation=generation+1
 		module.db.started=nil
 		offAt=nil
 	elseif module.db.started and InGroupInstance() then
@@ -134,7 +136,7 @@ local function Update(fresh)
 		offAt=GetTime()+LINGER
 		local mine=generation
 		C_Timer.After(LINGER,function()
-			if mine~=generation then return end
+			if mine~=generation or not module.db.started then return end
 			offAt=nil
 			if InArena() or ArenaPopped() or InGroupInstance() then return end
 			if Logging() then LoggingCombat(false) end

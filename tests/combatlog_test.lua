@@ -76,6 +76,22 @@ check(logging, "the linger starts again once out")
 Advance(2)
 check(not logging, "and ends")
 
+-- Switched off after the arena by somebody else, then started again by
+-- you: the switch-off that was waiting for ArenaPlus's log leaves yours.
+popped = true
+Event("UPDATE_BATTLEFIELD_STATUS")
+where = "arena"
+Event("PLAYER_ENTERING_WORLD")
+popped = false
+where = "none"
+Event("PLAYER_ENTERING_WORLD")
+logging = false
+Event("UPDATE_BATTLEFIELD_STATUS")
+check(not module.db.started, "off by other hands: no longer ArenaPlus's")
+logging = true
+Advance(1000)
+check(logging, "a log started again by you outlives the old switch-off")
+
 -- A log you started yourself is left alone.
 logging = true
 module.db.started = nil
