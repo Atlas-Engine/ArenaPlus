@@ -510,6 +510,9 @@ L.HISTORY_TIP_DISPELS     = "Party dispels |cffffffff%d|r    Offensive dispels |
 L.HISTORY_TIP_TRINKETS    = "Trinkets used |cffffffff%d|r"
 -- Casts they stopped, and casts of theirs that were stopped.
 L.HISTORY_TIP_KICKS       = "Interrupts |cffffffff%d|r    Interrupted |cffffffff%d|r"
+-- Their own team's crowd control they broke with damage: a mistake, so it is
+-- drawn in red.
+L.HISTORY_TIP_BREAKS      = "Broke their team's crowd control |cffffffff%d|r"
 L.HISTORY_TIP_DAMAGE      = "Damage |cffffffff%s|r  (%s dps)"
 L.HISTORY_TIP_HEALING     = "Healing |cffffffff%s|r  (%s hps)"
 L.HISTORY_TIP_DAMAGE_ONLY = "Damage |cffffffff%s|r"

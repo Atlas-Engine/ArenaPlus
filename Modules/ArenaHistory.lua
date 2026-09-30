@@ -747,6 +747,29 @@ local TRINKETS = {
 	[7744]  = true,  -- Will of the Forsaken
 }
 
+-- The Anniversary client's trinket is another spell than Mists', and which one
+-- is not yet confirmed, so on that client it is known by name as well, under
+-- every name the TBC insignias and medallions have gone by. English names, as
+-- the log gives them on an English client.
+local TRINKET_NAMES = {
+	["PvP Trinket"]                 = true,
+	["Will of the Forsaken"]        = true,
+	["Insignia of the Alliance"]    = true,
+	["Insignia of the Horde"]       = true,
+	["Medallion of the Alliance"]   = true,
+	["Medallion of the Horde"]      = true,
+	["Immune Charm/Fear/Stun"]      = true,
+	["Immune Charm/Fear/Polymorph"] = true,
+	["Immune Fear/Polymorph/Snare"] = true,
+	["Immune Fear/Polymorph/Stun"]  = true,
+	["Immune Root/Snare/Stun"]      = true,
+}
+
+local function IsTrinket(spellID,spellName)
+	if TRINKETS[spellID] then return true end
+	return ns.ClientVersion()=="tbc" and spellName and TRINKET_NAMES[spellName] or false
+end
+
 local function NoteTrinket(sourceGUID)
 	local player=PlayerByGUID(sourceGUID)
 	if player then player.trink=(player.trink or 0)+1 end
@@ -764,23 +787,39 @@ end
 -- Spellsteal and Mass Dispel's included). A pet's is its owner's. Which side
 -- is which comes from the rosters, not the aura's type, so both ends have to
 -- be players in this match.
+local function OnMine(player)
+	for _,p in pairs(current.mine) do
+		if p==player then return true end
+	end
+	return false
+end
+
 local function NoteDispel(sourceGUID,destGUID,stolen)
 	local source=PlayerOrOwner(sourceGUID)
 	local target=PlayerByGUID(destGUID)
 	if not (source and target) then return end
 
-	local function onMine(player)
-		for _,p in pairs(current.mine) do
-			if p==player then return true end
-		end
-		return false
-	end
-
-	if not stolen and onMine(source)==onMine(target) then
+	if not stolen and OnMine(source)==OnMine(target) then
 		source.disp=(source.disp or 0)+1
 	else
 		source.purge=(source.purge or 0)+1
 	end
+end
+
+-- Crowd control broken early by damage, counted against the one who broke it
+-- ("brk") when it was their own side's: a rogue's Sinister Strike on his mage's
+-- Polymorph, or the mage's own Fire Blast. Only hard crowd control that was
+-- being timed, and only a break the log reports as one -- a dispel or a
+-- trinket is a removal. Read before NoteCC closes it, which forgets whose it
+-- was.
+local function NoteBreak(sourceGUID,destGUID,spellID)
+	if not (current and current.ccOpen and destGUID and spellID) then return end
+	local key=destGUID.."|"..spellID
+	if not current.ccOpen[key] or (current.ccSoft and current.ccSoft[key]) then return end
+	local breaker=PlayerOrOwner(sourceGUID)
+	local caster=PlayerByGUID(current.ccBy and current.ccBy[key])
+	if not (breaker and caster) then return end
+	if OnMine(breaker)==OnMine(caster) then breaker.brk=(breaker.brk or 0)+1 end
 end
 
 -- Interrupts both ways: a cast stopped ("kick", a pet's its owner's) and a
@@ -961,7 +1000,7 @@ local function OnCombatLog()
 		NoteFeign(sourceGUID,true)
 	end
 
-	if event=="SPELL_CAST_SUCCESS" and TRINKETS[spellID] then
+	if event=="SPELL_CAST_SUCCESS" and IsTrinket(spellID,spellName) then
 		return NoteTrinket(sourceGUID)
 	end
 
@@ -981,6 +1020,7 @@ local function OnCombatLog()
 	elseif event=="SPELL_AURA_REMOVED" or event=="SPELL_AURA_BROKEN"
 		or event=="SPELL_AURA_BROKEN_SPELL" then
 		if spellID==FEIGN_DEATH then NoteFeign(destGUID,false) end
+		if event~="SPELL_AURA_REMOVED" then NoteBreak(sourceGUID,destGUID,spellID) end
 		-- Breaking on damage is how most fears end, and the log reports that
 		-- differently from an aura running out. Missing it left the fear open
 		-- until the whistle, where it was banked at the twelve second cap.
@@ -1149,6 +1189,9 @@ local function ShowPlayerTooltip(slot)
 	end
 	if (tonumber(player.kick) or 0)>0 or (tonumber(player.kicked) or 0)>0 then
 		GameTooltip:AddLine(L.HISTORY_TIP_KICKS:format(tonumber(player.kick) or 0,tonumber(player.kicked) or 0),1,1,1)
+	end
+	if (tonumber(player.brk) or 0)>0 then
+		GameTooltip:AddLine(L.HISTORY_TIP_BREAKS:format(player.brk),1,0.5,0.5)
 	end
 
 	-- Rates only where the match length was recorded; an average over an
@@ -3404,10 +3447,10 @@ function module:OnEnable()
 			-- Gathered up to the moment you left rather than to the end, so the
 			-- row says so rather than quietly reading like a full record.
 			left   = left or nil,
-			-- Trinkets, dispels and interrupts were counted (trink, disp,
-			-- purge, kick, kicked on the players), so a player without them
-			-- had none: a match from before this has no such field, and
-			-- nobody's are known.
+			-- Trinkets, dispels, interrupts and breaks were counted (trink,
+			-- disp, purge, kick, kicked, brk on the players), so a player
+			-- without them had none: a match from before this has no such
+			-- field, and nobody's are known.
 			plays  = gathered and true or nil,
 			mine   = AsList(gathered and gathered.mine),
 			theirs = AsList(gathered and gathered.theirs),

@@ -60,6 +60,9 @@ ignore:
   # ignored.
   - tools
 
+  # The stub-client tests: run from the repository, never by the game.
+  - tests
+
   # Repository furniture the game never reads.
   - README.md
   - CHANGELOG.md
