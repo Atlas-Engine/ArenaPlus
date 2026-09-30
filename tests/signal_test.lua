@@ -21,6 +21,8 @@ local function Widget()
 			elseif k == "SetColorTexture" then self.colour = { a[1], a[2], a[3] }
 			elseif k == "CreateTexture" then local tex = Widget(); self.textures = self.textures or {}; table.insert(self.textures, tex); return tex
 			elseif k == "SetScale" then self.scale = a[1]
+			elseif k == "SetPoint" then self.point = a
+			elseif k == "SetSize" then self.size = a
 			elseif k == "SetScript" then self.scripts = self.scripts or {}; self.scripts[a[1]] = a[2]
 			elseif k == "RegisterEvent" then self.events = self.events or {}; self.events[a[1]] = true
 			elseif k == "UnregisterEvent" then self.events = self.events or {}; self.events[a[1]] = nil
@@ -84,6 +86,14 @@ local v = Read()
 check(valid(v), "in the arena: a valid mark")
 check(v and v[2] == 1 and v[3] == 4 and v[4] == 1, "prep, Dalaran (617), rated 2v2")
 check(math.abs(_G.ArenaPlusSignal.scale - 768 / 1440) < 1e-9, "one unit one pixel")
+local sig = _G.ArenaPlusSignal
+check(sig.point[1] == "TOPRIGHT" and sig.point[3] == "TOPRIGHT" and sig.size[1] == 4 and sig.size[2] == 28,
+	"a 4 by 28 column in the top-right corner")
+local stacked = true
+for i, tex in ipairs(sig.textures) do
+	if not (tex.point[1] == "TOPLEFT" and tex.point[4] == 0 and tex.point[5] == -(i - 1) * 4) then stacked = false end
+end
+check(stacked, "its cells stacked top to bottom")
 local seq = v[5]
 tick()
 local same = Read()[5] == seq

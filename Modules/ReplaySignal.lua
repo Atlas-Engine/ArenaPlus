@@ -1,16 +1,16 @@
 local ADDON_NAME, ns = ...
 local L = ns.L
 
--- A mark for ReplayPlus: a strip of seven 4x4-pixel cells in the top-left
--- corner of the screen while you are in an arena, and for half a minute after
--- you leave one. ReplayPlus reads it off the game's window to start recording
+-- A mark for ReplayPlus: a column of seven 4x4-pixel cells down the right edge
+-- of the screen from its top-right corner, while you are in an arena and for
+-- half a minute after you leave one. ReplayPlus reads it off the game's window to start recording
 -- as the arena begins and stop as it ends -- live, which the combat log cannot
 -- be: the game writes it in 48 KiB blocks, so an arena's entry reached the
 -- file a minute or more late and its end not until the next block, often the
 -- next arena's (measured 2026-09-30).
 --
 -- Each cell is one of eight colours, red, green and blue each fully on or off,
--- read as a number red 4 + green 2 + blue 1:
+-- read as a number red 4 + green 2 + blue 1, top to bottom:
 --
 --   magenta | phase | map | bracket | sequence | check | green
 --
@@ -74,7 +74,7 @@ local function Build()
 		if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false) end
 		if t.SetTexelSnappingBias then t:SetTexelSnappingBias(0) end
 		t:SetSize(CELL,CELL)
-		t:SetPoint("TOPLEFT",frame,"TOPLEFT",(i-1)*CELL,0)
+		t:SetPoint("TOPLEFT",frame,"TOPLEFT",0,-(i-1)*CELL)
 		cells[i]=t
 	end
 	frame:Hide()
@@ -87,9 +87,11 @@ local function Fit()
 	local _,height=GetPhysicalScreenSize()
 	if not height or height<=0 then height=768 end
 	frame:SetScale(768/height)
-	frame:SetSize(CELL*CELLS,CELL)
+	-- A column down the right edge, from the top: where the eye goes least
+	-- (a row along the top-left sat by the portraits and the chat tabs).
+	frame:SetSize(CELL,CELL*CELLS)
 	frame:ClearAllPoints()
-	frame:SetPoint("TOPLEFT",WorldFrame,"TOPLEFT",0,0)
+	frame:SetPoint("TOPRIGHT",WorldFrame,"TOPRIGHT",0,0)
 end
 
 local function Colour(t,v)
