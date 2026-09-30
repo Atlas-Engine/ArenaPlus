@@ -32,7 +32,9 @@ local ADDON_NAME, ns = ...
 -- Checked against Details' Mists data (LibOpenRaid, 2026-09-30), whose table is
 -- partly retail ids but does name each spec's own cast where one talent casts a
 -- different spell per spec or pet: Ascendance, Incarnation and Grimoire of
--- Service are listed under those as well as the talent's own id.
+-- Service are listed under those as well as the talent's own id, and so are
+-- Heart of the Wild and the race's Gift of the Naaru (one per class), which
+-- a real Mists arena's log showed cast under their own ids (2026-09-30).
 --
 -- One line per spell, "[id] = "CATEGORY", -- Name": ReplayPlus reads the
 -- tables line by line, so an entry keeps to one line with its name after it.
@@ -41,7 +43,14 @@ ns.COOLDOWNS = {
 	-- Racials, and a healthstone
 	[20594  ] = "DEFENSIVE",  -- Stoneform
 	[58984  ] = "DEFENSIVE",  -- Shadowmeld
-	[59544  ] = "DEFENSIVE",  -- Gift of the Naaru
+	[59544  ] = "DEFENSIVE",  -- Gift of the Naaru (Priest)
+	[28880  ] = "DEFENSIVE",  -- Gift of the Naaru (Warrior)
+	[59542  ] = "DEFENSIVE",  -- Gift of the Naaru (Paladin)
+	[59543  ] = "DEFENSIVE",  -- Gift of the Naaru (Hunter)
+	[59545  ] = "DEFENSIVE",  -- Gift of the Naaru (Death Knight)
+	[59547  ] = "DEFENSIVE",  -- Gift of the Naaru (Shaman)
+	[59548  ] = "DEFENSIVE",  -- Gift of the Naaru (Mage)
+	[121093 ] = "DEFENSIVE",  -- Gift of the Naaru (Monk)
 	[6262   ] = "DEFENSIVE",  -- Healthstone
 	[26297  ] = "OFFENSIVE",  -- Berserking
 	[20572  ] = "OFFENSIVE",  -- Blood Fury
@@ -82,6 +91,10 @@ ns.COOLDOWNS = {
 	[50334  ] = "OFFENSIVE",  -- Berserk (Bear Form)
 	[48505  ] = "OFFENSIVE",  -- Starfall
 	[108288 ] = "OFFENSIVE",  -- Heart of the Wild
+	[108291 ] = "OFFENSIVE",  -- Heart of the Wild (Balance)
+	[108292 ] = "OFFENSIVE",  -- Heart of the Wild (Feral)
+	[108293 ] = "OFFENSIVE",  -- Heart of the Wild (Guardian)
+	[108294 ] = "OFFENSIVE",  -- Heart of the Wild (Restoration)
 	[124974 ] = "OFFENSIVE",  -- Nature's Vigil
 
 	-- Hunter
@@ -244,11 +257,15 @@ ns.COOLDOWNS_TBC = {
 -- Mists ids, and their names, that are no cooldown on the Anniversary client:
 -- Demoralizing Shout is a debuff warriors keep up there, not a wall; Devotion
 -- Aura a paladin's everyday armour aura, not Mists' raid cooldown; 33891 the
--- Restoration druid's Tree of Life form, shifted into at will; and Vampiric
--- Embrace a Shadow priest's debuff, kept up on the target.
+-- Restoration druid's Tree of Life form, shifted into at will; Vampiric
+-- Embrace a Shadow priest's debuff, kept up on the target; Tremor Totem has no
+-- cooldown there, and Spell Reflection and Shadowmeld ten seconds.
 ns.COOLDOWNS_NOT_TBC = {
 	[1160   ] = true,  -- Demoralizing Shout
 	[31821  ] = true,  -- Devotion Aura
 	[33891  ] = true,  -- Tree of Life
 	[15286  ] = true,  -- Vampiric Embrace
+	[8143   ] = true,  -- Tremor Totem
+	[23920  ] = true,  -- Spell Reflection
+	[58984  ] = true,  -- Shadowmeld
 }

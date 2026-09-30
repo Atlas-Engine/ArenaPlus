@@ -36,7 +36,7 @@ ns.HARD_CC = {
 	[91800  ] = true,  -- Gnaw (Ghoul)
 	[102795 ] = true,  -- Bear Hug
 	[105593 ] = true,  -- Fist of Justice
-	[107570 ] = true,  -- Storm Bolt
+	[132169 ] = true,  -- Storm Bolt (the stun; the cast is 107570)
 	[108194 ] = true,  -- Asphyxiate
 	[110698 ] = true,  -- Hammer of Justice (Symbiosis)
 	[113801 ] = true,  -- Bash (Treants)
@@ -57,7 +57,7 @@ ns.HARD_CC = {
 	[132168 ] = true,  -- Shockwave
 
 	-- Stuns that land on their own
-	[100    ] = true,  -- Charge
+	[7922   ] = true,  -- Charge Stun (Charge's stun; the cast is 100)
 	[77505  ] = true,  -- Earthquake
 	[113953 ] = true,  -- Paralysis
 	[118000 ] = true,  -- Dragon Roar
@@ -139,7 +139,7 @@ ns.HARD_CC = {
 	[69179  ] = true,  -- Arcane Torrent (Rage version)
 	[80483  ] = true,  -- Arcane Torrent (Focus version)
 	[102051 ] = true,  -- Frostjaw
-	[114237 ] = true,  -- Glyph of Fae Silence (TODO: verify id)
+	[114238 ] = true,  -- Fae Silence (the glyph's debuff; the glyph is 114237)
 	[115782 ] = true,  -- Optical Blast (Observer)
 	[116709 ] = true,  -- Spear Hand Strike
 	[137460 ] = true,  -- Ring of Peace (Silence effect)
