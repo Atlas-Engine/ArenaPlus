@@ -32,7 +32,12 @@ local L = ns.L
 --
 -- Only ever switched off if this switched it on. A log you started yourself --
 -- for a raid, say -- is left alone. Which one it was is kept in the saved
--- variables, so a /reload in the arena does not lose track of it.
+-- variables, so a /reload in the arena does not lose track of it. Never
+-- switched off inside a dungeon, a raid or a scenario either, where a log is
+-- wanted for its own sake -- the linger ran out fifteen minutes into one, and
+-- the log someone meant to upload stopped there. The linger starts again once
+-- out of it; it runs from leaving, not from the last event, which pushed it
+-- back at every queue update.
 --
 -- Off by default: it writes a file per arena into the game's Logs folder,
 -- which is only worth having for something that reads them.
@@ -89,6 +94,14 @@ local function Logging()
 	return LoggingCombat() and true or false
 end
 
+local function InGroupInstance()
+	local _,kind=IsInInstance()
+	return kind=="party" or kind=="raid" or kind=="scenario"
+end
+
+-- When the waiting switch-off is due; nil when none waits.
+local offAt=nil
+
 -- `fresh` treats an arena already underway as just begun: at load, on
 -- arriving, and when the tick is switched on.
 local function Update(fresh)
@@ -98,6 +111,7 @@ local function Update(fresh)
 
 	if underway then
 		generation=generation+1
+		offAt=nil
 		if (fresh or not underwayBefore) and module.db.enabled and not Logging() then
 			LoggingCombat(true)
 			module.db.started=true
@@ -107,15 +121,22 @@ local function Update(fresh)
 		-- flag left from the last one. Forgotten now rather than acted on
 		-- later, where it could stop a log you have just started yourself.
 		module.db.started=nil
-	elseif module.db.started then
+		offAt=nil
+	elseif module.db.started and InGroupInstance() then
+		-- Kept on while inside; the switch-off waiting is called off.
+		generation=generation+1
+		offAt=nil
+	elseif module.db.started and not offAt then
 		-- Whether or not the tick is still on: switched off in the middle of a
 		-- match, the log runs until you leave rather than stopping partway
 		-- through it, and is then put away like any other.
 		generation=generation+1
+		offAt=GetTime()+LINGER
 		local mine=generation
 		C_Timer.After(LINGER,function()
 			if mine~=generation then return end
-			if InArena() or ArenaPopped() then return end
+			offAt=nil
+			if InArena() or ArenaPopped() or InGroupInstance() then return end
 			if Logging() then LoggingCombat(false) end
 			module.db.started=nil
 		end)

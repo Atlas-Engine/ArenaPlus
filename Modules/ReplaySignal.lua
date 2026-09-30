@@ -140,15 +140,26 @@ local watcher=CreateFrame("Frame")
 
 local function Update()
 	tick=tick+1
+	-- The test: phase 7, out of the arena, which ReplayPlus never records,
+	-- with every map and bracket value in turn so each cell shows all eight
+	-- colours. Ended by entering an arena.
 	if testUntil then
-		if GetTime()<testUntil then
+		if GetTime()<testUntil and not InArena() then
 			local step=math.floor((GetTime()-testStart)/2)
-			Draw(step%7+1,step%8,step%4)
+			Draw(7,step%8,(step+3)%8)
 			return
 		end
 		testUntil=nil
 	end
-	if not (module.db and module.db.enabled) then HideMark() return end
+	if not (module.db and module.db.enabled) then
+		-- Put away as if never in an arena: switched on again inside one, it
+		-- is a new arena whose gates were not seen.
+		watcher:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+		wasInArena=false
+		instance,leftAt=nil,nil
+		HideMark()
+		return
+	end
 	if InArena() then
 		local id=select(8,GetInstanceInfo())
 		-- A new arena: entered from outside one. A /reload inside starts this
@@ -224,10 +235,13 @@ end
 -- What it would draw now, since none of it is words.
 --
 --   /arena signal        the phase, map, bracket, winner and the pixel scale
---   /arena signal test   every phase, map and bracket in turn for 16 seconds,
---                        for ReplayPlus's reader to be checked against
+--   /arena signal test   every map and bracket value in turn for 16 seconds,
+--                        as if just out of an arena, for ReplayPlus's reader
+--                        to be checked against without recording anything;
+--                        refused in an arena, where it would end the recording
 ns.SlashCommands["signal"]=function(arg)
 	if arg=="test" then
+		if InArena() then ns.Print(L.REPLAYSIGNAL_TEST_ARENA) return end
 		Build()
 		Fit()
 		if not ticker then ticker=C_Timer.NewTicker(0.25,Update) end

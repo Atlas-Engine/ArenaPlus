@@ -22,6 +22,8 @@ local function Widget()
 			elseif k == "CreateTexture" then local tex = Widget(); self.textures = self.textures or {}; table.insert(self.textures, tex); return tex
 			elseif k == "SetScale" then self.scale = a[1]
 			elseif k == "SetScript" then self.scripts = self.scripts or {}; self.scripts[a[1]] = a[2]
+			elseif k == "RegisterEvent" then self.events = self.events or {}; self.events[a[1]] = true
+			elseif k == "UnregisterEvent" then self.events = self.events or {}; self.events[a[1]] = nil
 			end
 		end
 	end }
@@ -116,5 +118,54 @@ check(Read()[2] == 3, "the minute run out: fighting, inferred")
 module.db.enabled = false
 tick()
 check(Read() == nil, "switched off: no mark")
+-- Switched off and on again inside an arena: a new arena as far as the mark
+-- knows, its gates not seen by it; and nothing left listening meanwhile.
+local watcher
+for _, f in ipairs(frames) do if f.scripts and f.scripts.OnEvent then watcher = f end end
+module.db.enabled = true
+inArena, runTime = false, 0
+tick()
+inArena, runTime = true, 500
+tick()
+check(watcher.events["COMBAT_LOG_EVENT_UNFILTERED"], "the starting room: the combat log listened to")
+handler(nil, "CHAT_MSG_BG_SYSTEM_NEUTRAL", "The Arena battle has begun!")
+tick()
+check(Read()[2] == 2, "the gates seen")
+module.db.enabled = false
+tick()
+check(not watcher.events["COMBAT_LOG_EVENT_UNFILTERED"], "switched off: the combat log no longer listened to")
+module.db.enabled = true
+runTime = 63000
+tick()
+check(Read()[2] == 3, "switched on again mid-arena: the gates inferred, not the last session's")
+-- The test mark: out of the arena only, and never a phase ReplayPlus records.
+inArena = false
+now = now + 60
+tick()
+ns.SlashCommands["signal"]("test")
+local phases, maps = {}, {}
+for i = 1, 60 do
+	tick()
+	local m = Read()
+	if m then
+		check(valid(m), "the test mark is valid")
+		phases[m[2]] = true
+		maps[m[3]] = true
+	end
+end
+local only7 = true
+for p in pairs(phases) do if p ~= 7 then only7 = false end end
+check(only7 and phases[7], "the test mark is out of the arena, phase 7 only")
+local count = 0
+for _ in pairs(maps) do count = count + 1 end
+check(count == 8, "and shows every map value")
+now = now + 20
+tick()
+check(Read() == nil, "and ends")
+inArena, runTime = true, 500
+tick()
+ns.SlashCommands["signal"]("test")
+tick()
+check(Read()[2] == 1, "refused inside an arena: the real mark stays")
 print("signal: passed " .. passes .. ", failed " .. fails)
 os.exit(fails == 0 and 0 or 1)
