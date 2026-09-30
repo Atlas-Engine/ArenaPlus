@@ -1,5 +1,7 @@
-﻿- New: pointing at a guild member shows where they stand on the ladder, in either guild window, with the tooltip beside the window instead of over it.
-- New: "Log combat in arenas" turns the game's combat log on for each arena and off once you have left, for replay recorders. A log you start yourself with /combatlog is left alone. Off by default.
-- Anniversary: crowd control now counts TBC's own stuns and silences -- Intercept Stun, Concussion Blow, Charge Stun, Kick - Silenced, Counterspell - Silenced and more.
-- Anniversary: Demoralizing Roar and Avenger's Shield no longer count as crowd control.
-- The match history records each player's race, for tools that read it.
+﻿- New: "Signal ReplayPlus" draws a small coloured strip, 28 by 4 pixels, in the top-left corner while you are in an arena and for half a minute after, so ReplayPlus can start recording as the arena begins and stop as it ends. It carries only the arena's phase (including the result), map and bracket. Off by default. /arena signal says what the strip is showing; /arena signal test shows a test strip for 16 seconds, outside an arena.
+- "Log combat in arenas" now keeps the log on for fifteen minutes after you leave an arena instead of ten seconds, so the match's last lines reach the file sooner. It never switches the log off inside a dungeon, raid or scenario.
+- The match history's player tooltip shows trinkets used (the human and Forsaken racials included), party and offensive dispels, interrupts and times interrupted, and how often a player broke their own team's crowd control. Recorded from this version on, on Mists and Anniversary.
+- A pet's, guardian's or totem's dispels and interrupts count for its owner, and breaking your own pet's crowd control counts as breaking your team's.
+- Crowd control now counts Storm Bolt, Charge's stun and Fae Silence under the ids a Mists combat log uses.
+- New: a list of the major offensive and defensive cooldowns, for Mists and Anniversary, ships with the addon for ReplayPlus to mark on a replay's timeline. ArenaPlus itself does not load it.
+- Restart the game after updating: a /reload will not load the new file.
