@@ -523,7 +523,12 @@ L.HISTORY_TIP_HEALING_ONLY= "Healing |cffffffff%s|r"
 ----------------------------------------------------------------
 L.COMBATLOG_TITLE         = "Combat log"
 L.COMBATLOG_ENABLE        = "Log combat in arenas"
-L.COMBATLOG_DESC          = "Turns the game's combat log on when an arena queue pops and off once you have left, for replay recorders and anything else that reads it. A log you started yourself with /combatlog is left alone."
+L.COMBATLOG_DESC          = "Turns the game's combat log on when an arena queue pops and off a while after you have left, for replay recorders and anything else that reads it. A log you started yourself with /combatlog is left alone."
+L.REPLAYSIGNAL_TITLE      = "ReplayPlus mark"
+L.REPLAYSIGNAL_ENABLE     = "Signal ReplayPlus"
+L.REPLAYSIGNAL_DESC       = "Draws a small coloured strip, 28 by 4 pixels, in the top-left corner of the screen while you are in an arena and for half a minute after you leave. ReplayPlus reads it to start recording as the arena begins and stop as it ends: the game writes its combat log too late for that. It carries only the arena's phase, map and bracket."
+L.REPLAYSIGNAL_STATUS     = "Signal ReplayPlus: %s.  Phase: %s.  Map: %s.  Bracket: %s.  Winner: %s.  Your side: %s.  Pixel scale: %s."
+L.REPLAYSIGNAL_TESTING    = "Showing every phase, map and bracket in turn for 16 seconds."
 
 ----------------------------------------------------------------
 -- Auto marker

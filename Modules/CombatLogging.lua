@@ -9,10 +9,19 @@ local L = ns.L
 -- This does both halves: on when an arena queue pops, off once you are out.
 --
 -- On at the pop rather than on arrival. Entering the arena is itself a line in
--- the log (ZONE_CHANGE), the one ReplayPlus starts recording on, and it is
--- written during the loading screen -- before anything here gets to run on the
--- other side of it. Off OFF_DELAY seconds after leaving, for the same reason
--- the other way round: the line saying you left has to make it in too.
+-- the log (ZONE_CHANGE), and it is written during the loading screen -- before
+-- anything here gets to run on the other side of it.
+--
+-- Off only LINGER seconds after leaving. The game writes the log to disk in
+-- 48 KiB blocks, holding the rest in memory (measured 2026-09-30): the last
+-- seconds of a match and the line saying you left reach the file only when
+-- the next block fills, and nothing more is logged once the log is off -- so
+-- switched off ten seconds after leaving, they waited for the next arena. Kept
+-- on, world combat or the next arena's first block writes them sooner, and
+-- the game writes what is left when it closes. Nothing an addon does can make
+-- it write sooner: switching logging off and on from Lua writes nothing.
+-- ReplayPlus starts and stops recording from ArenaPlus's mark (ReplaySignal)
+-- and fills the match in whenever the log comes.
 --
 -- And on again on arrival, and ARRIVAL_CHECK seconds after it. Another addon
 -- may switch the log off at every loading screen -- Details' "Auto Start
@@ -35,7 +44,7 @@ local module = ns.RegisterModule("combatlog",{
 	defaults    = { enabled=false },
 })
 
-local OFF_DELAY     = 10
+local LINGER        = 900
 local ARRIVAL_CHECK = 3
 
 -- Bumped by every decision, so a switch-off still waiting on its delay can
@@ -104,7 +113,7 @@ local function Update(fresh)
 		-- through it, and is then put away like any other.
 		generation=generation+1
 		local mine=generation
-		C_Timer.After(OFF_DELAY,function()
+		C_Timer.After(LINGER,function()
 			if mine~=generation then return end
 			if InArena() or ArenaPopped() then return end
 			if Logging() then LoggingCombat(false) end
