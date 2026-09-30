@@ -503,6 +503,13 @@ L.HISTORY_TIP_DAMAGE_ONLY = "Damage |cffffffff%s|r"
 L.HISTORY_TIP_HEALING_ONLY= "Healing |cffffffff%s|r"
 
 ----------------------------------------------------------------
+-- Combat log
+----------------------------------------------------------------
+L.COMBATLOG_TITLE         = "Combat log"
+L.COMBATLOG_ENABLE        = "Log combat in arenas"
+L.COMBATLOG_DESC          = "Turns the game's combat log on when an arena queue pops and off once you have left, for replay recorders and anything else that reads it. A log you started yourself with /combatlog is left alone."
+
+----------------------------------------------------------------
 -- Auto marker
 ----------------------------------------------------------------
 

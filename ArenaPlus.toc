@@ -60,3 +60,4 @@ Modules\ArenaLadder.lua
 Modules\InspectPanel.lua
 Modules\AuctionPvP.lua
 Modules\ArenaHistory.lua
+Modules\CombatLogging.lua
