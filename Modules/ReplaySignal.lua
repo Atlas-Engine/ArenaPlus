@@ -19,7 +19,7 @@ local L = ns.L
 --             known, 7 out of the arena
 --   map       the arena, an index into MAPS; 0 unknown
 --   bracket   1-3 rated 2v2/3v3/5v5, 5-7 skirmish; 0 unknown
---   sequence  counts on every tick, so ReplayPlus can tell a frozen picture
+--   sequence  counts on once a second, so ReplayPlus can tell a frozen picture
 --   check     7 - (phase ^ map ^ bracket ^ sequence)
 --
 -- Nothing else is ever drawn: no combat, no names. The frame has no parent, so
@@ -98,7 +98,11 @@ end
 
 local function Draw(phase,map,bracket)
 	Build()
-	local seq=tick%8
+	-- Once a second, not every tick: the sequence and check cells were the
+	-- strip's only movement, a flicker four times a second in the corner of
+	-- the eye. ReplayPlus calls a picture frozen after three seconds without
+	-- a change, so once a second still tells it the game is drawing.
+	local seq=math.floor(tick/4)%8
 	local check=7-bit.bxor(bit.bxor(phase,map),bit.bxor(bracket,seq))
 	local values={MAGENTA,phase,map,bracket,seq,check,GREEN}
 	for i=1,CELLS do Colour(cells[i],values[i]) end

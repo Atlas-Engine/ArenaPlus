@@ -86,7 +86,10 @@ check(v and v[2] == 1 and v[3] == 4 and v[4] == 1, "prep, Dalaran (617), rated 2
 check(math.abs(_G.ArenaPlusSignal.scale - 768 / 1440) < 1e-9, "one unit one pixel")
 local seq = v[5]
 tick()
+local same = Read()[5] == seq
+tick() tick() tick()
 check(Read()[5] ~= seq, "the sequence counts on")
+check(same, "once a second, not every tick: no flicker")
 -- The gates, from the chat line.
 local handler = frames[1].scripts and frames[1].scripts.OnEvent
 for _, f in ipairs(frames) do if f.scripts and f.scripts.OnEvent then handler = f.scripts.OnEvent end end
