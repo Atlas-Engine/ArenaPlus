@@ -222,7 +222,9 @@ ns.COOLDOWNS_TBC = {
 }
 
 -- Mists ids, and their names, that are no cooldown on the Anniversary client:
--- Demoralizing Shout is a debuff warriors keep up there, not a wall.
+-- Demoralizing Shout is a debuff warriors keep up there, not a wall, and
+-- Devotion Aura a paladin's everyday armour aura, not Mists' raid cooldown.
 ns.COOLDOWNS_NOT_TBC = {
 	[1160   ] = true,  -- Demoralizing Shout
+	[31821  ] = true,  -- Devotion Aura
 }

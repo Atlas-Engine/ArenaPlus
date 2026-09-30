@@ -508,6 +508,8 @@ L.HISTORY_TIP_DECISIVE    = "Decisive kills |cffffffff%d|r"
 -- off an enemy (a purge, or a Spellsteal).
 L.HISTORY_TIP_DISPELS     = "Party dispels |cffffffff%d|r    Offensive dispels |cffffffff%d|r"
 L.HISTORY_TIP_TRINKETS    = "Trinkets used |cffffffff%d|r"
+-- Casts they stopped, and casts of theirs that were stopped.
+L.HISTORY_TIP_KICKS       = "Interrupts |cffffffff%d|r    Interrupted |cffffffff%d|r"
 L.HISTORY_TIP_DAMAGE      = "Damage |cffffffff%s|r  (%s dps)"
 L.HISTORY_TIP_HEALING     = "Healing |cffffffff%s|r  (%s hps)"
 L.HISTORY_TIP_DAMAGE_ONLY = "Damage |cffffffff%s|r"

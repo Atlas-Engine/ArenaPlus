@@ -496,8 +496,8 @@ local function Sample(request)
 					if race then player.race=race end
 					local sex=UnitSex(unit)
 					if sex==2 or sex==3 then player.sex=sex end
-					-- Whose pet is whose, so a felhunter's Devour Magic counts
-					-- as its warlock's dispel. Kept on the match being gathered,
+					-- Whose pet is whose, so a felhunter's Devour Magic and Spell
+					-- Lock count as its warlock's dispel and interrupt. Kept on the match being gathered,
 					-- never stored: a pet's guid means nothing after it.
 					local pet=(unit=="player") and "pet" or unit:gsub("^party","partypet"):gsub("^arena","arenapet")
 					local petGUID=guid and UnitGUID(pet)
@@ -752,14 +752,20 @@ local function NoteTrinket(sourceGUID)
 	if player then player.trink=(player.trink or 0)+1 end
 end
 
+-- The player a guid is, or whose pet it is: a warlock's dispels and
+-- interrupts are their felhunter's.
+local function PlayerOrOwner(guid)
+	return PlayerByGUID(guid)
+		or PlayerByGUID(current and current.petOwner and current.petOwner[guid])
+end
+
 -- Dispels, counted two ways: a debuff taken off your own side ("disp", a party
 -- dispel) and a buff taken off the other ("purge", an offensive dispel --
--- Spellsteal and Mass Dispel's included). A pet's is its owner's: a warlock's
--- dispels are their felhunter's. Which side is which comes from the rosters,
--- not the aura's type, so both ends have to be players in this match.
+-- Spellsteal and Mass Dispel's included). A pet's is its owner's. Which side
+-- is which comes from the rosters, not the aura's type, so both ends have to
+-- be players in this match.
 local function NoteDispel(sourceGUID,destGUID,stolen)
-	local source=PlayerByGUID(sourceGUID)
-		or PlayerByGUID(current and current.petOwner and current.petOwner[sourceGUID])
+	local source=PlayerOrOwner(sourceGUID)
 	local target=PlayerByGUID(destGUID)
 	if not (source and target) then return end
 
@@ -775,6 +781,17 @@ local function NoteDispel(sourceGUID,destGUID,stolen)
 	else
 		source.purge=(source.purge or 0)+1
 	end
+end
+
+-- Interrupts both ways: a cast stopped ("kick", a pet's its owner's) and a
+-- cast of one's own stopped ("kicked"). Only a player's cast counts: kicking a
+-- water elemental's bolt is not stopping anybody's heal.
+local function NoteInterrupt(sourceGUID,destGUID)
+	local target=PlayerByGUID(destGUID)
+	if not target then return end
+	target.kicked=(target.kicked or 0)+1
+	local source=PlayerOrOwner(sourceGUID)
+	if source then source.kick=(source.kick or 0)+1 end
 end
 
 local function NoteFeign(destGUID,feigning)
@@ -952,6 +969,10 @@ local function OnCombatLog()
 		return NoteDispel(sourceGUID,destGUID,event=="SPELL_STOLEN")
 	end
 
+	if event=="SPELL_INTERRUPT" then
+		return NoteInterrupt(sourceGUID,destGUID)
+	end
+
 	if event=="UNIT_DIED" then
 		NoteDeath(destGUID)
 	elseif event=="SPELL_AURA_APPLIED" or event=="SPELL_AURA_REFRESH" then
@@ -1125,6 +1146,9 @@ local function ShowPlayerTooltip(slot)
 	end
 	if (tonumber(player.trink) or 0)>0 then
 		GameTooltip:AddLine(L.HISTORY_TIP_TRINKETS:format(player.trink),1,1,1)
+	end
+	if (tonumber(player.kick) or 0)>0 or (tonumber(player.kicked) or 0)>0 then
+		GameTooltip:AddLine(L.HISTORY_TIP_KICKS:format(tonumber(player.kick) or 0,tonumber(player.kicked) or 0),1,1,1)
 	end
 
 	-- Rates only where the match length was recorded; an average over an
@@ -3380,9 +3404,10 @@ function module:OnEnable()
 			-- Gathered up to the moment you left rather than to the end, so the
 			-- row says so rather than quietly reading like a full record.
 			left   = left or nil,
-			-- Trinkets and dispels were counted (trink, disp, purge on the
-			-- players), so a player without them spent none: a match from
-			-- before this has no such field, and nobody's are known.
+			-- Trinkets, dispels and interrupts were counted (trink, disp,
+			-- purge, kick, kicked on the players), so a player without them
+			-- had none: a match from before this has no such field, and
+			-- nobody's are known.
 			plays  = gathered and true or nil,
 			mine   = AsList(gathered and gathered.mine),
 			theirs = AsList(gathered and gathered.theirs),

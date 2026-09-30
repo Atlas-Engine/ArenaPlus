@@ -23,7 +23,7 @@ Every rated bracket, US and EU, searchable and filterable by spec. Ranks and rat
 What Gladiator, Duelist, Rival and Challenger cost right now, and how far you are from the next one. Rated battlegrounds show Hero of the Alliance or Hero of the Horde, whichever is yours.
 
 ### 📜 A match history that remembers
-The last matches of each bracket: your comp against theirs, rating and change, damage, healing, damage taken, crowd control landed and taken, trinkets used and dispels on both sides, and who earned the game. Expand a match to see every player, with their ladder standing **as it was when you fought them** — click it to find them on the ladder.
+The last matches of each bracket: your comp against theirs, rating and change, damage, healing, damage taken, crowd control landed and taken, trinkets used, dispels and interrupts, and who earned the game. Expand a match to see every player, with their ladder standing **as it was when you fought them** — click it to find them on the ladder.
 
 Recorded from the scoreboard rather than guessed at, including the rating change for *every* player, not just yours.
 
