@@ -496,6 +496,15 @@ local function Sample(request)
 					if race then player.race=race end
 					local sex=UnitSex(unit)
 					if sex==2 or sex==3 then player.sex=sex end
+					-- Whose pet is whose, so a felhunter's Devour Magic counts
+					-- as its warlock's dispel. Kept on the match being gathered,
+					-- never stored: a pet's guid means nothing after it.
+					local pet=(unit=="player") and "pet" or unit:gsub("^party","partypet"):gsub("^arena","arenapet")
+					local petGUID=guid and UnitGUID(pet)
+					if petGUID then
+						current.petOwner=current.petOwner or {}
+						current.petOwner[petGUID]=guid
+					end
 					if unit:match("^arena") and GetArenaOpponentSpec then
 						player.spec=GetArenaOpponentSpec(index) or player.spec
 					elseif unit:match("^party") then
@@ -729,6 +738,45 @@ local function NoteDeath(guid)
 	end
 end
 
+-- The PvP trinket, and the two racials that do its job: Every Man for Himself
+-- and Will of the Forsaken. Counted per player, so the history -- and whatever
+-- reads it -- can say who spent theirs.
+local TRINKETS = {
+	[42292] = true,  -- PvP Trinket
+	[59752] = true,  -- Every Man for Himself
+	[7744]  = true,  -- Will of the Forsaken
+}
+
+local function NoteTrinket(sourceGUID)
+	local player=PlayerByGUID(sourceGUID)
+	if player then player.trink=(player.trink or 0)+1 end
+end
+
+-- Dispels, counted two ways: a debuff taken off your own side ("disp", a party
+-- dispel) and a buff taken off the other ("purge", an offensive dispel --
+-- Spellsteal and Mass Dispel's included). A pet's is its owner's: a warlock's
+-- dispels are their felhunter's. Which side is which comes from the rosters,
+-- not the aura's type, so both ends have to be players in this match.
+local function NoteDispel(sourceGUID,destGUID,stolen)
+	local source=PlayerByGUID(sourceGUID)
+		or PlayerByGUID(current and current.petOwner and current.petOwner[sourceGUID])
+	local target=PlayerByGUID(destGUID)
+	if not (source and target) then return end
+
+	local function onMine(player)
+		for _,p in pairs(current.mine) do
+			if p==player then return true end
+		end
+		return false
+	end
+
+	if not stolen and onMine(source)==onMine(target) then
+		source.disp=(source.disp or 0)+1
+	else
+		source.purge=(source.purge or 0)+1
+	end
+end
+
 local function NoteFeign(destGUID,feigning)
 	local target=PlayerByGUID(destGUID)
 	if target then target.feigning=feigning or nil end
@@ -894,6 +942,14 @@ local function OnCombatLog()
 	-- still worth catching.
 	if event=="SPELL_CAST_SUCCESS" and spellID==FEIGN_DEATH then
 		NoteFeign(sourceGUID,true)
+	end
+
+	if event=="SPELL_CAST_SUCCESS" and TRINKETS[spellID] then
+		return NoteTrinket(sourceGUID)
+	end
+
+	if event=="SPELL_DISPEL" or event=="SPELL_STOLEN" then
+		return NoteDispel(sourceGUID,destGUID,event=="SPELL_STOLEN")
 	end
 
 	if event=="UNIT_DIED" then
@@ -1063,6 +1119,12 @@ local function ShowPlayerTooltip(slot)
 	end
 	if (tonumber(player.decisive) or 0)>0 then
 		GameTooltip:AddLine(L.HISTORY_TIP_DECISIVE:format(player.decisive),1,0.82,0)
+	end
+	if (tonumber(player.disp) or 0)>0 or (tonumber(player.purge) or 0)>0 then
+		GameTooltip:AddLine(L.HISTORY_TIP_DISPELS:format(tonumber(player.disp) or 0,tonumber(player.purge) or 0),1,1,1)
+	end
+	if (tonumber(player.trink) or 0)>0 then
+		GameTooltip:AddLine(L.HISTORY_TIP_TRINKETS:format(player.trink),1,1,1)
 	end
 
 	-- Rates only where the match length was recorded; an average over an
@@ -3318,6 +3380,10 @@ function module:OnEnable()
 			-- Gathered up to the moment you left rather than to the end, so the
 			-- row says so rather than quietly reading like a full record.
 			left   = left or nil,
+			-- Trinkets and dispels were counted (trink, disp, purge on the
+			-- players), so a player without them spent none: a match from
+			-- before this has no such field, and nobody's are known.
+			plays  = gathered and true or nil,
 			mine   = AsList(gathered and gathered.mine),
 			theirs = AsList(gathered and gathered.theirs),
 		}

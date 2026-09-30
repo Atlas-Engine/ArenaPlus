@@ -504,6 +504,10 @@ L.HISTORY_TIP_KILLS       = "Kills |cffffffff%d|r    Deaths |cffffffff%d|r"
 L.HISTORY_TIP_TAKEN       = "Damage taken |cffffffff%s|r"
 -- The kill that broke the tie, which is the one the MVP tag pays for.
 L.HISTORY_TIP_DECISIVE    = "Decisive kills |cffffffff%d|r"
+-- A party dispel takes a debuff off a team mate; an offensive one takes a buff
+-- off an enemy (a purge, or a Spellsteal).
+L.HISTORY_TIP_DISPELS     = "Party dispels |cffffffff%d|r    Offensive dispels |cffffffff%d|r"
+L.HISTORY_TIP_TRINKETS    = "Trinkets used |cffffffff%d|r"
 L.HISTORY_TIP_DAMAGE      = "Damage |cffffffff%s|r  (%s dps)"
 L.HISTORY_TIP_HEALING     = "Healing |cffffffff%s|r  (%s hps)"
 L.HISTORY_TIP_DAMAGE_ONLY = "Damage |cffffffff%s|r"
