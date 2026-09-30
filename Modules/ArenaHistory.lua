@@ -488,6 +488,14 @@ local function Sample(request)
 					-- The guid is how a death in the combat log is matched back
 					-- to a player: names there can be ambiguous, guids cannot.
 					player.guid=guid
+					-- The race and sex, which nothing else in a match records:
+					-- the combat log has neither. ReplayPlus reads them back out
+					-- of the saved history to draw the race icon beside the
+					-- name. The token, not the localised name ("Scourge").
+					local _,race=UnitRace(unit)
+					if race then player.race=race end
+					local sex=UnitSex(unit)
+					if sex==2 or sex==3 then player.sex=sex end
 					if unit:match("^arena") and GetArenaOpponentSpec then
 						player.spec=GetArenaOpponentSpec(index) or player.spec
 					elseif unit:match("^party") then
