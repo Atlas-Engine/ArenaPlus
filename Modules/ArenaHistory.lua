@@ -809,7 +809,9 @@ local function NoteBreak(sourceGUID,destGUID,spellID)
 	local key=destGUID.."|"..spellID
 	if not current.ccOpen[key] or (current.ccSoft and current.ccSoft[key]) then return end
 	local breaker=PlayerOrOwner(sourceGUID)
-	local caster=PlayerByGUID(current.ccBy and current.ccBy[key])
+	-- Whose it was, a pet's its owner's: a warlock's DoT breaking his own
+	-- Succubus's Seduction is the break this is for.
+	local caster=PlayerOrOwner(current.ccBy and current.ccBy[key])
 	if not (breaker and caster) then return end
 	if OnMine(breaker)==OnMine(caster) then breaker.brk=(breaker.brk or 0)+1 end
 end
@@ -967,6 +969,20 @@ local function OnCombatLog()
 	-- and a white hit for 1079 read as Rip and named the attacker Feral.
 	if event:sub(1,6)=="SPELL_" or event:sub(1,6)=="RANGE_" then
 		NoteSpec(sourceGUID,spellID,spellName)
+	end
+
+	-- A guardian or totem summoned mid-match is its summoner's, as the pets
+	-- Sample reads off the units are: a Grimoire felhunter's Spell Lock, a
+	-- Mindbender breaking its priest's own Psychic Scream. Sample never sees
+	-- them -- they are no pet unit -- and a pet summoned again is its owner's
+	-- at once rather than at the next sample.
+	if event=="SPELL_SUMMON" then
+		local owner=PlayerOrOwner(sourceGUID)
+		if owner and destGUID then
+			current.petOwner=current.petOwner or {}
+			current.petOwner[destGUID]=owner.guid
+		end
+		return
 	end
 
 	if event=="SWING_DAMAGE" then

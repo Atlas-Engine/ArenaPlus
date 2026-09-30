@@ -37,6 +37,19 @@ log("SPELL_AURA_BROKEN", "E-MAGE", "P-ME", 5782, "Fear", nil, nil, "DEBUFF")
 log("SPELL_AURA_APPLIED", "P-MATE", "E-MAGE", 408, "Kidney Shot", nil, nil, "DEBUFF")
 advance(4)
 log("SPELL_AURA_REMOVED", "P-MATE", "E-MAGE", 408, "Kidney Shot", nil, nil, "DEBUFF")
+-- Pets and guardians: the Succubus seduces my rogue and Locky's Corruption
+-- breaks it (crowd control landed by a pet is its owner's); a Mindbender I
+-- summon breaks my own Psychic Scream on the mage; a Grimoire felhunter
+-- summoned mid-match locks me (a guardian is its summoner's).
+log("SPELL_AURA_APPLIED", "PET-FEL", "P-MATE", 6358, "Seduction", nil, nil, "DEBUFF")
+advance(2)
+log("SPELL_AURA_BROKEN_SPELL", "E-LOCK", "P-MATE", 6358, "Seduction", 172, "Corruption", "DEBUFF")
+log("SPELL_SUMMON", "P-ME", "MB-1", 123040, "Mindbender")
+log("SPELL_AURA_APPLIED", "P-ME", "E-MAGE", 8122, "Psychic Scream", nil, nil, "DEBUFF")
+advance(1)
+log("SPELL_AURA_BROKEN", "MB-1", "E-MAGE", 8122, "Psychic Scream", nil, nil, "DEBUFF")
+log("SPELL_SUMMON", "E-LOCK", "GUARD-1", 111897, "Grimoire: Felhunter")
+log("SPELL_INTERRUPT", "GUARD-1", "P-ME", 19647, "Spell Lock", 2061, "Flash Heal")
 
 h.handlers.ARENA_RESULT({ bracket = 1, rating = 1800, delta = 12, won = true })
 
@@ -58,11 +71,12 @@ check(n("P-ME", "disp") == 1 and n("P-ME", "purge") == 1, "my party dispel and m
 check(n("E-MAGE", "purge") == 1, "the steal is an offensive dispel")
 check(n("E-LOCK", "purge") == 1, "the felhunter's purge is the warlock's")
 check(n("P-MATE", "kick") == 1 and n("E-MAGE", "kicked") == 1, "the rogue's kick, the mage kicked")
-check(n("E-LOCK", "kick") == 1 and n("P-ME", "kicked") == 1, "the felhunter's lock is the warlock's; I was locked")
-check(n("E-LOCK", "brk") == 1, "Locky broke his mage's sheep")
+check(n("E-LOCK", "kick") == 2 and n("P-ME", "kicked") == 2, "the felhunter's and the Grimoire felhunter's locks are the warlock's; I was locked twice")
+check(n("E-LOCK", "brk") == 2, "Locky broke his mage's sheep, and his own Succubus's Seduction")
 check(n("E-MAGE", "brk") == 2, "Frosty broke his own sheep, and Locky's Fear")
-check(n("P-MATE", "brk") == 0 and n("P-ME", "brk") == 0, "nobody on my side broke anything")
-check((by["P-MATE"].ccTaken or 0) > 1.9 and (by["P-MATE"].ccTaken or 0) < 2.1, "the broken sheep still counted its two seconds")
-check(n("E-MAGE", "ccTakenCount") == 1, "the Kidney Shot counted as crowd control, not a break")
+check(n("P-MATE", "brk") == 0, "my rogue broke nothing")
+check(n("P-ME", "brk") == 1, "my Mindbender broke my own Psychic Scream: mine")
+check((by["P-MATE"].ccTaken or 0) > 3.9 and (by["P-MATE"].ccTaken or 0) < 4.1, "the broken sheep and Seduction still counted their two seconds each")
+check(n("E-MAGE", "ccTakenCount") == 2, "the Kidney Shot and the Scream counted as crowd control")
 print(CLIENT .. ": passed " .. passes .. ", failed " .. fails)
 os.exit(fails == 0 and 0 or 1)
