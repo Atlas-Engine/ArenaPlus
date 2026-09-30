@@ -240,7 +240,7 @@ end
 --                        to be checked against without recording anything;
 --                        refused in an arena, where it would end the recording
 ns.SlashCommands["signal"]=function(arg)
-	if arg=="test" then
+	if type(arg)=="string" and arg:lower():match("^%s*test%s*$") then
 		if InArena() then ns.Print(L.REPLAYSIGNAL_TEST_ARENA) return end
 		Build()
 		Fit()

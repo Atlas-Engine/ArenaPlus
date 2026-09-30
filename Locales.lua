@@ -529,7 +529,7 @@ L.REPLAYSIGNAL_ENABLE     = "Signal ReplayPlus"
 L.REPLAYSIGNAL_DESC       = "Draws a small coloured strip, 28 by 4 pixels, in the top-left corner of the screen while you are in an arena and for half a minute after you leave. ReplayPlus reads it to start recording as the arena begins and stop as it ends: the game writes its combat log too late for that. It carries only the arena's phase, map and bracket."
 L.REPLAYSIGNAL_STATUS     = "Signal ReplayPlus: %s.  Phase: %s.  Map: %s.  Bracket: %s.  Winner: %s.  Your side: %s.  Pixel scale: %s."
 L.REPLAYSIGNAL_TESTING    = "Showing the mark with every map and bracket in turn for 16 seconds, as if just out of an arena, so ReplayPlus records nothing."
-L.REPLAYSIGNAL_TEST_ARENA = "Not in an arena: the test mark would end ReplayPlus's recording."
+L.REPLAYSIGNAL_TEST_ARENA = "Not while you are in an arena: the test mark would end ReplayPlus's recording."
 
 ----------------------------------------------------------------
 -- Auto marker
