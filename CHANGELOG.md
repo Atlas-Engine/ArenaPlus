@@ -1,5 +1,13 @@
 ﻿# Changelog
 
+## 1.8b
+
+- New: pointing at a guild member shows where they stand on the ladder, in either guild window, with the tooltip beside the window instead of over it.
+- New: "Log combat in arenas" turns the game's combat log on for each arena and off once you have left, for replay recorders. A log you start yourself with /combatlog is left alone. Off by default.
+- Anniversary: crowd control now counts TBC's own stuns and silences -- Intercept Stun, Concussion Blow, Charge Stun, Kick - Silenced, Counterspell - Silenced and more.
+- Anniversary: Demoralizing Roar and Avenger's Shield no longer count as crowd control.
+- The match history records each player's race, for tools that read it.
+
 ## 1.8a
 
 - Fixed decisive kills never being credited in the match history: the last hand on a player was recorded from a value that was never set.
@@ -175,6 +183,7 @@
 - Fixed characters with the same name on different realms showing each other's rank and rating.
 - Press Enter in the ladder search to step between characters sharing a name.
 - Changing page in the ladder now returns to the top of the list.
+
 
 
 

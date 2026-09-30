@@ -1,15 +1,5 @@
-﻿- Fixed decisive kills never being credited in the match history: the last hand on a player was recorded from a value that was never set.
-- Fixed the history asking the server for the scoreboard on every answer it sent back, which after the first death ran for the rest of the match.
-- Fixed opening the history right after logging in, before the client has reported this season's games, deleting the bracket's stored matches.
-- Fixed a rogue restealthing, or the scoreboard arriving, in the first half minute of an arena throwing away everything gathered so far.
-- Fixed crowd control recognised only by its name never being credited when the match ended with it still running.
-- Fixed a white hit for exactly the damage of a signature spell's id naming the attacker's spec.
-- Fixed teammates and same-realm opponents never contributing to the observed specs that correct the ladder.
-- Fixed Feral druids read as Guardian on their first Mangle or Frenzied Regeneration; Lacerate is the Guardian signature now.
-- Fixed the history's spec icons on Anniversary, where twenty-six specs drew nothing.
-- Fixed "Start on the bracket you last played" doing nothing when "Open on Rated" is switched off.
-- Fixed the inspect window's subtitle reading "TBC-US" on Anniversary instead of drawing the flag.
-- Fixed the "No enchants." row of the shopping list keeping the previous character's click, colour and enchant.
-- Fixed the ladder's Rating sort order and arrow leaking between the activity view, My rank, My alts and a reopened window.
-- Tooltip, LFG and history ladder lookups now default to this client's game rather than the Mists ladder.
-- The hidden Mists/Anniversary picker is gone from the ladder window, along with a good deal of code nothing used.
+﻿- New: pointing at a guild member shows where they stand on the ladder, in either guild window, with the tooltip beside the window instead of over it.
+- New: "Log combat in arenas" turns the game's combat log on for each arena and off once you have left, for replay recorders. A log you start yourself with /combatlog is left alone. Off by default.
+- Anniversary: crowd control now counts TBC's own stuns and silences -- Intercept Stun, Concussion Blow, Charge Stun, Kick - Silenced, Counterspell - Silenced and more.
+- Anniversary: Demoralizing Roar and Avenger's Shield no longer count as crowd control.
+- The match history records each player's race, for tools that read it.
