@@ -29,6 +29,10 @@ local ADDON_NAME, ns = ...
 -- TrackerPlus gives, except the Retribution Guardian of Ancient Kings, which is
 -- burst and is filed as OFFENSIVE here. The healthstone is the one addition
 -- TrackerPlus does not track: an item, but the log reports its use as a cast.
+-- Checked against Details' Mists data (LibOpenRaid, 2026-09-30), whose table is
+-- partly retail ids but does name each spec's own cast where one talent casts a
+-- different spell per spec or pet: Ascendance, Incarnation and Grimoire of
+-- Service are listed under those as well as the talent's own id.
 --
 -- One line per spell, "[id] = "CATEGORY", -- Name": ReplayPlus reads the
 -- tables line by line, so an entry keeps to one line with its name after it.
@@ -68,8 +72,13 @@ ns.COOLDOWNS = {
 	[132158 ] = "DEFENSIVE",  -- Nature's Swiftness
 	[740    ] = "DEFENSIVE",  -- Tranquility
 	[106731 ] = "OFFENSIVE",  -- Incarnation
+	[102560 ] = "OFFENSIVE",  -- Incarnation: Chosen of Elune
+	[102543 ] = "OFFENSIVE",  -- Incarnation: King of the Jungle
+	[102558 ] = "DEFENSIVE",  -- Incarnation: Son of Ursoc
+	[33891  ] = "DEFENSIVE",  -- Incarnation: Tree of Life
 	[112071 ] = "OFFENSIVE",  -- Celestial Alignment
 	[106952 ] = "OFFENSIVE",  -- Berserk
+	[106951 ] = "OFFENSIVE",  -- Berserk (Cat Form)
 	[50334  ] = "OFFENSIVE",  -- Berserk (Bear Form)
 	[48505  ] = "OFFENSIVE",  -- Starfall
 	[108288 ] = "OFFENSIVE",  -- Heart of the Wild
@@ -88,6 +97,7 @@ ns.COOLDOWNS = {
 	-- Mage
 	[45438  ] = "DEFENSIVE",  -- Ice Block
 	[110959 ] = "DEFENSIVE",  -- Greater Invisibility
+	[110960 ] = "DEFENSIVE",  -- Greater Invisibility (the buff's id)
 	[66     ] = "DEFENSIVE",  -- Invisibility
 	[108978 ] = "DEFENSIVE",  -- Alter Time
 	[11958  ] = "DEFENSIVE",  -- Cold Snap
@@ -111,6 +121,7 @@ ns.COOLDOWNS = {
 	[115310 ] = "DEFENSIVE",  -- Revival
 	[115080 ] = "OFFENSIVE",  -- Touch of Death
 	[123904 ] = "OFFENSIVE",  -- Invoke Xuen, the White Tiger
+	[137639 ] = "OFFENSIVE",  -- Storm, Earth, and Fire
 
 	-- Paladin
 	[642    ] = "DEFENSIVE",  -- Divine Shield
@@ -139,6 +150,7 @@ ns.COOLDOWNS = {
 	[108968 ] = "DEFENSIVE",  -- Void Shift
 	[6346   ] = "DEFENSIVE",  -- Fear Ward
 	[64843  ] = "DEFENSIVE",  -- Divine Hymn
+	[15286  ] = "DEFENSIVE",  -- Vampiric Embrace
 	[10060  ] = "OFFENSIVE",  -- Power Infusion
 	[34433  ] = "OFFENSIVE",  -- Shadowfiend
 	[123040 ] = "OFFENSIVE",  -- Mindbender
@@ -166,6 +178,9 @@ ns.COOLDOWNS = {
 	[16188  ] = "DEFENSIVE",  -- Ancestral Swiftness
 	[108285 ] = "DEFENSIVE",  -- Call of the Elements
 	[114049 ] = "OFFENSIVE",  -- Ascendance
+	[114050 ] = "OFFENSIVE",  -- Ascendance (Elemental)
+	[114051 ] = "OFFENSIVE",  -- Ascendance (Enhancement)
+	[114052 ] = "DEFENSIVE",  -- Ascendance (Restoration)
 	[2825   ] = "OFFENSIVE",  -- Bloodlust
 	[32182  ] = "OFFENSIVE",  -- Heroism
 	[16166  ] = "OFFENSIVE",  -- Elemental Mastery
@@ -184,6 +199,11 @@ ns.COOLDOWNS = {
 	[113860 ] = "OFFENSIVE",  -- Dark Soul: Misery
 	[113861 ] = "OFFENSIVE",  -- Dark Soul: Knowledge
 	[108501 ] = "OFFENSIVE",  -- Grimoire of Service
+	[111859 ] = "OFFENSIVE",  -- Grimoire: Imp
+	[111895 ] = "OFFENSIVE",  -- Grimoire: Voidwalker
+	[111896 ] = "OFFENSIVE",  -- Grimoire: Succubus
+	[111897 ] = "OFFENSIVE",  -- Grimoire: Felhunter
+	[111898 ] = "OFFENSIVE",  -- Grimoire: Felguard
 	[18540  ] = "OFFENSIVE",  -- Summon Doomguard
 	[1122   ] = "OFFENSIVE",  -- Summon Infernal
 
@@ -222,9 +242,13 @@ ns.COOLDOWNS_TBC = {
 }
 
 -- Mists ids, and their names, that are no cooldown on the Anniversary client:
--- Demoralizing Shout is a debuff warriors keep up there, not a wall, and
--- Devotion Aura a paladin's everyday armour aura, not Mists' raid cooldown.
+-- Demoralizing Shout is a debuff warriors keep up there, not a wall; Devotion
+-- Aura a paladin's everyday armour aura, not Mists' raid cooldown; 33891 the
+-- Restoration druid's Tree of Life form, shifted into at will; and Vampiric
+-- Embrace a Shadow priest's debuff, kept up on the target.
 ns.COOLDOWNS_NOT_TBC = {
 	[1160   ] = true,  -- Demoralizing Shout
 	[31821  ] = true,  -- Devotion Aura
+	[33891  ] = true,  -- Tree of Life
+	[15286  ] = true,  -- Vampiric Embrace
 }
