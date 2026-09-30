@@ -747,22 +747,14 @@ local TRINKETS = {
 	[7744]  = true,  -- Will of the Forsaken
 }
 
--- The Anniversary client's trinket is another spell than Mists', and which one
--- is not yet confirmed, so on that client it is known by name as well, under
--- every name the TBC insignias and medallions have gone by. English names, as
--- the log gives them on an English client.
+-- The Anniversary client's insignias and medallions cast the same 42292 "PvP
+-- Trinket" as Mists' (Wowhead's TBC tooltips, every one of them, 2026-09-30),
+-- so the ids above find them. On that client they are known by name as well,
+-- as its crowd control is, in case a rank or a client build logs another id.
+-- English names, as the log gives them on an English client.
 local TRINKET_NAMES = {
-	["PvP Trinket"]                 = true,
-	["Will of the Forsaken"]        = true,
-	["Insignia of the Alliance"]    = true,
-	["Insignia of the Horde"]       = true,
-	["Medallion of the Alliance"]   = true,
-	["Medallion of the Horde"]      = true,
-	["Immune Charm/Fear/Stun"]      = true,
-	["Immune Charm/Fear/Polymorph"] = true,
-	["Immune Fear/Polymorph/Snare"] = true,
-	["Immune Fear/Polymorph/Stun"]  = true,
-	["Immune Root/Snare/Stun"]      = true,
+	["PvP Trinket"]          = true,
+	["Will of the Forsaken"] = true,
 }
 
 local function IsTrinket(spellID,spellName)

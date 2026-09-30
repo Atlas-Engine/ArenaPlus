@@ -13,7 +13,7 @@ local function check(ok, what) if ok then passes = passes + 1 else fails = fails
 
 -- Trinkets: Mists' id, and on Anniversary a name.
 log("SPELL_CAST_SUCCESS", "P-ME", nil, 42292, "PvP Trinket")
-log("SPELL_CAST_SUCCESS", "E-MAGE", nil, 99999, "Immune Fear/Polymorph/Stun")
+log("SPELL_CAST_SUCCESS", "E-MAGE", nil, 99999, "PvP Trinket")
 -- A party dispel, a purge, a steal, and the felhunter's purge for its warlock.
 log("SPELL_DISPEL", "P-ME", "P-MATE", 527, "Purify", 118, "Polymorph", "DEBUFF")
 log("SPELL_DISPEL", "P-ME", "E-MAGE", 528, "Dispel Magic", 11426, "Ice Barrier", "BUFF")
