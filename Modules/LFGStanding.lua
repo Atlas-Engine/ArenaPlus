@@ -92,24 +92,10 @@ end
 -- Asking the API directly draws a protection paladin as something else, quietly.
 local ICON = "|T%s:14:14:0:0:64:64:5:59:5:59|t"
 
-local function Append(tooltip,resultID)
-	calls=calls+1
-
-	if not module.db.enabled then return end
-	if not (tooltip and tooltip.AddLine and resultID and C_LFGList) then return end
-
-	local ok,info=pcall(C_LFGList.GetSearchResultInfo,resultID)
-	if not (ok and info) then return end
-
-	-- Looked up before a single line is drawn, because a leader who is not on
-	-- the ladder should add nothing at all -- not a header over an empty space.
-	-- Most listings are that listing: the ladder stops at the Rival cutoff.
-	local found=Standing(FullName(info.leaderName))
-	if not found then return end
-	hits=hits+1
-
-	-- No name on these lines. The client's own "Leader:" line sits directly
-	-- above them, and repeating the name would only push the numbers right.
+-- The block itself, under whatever the tooltip already says: a gap, the header
+-- with their spec, and a line per bracket. Shared by the group finder and the
+-- guild roster below, so a standing reads the same in both.
+local function AddStanding(tooltip,found)
 	tooltip:AddLine(" ")
 
 	-- Any bracket's row will do: they are the same character, so they carry the
@@ -132,6 +118,29 @@ local function Append(tooltip,resultID)
 	end
 
 	tooltip:Show()
+end
+
+local function Append(tooltip,resultID)
+	calls=calls+1
+
+	if not module.db.enabled then return end
+	if not (tooltip and tooltip.AddLine and resultID and C_LFGList) then return end
+
+	local ok,info=pcall(C_LFGList.GetSearchResultInfo,resultID)
+	if not (ok and info) then return end
+
+	-- Looked up before a single line is drawn, because a leader who is not on
+	-- the ladder should add nothing at all -- not a header over an empty space.
+	-- Most listings are that listing: the ladder stops at the Rival cutoff.
+	--
+	-- No name on the block's lines. The client's own "Leader:" line sits
+	-- directly above them, and repeating the name would only push the numbers
+	-- right.
+	local found=Standing(FullName(info.leaderName))
+	if not found then return end
+	hits=hits+1
+
+	AddStanding(tooltip,found)
 end
 
 function module:OnEnable()
@@ -177,6 +186,204 @@ ns.SlashCommands["lfg"]=function(argument)
 		LFGListUtil_SetSearchEntryTooltip and "yes" or "no",
 		C_LFGList and "yes" or "no")
 	ns.Print("  called %d time(s), of which %d found the leader on the ladder.",calls,hits)
+
+	local wanted=(argument or ""):match("^%s*(.-)%s*$")
+	if wanted=="" then return end
+
+	local full=FullName(wanted)
+	local rows=Standing(full)
+	if not rows then
+		ns.Print("  \"%s\": nothing",full or wanted)
+		return
+	end
+
+	for _,row in ipairs(rows) do
+		ns.Print("  \"%s\" %s: #%d rating %d",
+			full,BRACKETS[row.bracket],row.entry.rank or 0,row.entry.rating or 0)
+	end
+end
+
+----------------------------------------------------------------
+-- The guild roster
+----------------------------------------------------------------
+
+-- The same block for a guild member, when the pointer is on their row -- a
+-- guildmate's claim is judged the same way as a stranger's listing.
+--
+-- There are two guild windows. Mists always opens the Communities one; the
+-- Anniversary client opens it too, unless its "useClassicGuildUI" setting
+-- brings back the old guild tab in the Friends window. Both are hooked, and the
+-- one never opened costs nothing.
+--
+-- The Communities roster draws a tooltip of its own only when a name, rank,
+-- note or zone is cut short, so in the full roster view most rows have none.
+-- For a member on the ladder one is started with their name; for anyone else,
+-- the row stays as Blizzard left it.
+local guild = ns.RegisterModule("guildstanding",{
+	title       = L.GUILDSTANDING_TITLE,
+	enableLabel = L.GUILDSTANDING_ENABLE,
+	desc        = L.GUILDSTANDING_DESC,
+	group       = "arena",
+	defaults    = { enabled=true },
+})
+
+local guildCalls,guildHits=0,0
+local communitiesHooked,tabHooked=false,false
+
+-- The row's tooltip moved out beside the guild window: past its right edge and
+-- whatever sticks out of it there (the Communities window's side tabs), level
+-- with the row. Blizzard puts it over the top of the window, where it hides
+-- the list being read. Where the screen has no room on the right, it goes to
+-- the window's left instead.
+--
+-- Worked in screen pixels, since the window, its tabs, the row and the tooltip
+-- can each carry a scale of their own.
+local function PlaceBeside(row,window,edges)
+	if not (window and window.GetRight and window:GetRight() and row:GetTop()) then return end
+
+	local right=window:GetRight()*window:GetEffectiveScale()
+	for _,edge in ipairs(edges or {}) do
+		if edge and edge:IsShown() and edge:GetRight() then
+			right=math.max(right,edge:GetRight()*edge:GetEffectiveScale())
+		end
+	end
+	local left=window:GetLeft()*window:GetEffectiveScale()
+	local top=row:GetTop()*row:GetEffectiveScale()
+
+	local scale=GameTooltip:GetEffectiveScale()
+	local width=GameTooltip:GetWidth()*scale
+	local screen=UIParent:GetWidth()*UIParent:GetEffectiveScale()
+	local gap=4*scale
+
+	-- Blizzard's tooltip is anchored to the row, and would go back there the
+	-- next time it lays itself out.
+	if GameTooltip.SetAnchorType then GameTooltip:SetAnchorType("ANCHOR_NONE") end
+	GameTooltip:ClearAllPoints()
+	if right+gap+width<=screen then
+		GameTooltip:SetPoint("TOPLEFT",UIParent,"BOTTOMLEFT",(right+gap)/scale,top/scale)
+	else
+		GameTooltip:SetPoint("TOPRIGHT",UIParent,"BOTTOMLEFT",(left-gap)/scale,top/scale)
+	end
+end
+
+-- Their standing on the row's tooltip, starting one when the row has none, and
+-- the tooltip -- theirs or Blizzard's -- put beside the window by `place`.
+local function ShowMember(owner,name,place)
+	guildCalls=guildCalls+1
+	if not guild.db.enabled then return end
+
+	local found=Standing(FullName(name))
+	if found then
+		guildHits=guildHits+1
+		if not (GameTooltip:GetOwner()==owner and GameTooltip:IsShown()) then
+			GameTooltip:SetOwner(owner,"ANCHOR_NONE")
+			GameTooltip:AddLine(name,1,1,1)
+		end
+		AddStanding(GameTooltip,found)
+	end
+
+	if place and GameTooltip:GetOwner()==owner and GameTooltip:IsShown() then place(owner) end
+end
+
+-- Whether a frame sits inside another, so a row from some other list that uses
+-- the same template is left where Blizzard puts its tooltip.
+local function Inside(frame,window)
+	while frame do
+		if frame==window then return true end
+		frame=frame.GetParent and frame:GetParent()
+	end
+	return false
+end
+
+-- The Communities window's rows. Each row copies the mixin's OnEnter as it is
+-- made, so the mixin is hooked for the rows still to come and any row already
+-- made is hooked on its own.
+local function HookCommunities()
+	if communitiesHooked or not CommunitiesMemberListEntryMixin then return communitiesHooked end
+
+	local function Place(row)
+		local window=CommunitiesFrame
+		if not (window and Inside(row,window)) then return end
+		PlaceBeside(row,window,{ window.ChatTab,window.RosterTab,window.GuildBenefitsTab,window.GuildInfoTab })
+	end
+
+	local function OnEnter(self)
+		local info=self.GetMemberInfo and self:GetMemberInfo()
+		if info and info.name then ShowMember(self,info.name,Place) end
+	end
+
+	hooksecurefunc(CommunitiesMemberListEntryMixin,"OnEnter",OnEnter)
+
+	local list=CommunitiesFrame and CommunitiesFrame.MemberList
+	local box=list and list.ScrollBox
+	if box and box.ForEachFrame then
+		pcall(box.ForEachFrame,box,function(row)
+			if row.OnEnter then hooksecurefunc(row,"OnEnter",OnEnter) end
+		end)
+	end
+
+	communitiesHooked=true
+	return true
+end
+
+-- The old guild tab: two sets of rows (who is online and where, and their
+-- guild status), neither with a tooltip of its own. The roster index is on the
+-- row, set as the list scrolls.
+local function HookGuildTab()
+	if tabHooked or not _G.GuildFrameButton1 then return tabHooked end
+
+	local function Place(row)
+		if FriendsFrame then PlaceBeside(row,FriendsFrame) end
+	end
+
+	local function OnEnter(self)
+		if not (self.guildIndex and GetGuildRosterInfo) then return end
+		local name=GetGuildRosterInfo(self.guildIndex)
+		if name then ShowMember(self,name,Place) end
+	end
+
+	local function OnLeave(self)
+		if GameTooltip:GetOwner()==self then GameTooltip:Hide() end
+	end
+
+	for i=1,(GUILDMEMBERS_TO_DISPLAY or 13) do
+		for _,prefix in ipairs({ "GuildFrameButton","GuildFrameGuildStatusButton" }) do
+			local row=_G[prefix..i]
+			if row then
+				row:HookScript("OnEnter",OnEnter)
+				row:HookScript("OnLeave",OnLeave)
+			end
+		end
+	end
+
+	tabHooked=true
+	return true
+end
+
+function guild:OnEnable()
+	HookGuildTab()
+	HookCommunities()
+	if tabHooked and communitiesHooked then return end
+
+	-- Either window can arrive later: the Communities one loads on demand, the
+	-- first time it is opened.
+	local waiting=CreateFrame("Frame")
+	waiting:RegisterEvent("ADDON_LOADED")
+	waiting:SetScript("OnEvent",function(self)
+		HookGuildTab()
+		HookCommunities()
+		if tabHooked and communitiesHooked then self:UnregisterEvent("ADDON_LOADED") end
+	end)
+end
+
+-- Which windows are hooked, whether the hooks have fired, and what a name
+-- resolves to.
+--
+--   open the guild window, point at a member, then: /arena guild [name]
+ns.SlashCommands["guild"]=function(argument)
+	ns.Print("hooked: Communities roster %s, old guild tab %s",
+		communitiesHooked and "yes" or "not yet",tabHooked and "yes" or "not yet")
+	ns.Print("  called %d time(s), of which %d found the member on the ladder.",guildCalls,guildHits)
 
 	local wanted=(argument or ""):match("^%s*(.-)%s*$")
 	if wanted=="" then return end

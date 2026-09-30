@@ -104,6 +104,13 @@ L.LFG_ENABLE              = "Show ladder standing in the group finder"
 L.LFG_DESC                = "Hovering a listing under Arenas, Battlegrounds, World PvP or Custom shows where its leader stands on the ladder. Nothing is added for a leader the ladder does not have, which is most of them."
 
 ----------------------------------------------------------------
+-- Guild roster
+----------------------------------------------------------------
+L.GUILDSTANDING_TITLE     = "Guild roster"
+L.GUILDSTANDING_ENABLE    = "Show ladder standing in the guild roster"
+L.GUILDSTANDING_DESC      = "Pointing at a guild member shows where they stand on the ladder, in either guild window. Nothing is added for anyone the ladder does not have."
+
+----------------------------------------------------------------
 -- Minimap button
 ----------------------------------------------------------------
 L.MINIMAP_TITLE           = "Minimap button"
