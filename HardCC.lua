@@ -146,6 +146,47 @@ ns.HARD_CC = {
 
 }
 
+-- The Anniversary client's own. The list above is Mists', and in TBC the same
+-- id can be a different spell -- the names come from the client, so an id that
+-- means something else there drags its wrong name in too. So on that client
+-- these are added to the hard list before its names are resolved, and the ids
+-- after them are taken out.
+--
+-- One id per spell is enough: every rank shares the name, and the names are
+-- matched. Where a Mists id already on the list names the spell differently in
+-- TBC (5211 is Bash there, 605 Mind Control), it is listed again under the TBC
+-- name, so a reader of this file sees that name too.
+ns.HARD_CC_TBC = {
+	-- Stuns
+	[5211   ] = true,  -- Bash
+	[5530   ] = true,  -- Mace Stun Effect
+	[7922   ] = true,  -- Charge Stun
+	[12355  ] = true,  -- Impact
+	[12798  ] = true,  -- Revenge Stun
+	[12809  ] = true,  -- Concussion Blow
+	[15269  ] = true,  -- Blackout
+	[16922  ] = true,  -- Starfire Stun
+	[19410  ] = true,  -- Improved Concussive Shot
+	[20253  ] = true,  -- Intercept Stun
+	[39796  ] = true,  -- Stoneclaw Stun
+
+	-- Taken over entirely
+	[605    ] = true,  -- Mind Control
+
+	-- Silences
+	[18425  ] = true,  -- Kick - Silenced
+	[18469  ] = true,  -- Counterspell - Silenced
+	[18498  ] = true,  -- Shield Bash - Silenced
+}
+
+-- Mists ids that are other spells in TBC, none of them crowd control: counted
+-- there, a druid's Demoralizing Roar was a fear and a paladin's daze a silence.
+ns.HARD_CC_NOT_TBC = {
+	[99     ] = true,  -- Demoralizing Roar in TBC (Disorienting Roar in Mists)
+	[100    ] = true,  -- Charge in TBC: its stun is Charge Stun, 7922
+	[31935  ] = true,  -- Avenger's Shield in TBC: a daze, not a silence
+}
+
 -- Soft crowd control: roots and disarms.
 --
 -- Kept apart from the hard list and scored lower. A root stops you walking, not
@@ -216,6 +257,13 @@ end
 
 function ns.BuildHardCCNames()
 	if ns.HARD_CC_NAMES then return end
+
+	-- The Anniversary client's own crowd control in, and the Mists ids that mean
+	-- something else there out, before any name is resolved from them.
+	if ns.ClientVersion and ns.ClientVersion()=="tbc" then
+		for spellID in pairs(ns.HARD_CC_TBC or {}) do ns.HARD_CC[spellID]=true end
+		for spellID in pairs(ns.HARD_CC_NOT_TBC or {}) do ns.HARD_CC[spellID]=nil end
+	end
 
 	local names={}
 	for spellID in pairs(ns.HARD_CC) do
