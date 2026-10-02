@@ -489,9 +489,6 @@ local function Sample(request)
 					-- to a player: names there can be ambiguous, guids cannot.
 					player.guid=guid
 					-- The race and sex, which nothing else in a match records:
-					-- the combat log has neither. ReplayPlus reads them back out
-					-- of the saved history to draw the race icon beside the
-					-- name. The token, not the localised name ("Scourge").
 					local _,race=UnitRace(unit)
 					if race then player.race=race end
 					local sex=UnitSex(unit)

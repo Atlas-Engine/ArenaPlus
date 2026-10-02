@@ -3,11 +3,6 @@ local L = ns.L
 
 -- The combat log, on for arenas and off again afterwards.
 --
--- ReplayPlus -- or anything else that reads Logs\WoWCombatLog*.txt -- needs the
--- game writing it, and /combatlog is easy to forget before a match and easy to
--- leave on after one, writing every fight in the open world to disk as well.
--- This does both halves: on when an arena queue pops, off once you are out.
---
 -- On at the pop rather than on arrival. Entering the arena is itself a line in
 -- the log (ZONE_CHANGE), and it is written during the loading screen -- before
 -- anything here gets to run on the other side of it.
@@ -20,14 +15,11 @@ local L = ns.L
 -- on, world combat or the next arena's first block writes them sooner, and
 -- the game writes what is left when it closes. Nothing an addon does can make
 -- it write sooner: switching logging off and on from Lua writes nothing.
--- ReplayPlus starts and stops recording from ArenaPlus's mark (ReplaySignal)
--- and fills the match in whenever the log comes.
 --
 -- And on again on arrival, and ARRIVAL_CHECK seconds after it. Another addon
 -- may switch the log off at every loading screen -- Details' "Auto Start
 -- Combatlog" does, a second after arriving, and only switches it back on in
--- dungeons and raids -- which left the match unlogged and ReplayPlus recording
--- with no end in sight. A loading screen (a /reload too) is the one moment the
+-- dungeons and raids. A loading screen (a /reload too) is the one moment the
 -- log is put back; after it, a /combatlog you type to stop it is left alone.
 --
 -- Only ever switched off if this switched it on. A log you started yourself --
