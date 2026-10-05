@@ -20,7 +20,7 @@
 #   ... -WhatIf     to see what it would do and push nothing
 
 param(
-    [string]$Repo    = "G:\My Drive\Dev\Atlas\ArenaPlus",
+    [string]$Repo    = "C:\dev\Atlas\ArenaPlus",
     [string]$Toc     = "ArenaPlus.toc",
     [Parameter(Mandatory = $true)]
     [string]$Version,

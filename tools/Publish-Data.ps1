@@ -22,7 +22,7 @@
 #   ... -WhatIf     to see what it would do and push nothing
 
 param(
-    [string]$Repo = "G:\My Drive\Dev\Atlas\ArenaPlus_Data",
+    [string]$Repo = "C:\dev\Atlas\ArenaPlus_Data",
     [string]$Live = "C:\Program Files (x86)\World of Warcraft\_classic_\Interface\AddOns\ArenaPlus_Data",
     [switch]$WhatIf
 )
