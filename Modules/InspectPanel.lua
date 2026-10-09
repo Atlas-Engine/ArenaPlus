@@ -1570,6 +1570,17 @@ local ENCHANT_ALIAS={
 	["glorious tyranny"]="Enchant Weapon - Tyranny",
 }
 
+-- And by id, for the shopping list: Blizzard's source item for Spirit of
+-- Conquest is the PvP vendor's own "Enchant Weapon - Spirit of Conquest"
+-- (98164), bound on pickup, so the row failed Buyable and the weapon's
+-- enchant was left off the list altogether -- the alias above never saw it
+-- (2026-10-09). The Jade Spirit scroll is what the auction house sells and
+-- what applies the same enchant, so the scroll's enchant is listed.
+local ENCHANT_SOLD_AS={
+	[5124]=4442,   -- Spirit of Conquest: Enchant Weapon - Jade Spirit
+	[5125]=4444,   -- Bloody Dancing Steel: Enchant Weapon - Dancing Steel
+}
+
 local function AliasFor(text)
 	if not text then return nil end
 	local lower=text:lower()
@@ -1668,6 +1679,9 @@ end
 -- entry on is a gem, and the same gem in four sockets is one line saying four.
 local function SocketTally(gear)
 	local gemOrder,gemCount={},{}
+	-- And the slots each gem sits in, in the gear's order, each slot once:
+	-- what somebody copying the build needs to know (asked for 2026-10-09).
+	local gemSlots={}
 	local enchants={}
 
 	-- The belt buckle, which is not an enchant and so was never counted.
@@ -1695,14 +1709,20 @@ local function SocketTally(gear)
 					if not gemCount[gem] then
 						gemCount[gem]=0
 						gemOrder[#gemOrder+1]=gem
+						gemSlots[gem]={}
 					end
 					gemCount[gem]=gemCount[gem]+1
+					local slots=gemSlots[gem]
+					if slots[#slots]~=slotKey then slots[#slots+1]=slotKey end
 				end
 			end
 
 			local enchant=tonumber(piece[2])
 			if enchant and enchant>0 then
-				local applied=ns.ENCHANT_ITEM and ns.ENCHANT_ITEM[enchant]
+				-- As the shop sells it (ENCHANT_SOLD_AS): the PvP weapon's own
+				-- id has no scroll behind it.
+				local sold=ENCHANT_SOLD_AS[enchant] or enchant
+				local applied=ns.ENCHANT_ITEM and ns.ENCHANT_ITEM[sold]
 				local shopName=applied and GetItemInfo(applied)
 				local effect=ns.ENCHANT_TEXT and ns.ENCHANT_TEXT[enchant]
 
@@ -1719,7 +1739,7 @@ local function SocketTally(gear)
 				-- binding is, and the same test tidies Mists as well.
 				if Buyable(applied)
 					and not IsProfessionOnly(shopName,effect) then
-					enchants[#enchants+1]={ slot=slotKey, id=enchant, item=tonumber(piece[1]) }
+					enchants[#enchants+1]={ slot=slotKey, id=enchant, sold=sold, item=tonumber(piece[1]) }
 				end
 			end
 
@@ -1736,7 +1756,7 @@ local function SocketTally(gear)
 		end
 	end
 
-	return gemOrder,gemCount,enchants
+	return gemOrder,gemCount,enchants,gemSlots
 end
 
 -- The gear the tab is currently showing, so it can be built again when the
@@ -1786,7 +1806,7 @@ local function FillSockets(page,gear,glyphs,class)
 		page.hint:SetTextColor(1,0.82,0)
 	end
 
-	local gemOrder,gemCount,enchants=SocketTally(gear)
+	local gemOrder,gemCount,enchants,gemSlots=SocketTally(gear)
 
 	for index,row in ipairs(page.gems) do
 		local gem=gemOrder[index]
@@ -1802,7 +1822,15 @@ local function FillSockets(page,gear,glyphs,class)
 			end
 
 			row.icon:SetTexture(icon or QUESTION)
-			row.text:SetText(L.INSPECT_GEM_COUNT:format(gemCount[gem],name or L.INSPECT_LOADING))
+			-- Where they go, first, the way the enchant rows name their
+			-- slot; three slots at most, then how many more.
+			local where,labels=gemSlots[gem] or {},{}
+			for i,slotKey in ipairs(where) do
+				if i>3 then labels[#labels+1]=("+%d"):format(#where-3) break end
+				labels[#labels+1]=SlotLabel(slotKey)
+			end
+			local count=L.INSPECT_GEM_COUNT:format(gemCount[gem],name or L.INSPECT_LOADING)
+			row.text:SetText(#labels>0 and ("|cffffd100%s|r  %s"):format(table.concat(labels,", "),count) or count)
 
 			-- Coloured by quality, the way the game colours item names
 			-- everywhere else. Rare gems read blue, the common ones green.
@@ -1866,7 +1894,7 @@ local function FillSockets(page,gear,glyphs,class)
 			-- back the item that applied the enchant, so the name, the icon,
 			-- the quality colour and the auction house search all come from
 			-- the same place they do for gems.
-			local applied=ns.ENCHANT_ITEM and ns.ENCHANT_ITEM[entry.id]
+			local applied=ns.ENCHANT_ITEM and ns.ENCHANT_ITEM[entry.sold or entry.id]
 			local effect=ns.ENCHANT_TEXT and ns.ENCHANT_TEXT[entry.id]
 
 			local name,link,quality,icon
