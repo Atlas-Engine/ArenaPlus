@@ -1,5 +1,11 @@
-- "Log combat in arenas" now keeps the log on for fifteen minutes after you leave an arena instead of ten seconds, so the match's last lines reach the file sooner. It never switches the log off inside a dungeon, raid or scenario.
-- The match history's player tooltip shows trinkets used (the human and Forsaken racials included), party and offensive dispels, interrupts and times interrupted, and how often a player broke their own team's crowd control. Recorded from this version on, on Mists and Anniversary.
-- A pet's, guardian's or totem's dispels and interrupts count for its owner, and breaking your own pet's crowd control counts as breaking your team's.
-- Crowd control now counts Storm Bolt, Charge's stun and Fae Silence under the ids a Mists combat log uses.
-- Restart the game after updating: a /reload will not load the new file.
+- The match history no longer loses the previous season's matches: a season reset used to make the list trim itself down to the new season's game count on the next open.
+- The PvP shopping list says where each gem goes, and lists Jade Spirit for a weapon enchanted with Spirit of Conquest (and Dancing Steel for Bloody Dancing Steel), since those are what the auction house sells.
+- Oceanic realms (Arugal and the others marked AU) now find their own row on the ladder, with My rank and the highlight working.
+- Anniversary druids get their Feral tab at the auctioneer, and the 10v10 tab is gone there, where rated battlegrounds do not exist.
+- The rated-info check no longer re-asks the server on every answer for the whole session; it asks while a result is pending and then stops.
+- Ctrl+C in a Blizzard dialog no longer closes it after a name has been copied from the ladder.
+- A new bracket opens at the top of the ladder; searching folds accented capitals, so "élodie" finds Élodie; the ladder and its tooltips do less work per keystroke and per scroll.
+- The history credits a pet's killing blow to its owner, no longer counts your own backlash as a kill on you, counts a refreshed crowd control once, and leaves overkill out of damage taken.
+- The shopping list stops rebuilding itself for every item the auction house loads, and the inspect panel stops working for a window that is closed.
+- The ladder passes keep the ladder's own rank for players kept below the cutoff by their game count.
+- Restart the game after updating: a /reload will not load the new files.

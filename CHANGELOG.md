@@ -1,4 +1,18 @@
-﻿# Changelog
+# Changelog
+
+## 1.8d
+
+- The match history no longer loses the previous season's matches: a season reset used to make the list trim itself down to the new season's game count on the next open.
+- The PvP shopping list says where each gem goes, and lists Jade Spirit for a weapon enchanted with Spirit of Conquest (and Dancing Steel for Bloody Dancing Steel), since those are what the auction house sells.
+- Oceanic realms (Arugal and the others marked AU) now find their own row on the ladder, with My rank and the highlight working.
+- Anniversary druids get their Feral tab at the auctioneer, and the 10v10 tab is gone there, where rated battlegrounds do not exist.
+- The rated-info check no longer re-asks the server on every answer for the whole session; it asks while a result is pending and then stops.
+- Ctrl+C in a Blizzard dialog no longer closes it after a name has been copied from the ladder.
+- A new bracket opens at the top of the ladder; searching folds accented capitals, so "élodie" finds Élodie; the ladder and its tooltips do less work per keystroke and per scroll.
+- The history credits a pet's killing blow to its owner, no longer counts your own backlash as a kill on you, counts a refreshed crowd control once, and leaves overkill out of damage taken.
+- The shopping list stops rebuilding itself for every item the auction house loads, and the inspect panel stops working for a window that is closed.
+- The ladder passes keep the ladder's own rank for players kept below the cutoff by their game count.
+- Restart the game after updating: a /reload will not load the new files.
 
 ## 1.8c
 
@@ -191,6 +205,7 @@
 - Fixed characters with the same name on different realms showing each other's rank and rating.
 - Press Enter in the ladder search to step between characters sharing a name.
 - Changing page in the ladder now returns to the top of the list.
+
 
 
 
