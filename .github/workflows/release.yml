@@ -143,7 +143,7 @@ jobs:
           # and left in place it becomes the first character of the embed --
           # invisible, but it is the sort of thing that shows up later as a
           # stray glyph in something that renders more strictly than Discord.
-          sed -i '1s/^ï»¿//' notes.md
+          sed -i '1s/^\xEF\xBB\xBF//' notes.md
 
           head -c 3900 notes.md > body.md
           if [ "$(wc -c < notes.md)" -gt 3900 ]; then

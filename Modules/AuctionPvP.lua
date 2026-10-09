@@ -88,7 +88,12 @@ local function MySpecs()
 	local list = ns.SPEC_SLUGS_BY_REGION and ns.SPEC_SLUGS_BY_REGION[key]
 	if list then
 		shipped = {}
-		for _, slug in ipairs(list) do shipped[slug] = true end
+		-- Through the alias: the data says "druid-feral-combat" where
+		-- SPEC_BY_SLUG says "druid-feral", and the Feral tab never appeared
+		-- for an Anniversary druid (2026-10-09).
+		for _, slug in ipairs(list) do
+			shipped[(ns.SPEC_SLUG_ALIAS and ns.SPEC_SLUG_ALIAS[slug]) or slug] = true
+		end
 	end
 
 	local specs = {}
@@ -126,7 +131,10 @@ local function TopOfSpec(classSlug, specSlug, bracket, region)
 	local key = LadderKey(region)
 
 	for _, entry in ipairs(ns.LadderRows and ns.LadderRows(bracket, key) or {}) do
-		if entry.class == classSlug and entry.spec == specSlug and entry.rating then
+		-- Compared by spec id, which knows the aliases: a row says
+		-- "feral-combat" where the tab says "feral" (2026-10-09).
+		if entry.class == classSlug and entry.rating and entry.spec and ns.SpecIdForSlug
+			and ns.SpecIdForSlug(classSlug .. "-" .. entry.spec) == ns.SpecIdForSlug(classSlug .. "-" .. specSlug) then
 			if ns.HasInspectData and ns.HasInspectData(entry.name, entry.realm, key) then
 				list[#list + 1] = entry
 			end
@@ -279,7 +287,11 @@ local function BuildPanel()
 	panel.bracket = BRACKET_DEFAULT
 	panel.brackets = {}
 
+	-- No rated battlegrounds on Anniversary: the tab answered "nobody in
+	-- 10v10" for ever (2026-10-09; the ladder's picker hides it the same way).
+	local noRBG = (ns.ClientVersion and ns.ClientVersion()) == "tbc"
 	for index, name in ipairs(BRACKET_NAMES) do
+		if noRBG and index == 4 then break end
 		local tab = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
 		tab:SetSize(50, 20)
 		tab:SetPoint("TOPLEFT", 18 + (index - 1) * 54, -80)
@@ -544,7 +556,8 @@ function ns.AuctionPvPShow(spec)
 			-- The rating in the colour of the title it is worth, by the same rule
 			-- the ladder paints its rows with, and against the region the row came
 			-- from: a Gladiator cut is a different number in each.
-			local realm = entry.realm or ""
+			-- Named as the ladder names it, not by its slug ("raden").
+			local realm = (ns.RealmName and ns.RealmName(entry.realm)) or entry.realm or ""
 			local hex = (ns.RankHex and ns.RankHex(panel.bracket, entry, LadderKey(panel.region))) or "b3b3b3"
 			row.detail:SetText(("|cff%s%d|r  %s"):format(hex, entry.rating or 0, realm))
 			row:Show()
@@ -907,8 +920,10 @@ watcher:SetScript("OnEvent", function(_, event, name)
 	-- one click is a smaller price than closing a window on every visit.
 	PlaceButton()
 
-	-- Again on every open: the first one happens before the house has a size.
+	-- Again on every open: the first one happens before the house has a size
+	-- -- and once more a frame later, when the cold open has one.
 	AlignClassicButton()
+	if C_Timer and C_Timer.After then C_Timer.After(0, AlignClassicButton) end
 end)
 
 -- Closed with the house it belongs to.

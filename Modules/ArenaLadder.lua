@@ -520,10 +520,10 @@ local function Searched(entry)
 	local person,realm=query:match("^([^%-]+)%-(.+)$")
 
 	if not person then
-		return ((entry.name or ""):lower()):find(query,1,true)~=nil
+		return ns.FoldCase(entry.name):find(ns.FoldCase(query),1,true)~=nil
 	end
 
-	if not ((entry.name or ""):lower()):find(person,1,true) then return false end
+	if not ns.FoldCase(entry.name):find(ns.FoldCase(person),1,true) then return false end
 
 	-- Punctuation off both sides before they are compared, so a typed "ra-den"
 	-- and the ladder's "raden" meet.
@@ -535,15 +535,32 @@ end
 -- Name and realm compared separately, both stripped of the punctuation the two
 -- sources disagree about: the game says "Ra-den" and the site says "Raden",
 -- which quietly rejected every row until it was noticed.
+--
+-- The player's own name and realm are worked out once, and a row's plain
+-- name is kept on the row: this ran for every one of five thousand rows on
+-- every keystroke, twice, with four gsubs and two client calls a row
+-- (2026-10-09).
+local myPlainName,myPlainRealm
+
 local function IsPlayer(entry)
-	local name=UnitName and UnitName("player")
-	if not (name and entry.name) then return false end
-	if ns.PlainName(entry.name)~=ns.PlainName(name) then return false end
+	if not entry.name then return false end
+	if not myPlainName then
+		local name=UnitName and UnitName("player")
+		if not name then return false end
+		myPlainName=ns.PlainName(name)
+		local realm=GetRealmName and GetRealmName()
+		myPlainRealm=realm and ns.PlainName(realm) or nil
+	end
+	local plain=entry.plainName
+	if not plain then
+		plain=ns.PlainName(entry.name)
+		entry.plainName=plain
+	end
+	if plain~=myPlainName then return false end
 
-	local realm=GetRealmName and GetRealmName()
-	if not (realm and entry.realm and entry.realm~="") then return true end
+	if not (myPlainRealm and entry.realm and entry.realm~="") then return true end
 
-	return ns.PlainName(entry.realm)==ns.PlainName(realm)
+	return ns.PlainName(entry.realm)==myPlainRealm
 end
 
 ----------------------------------------------------------------
@@ -740,6 +757,8 @@ local RACE_ALSO = { scourge="undead" }
 -- Tried and dropped rather than assumed: if this build has no such atlas the
 -- texture is simply left empty, because a wrong icon on every row would be
 -- worse than none.
+local raceAtlas={}   -- "file|sex" -> the atlas that answered, or false
+
 local function SetRaceIcon(texture,entry)
 	local file=entry and entry.race and RACE_FILES[entry.race]
 	if not file then
@@ -749,6 +768,19 @@ local function SetRaceIcon(texture,entry)
 	end
 
 	local sex=(entry.gender==1) and "female" or "male"
+
+	-- Resolved once: this built two tables and asked the client up to four
+	-- times per visible row on every scroll tick (2026-10-09).
+	local cached=raceAtlas[file.."|"..sex]
+	if cached then
+		texture:SetAtlas(cached)
+		texture:Show()
+		return
+	elseif cached==false then
+		texture:SetTexture(nil)
+		texture:Hide()
+		return
+	end
 
 	-- Asked for by name before it is set.
 	--
@@ -769,6 +801,7 @@ local function SetRaceIcon(texture,entry)
 
 	for _,name in ipairs(names) do
 		if texture.SetAtlas and known and C_Texture.GetAtlasInfo(name) then
+			raceAtlas[file.."|"..sex]=name
 			texture:SetAtlas(name)
 			texture:Show()
 			return
@@ -776,6 +809,7 @@ local function SetRaceIcon(texture,entry)
 	end
 
 	-- Nothing to draw. Cleared rather than left holding the last row's icon.
+	raceAtlas[file.."|"..sex]=false
 	texture:SetTexture(nil)
 	texture:Hide()
 end
@@ -1152,6 +1186,8 @@ local function Refresh()
 		shownBracket=bracket
 		page=1
 		pageChosen=false
+		-- And at the top: the scroll stayed where the old bracket's was.
+		wantTop=true
 	end
 
 	-- Your characters, or everybody's.
@@ -2955,8 +2991,9 @@ function ns.ToggleLadder()
 	if ns.SetViewBracket then ns.SetViewBracket(1) end
 
 	Anchor(frame)
-	frame:Show()
-	Refresh()
+	-- Show runs Refresh through OnShow; a frame already up is refreshed
+	-- here. Both ran on every open (2026-10-09).
+	if frame:IsShown() then Refresh() else frame:Show() end
 end
 
 function ns.CloseLadder()

@@ -82,7 +82,7 @@ local calls,hits,how=0,0,"not hooked"
 -- fixed for the whole frame, so "same unit, same frame" is exactly the repeat
 -- worth dropping -- while a genuine redraw on a later frame still gets its
 -- lines, because the tooltip was cleared in between.
-local lastGUID,lastAt
+local lastKey,lastAt
 
 local function Append(tooltip)
 	calls=calls+1
@@ -94,8 +94,11 @@ local function Append(tooltip)
 
 	local guid=UnitGUID and UnitGUID(unit)
 	local now=GetTime and GetTime() or 0
-	if guid and guid==lastGUID and now==lastAt then return end
-	lastGUID,lastAt=guid,now
+	-- The unit, failing its guid (gone mid-frame): with no key both hooks
+	-- appended, and the block came out twice (2026-10-09).
+	local key=guid or (tostring(tooltip).."|"..tostring(unit))
+	if key==lastKey and now==lastAt then return end
+	lastKey,lastAt=key,now
 
 	local found=Describe(unit)
 	if not found then return end

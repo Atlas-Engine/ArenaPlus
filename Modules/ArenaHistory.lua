@@ -257,7 +257,7 @@ function ns.ObservedSpecs()
 		for _,list in pairs(store.matches or {}) do
 			for _,match in ipairs(list) do
 				local when=match.at or 0
-				for _,side in ipairs({ match.mine, match.theirs }) do
+				for _,side in ipairs({ match.mine or {}, match.theirs or {} }) do
 					for _,player in ipairs(side or {}) do
 						local spec=tonumber(player.spec)
 						-- Character names cannot contain a hyphen, so the
@@ -289,27 +289,14 @@ local function History(bracket)
 	return list
 end
 
--- The season record is the authority on how many matches exist. Holding more
--- than that means the character was deleted and restored -- the rating and the
--- record start again, and the older rows describe a life that no longer counts.
-local function Played(bracket)
-	if not GetPersonalRatedInfo then return nil end
-	local played=select(4,GetPersonalRatedInfo(bracket))
-	return tonumber(played)
-end
-
+-- The list as saved. It used to be trimmed to the season's game count, on
+-- the reasoning that holding more meant a deleted and restored character --
+-- but that count starts again at a season reset, and the first game of the
+-- new season took every older row, up to KEEP_MAX of them, off the saved
+-- file, which ReplayPlus reads too (2026-10-09). KEEP_MAX bounds the list;
+-- nothing else is thrown away.
 local function Trimmed(bracket)
-	local list=History(bracket)
-
-	local played=Played(bracket)
-	-- Zero is not an answer: the client reports zero games until the rated
-	-- stats arrive after login, and a window opened before then trimmed the
-	-- whole bracket away.
-	if played and played>0 then
-		while #list>played do table.remove(list,1) end
-	end
-
-	return list
+	return History(bracket)
 end
 
 -- The bracket of the most recent match on this character.
@@ -488,6 +475,10 @@ local function Sample(request)
 					-- The guid is how a death in the combat log is matched back
 					-- to a player: names there can be ambiguous, guids cannot.
 					player.guid=guid
+					if guid then
+						current.byGUID=current.byGUID or {}
+						current.byGUID[guid]=player
+					end
 					-- The race and sex, which nothing else in a match records:
 					local _,race=UnitRace(unit)
 					if race then player.race=race end
@@ -505,7 +496,10 @@ local function Sample(request)
 					if unit:match("^arena") and GetArenaOpponentSpec then
 						player.spec=GetArenaOpponentSpec(index) or player.spec
 					elseif unit:match("^party") then
-						AskForSpec(unit,player)
+						-- Not on Anniversary: with no specs the answer never
+						-- comes, and every teammate was asked every three
+						-- seconds for the whole match (2026-10-09).
+						if HasSpecs() then AskForSpec(unit,player) end
 					elseif unit=="player" then
 						local spec=SpecIndex()
 						if spec and HasSpecs() and GetSpecializationRole then
@@ -661,9 +655,13 @@ end
 -- watched so the death that comes with it can be ignored.
 local FEIGN_DEATH = 5384
 
--- Whoever a guid belongs to, either side.
+-- Whoever a guid belongs to, either side. By the map Sample keeps first:
+-- the scan allocated a table and walked both sides on every damage event
+-- (2026-10-09); the scan stays for a guid the map has not seen.
 local function PlayerByGUID(guid)
 	if not (current and guid) then return nil end
+	local known=current.byGUID and current.byGUID[guid]
+	if known then return known end
 	for _,side in ipairs({current.mine,current.theirs}) do
 		for _,player in pairs(side) do
 			if player.guid==guid then return player end
@@ -671,6 +669,14 @@ local function PlayerByGUID(guid)
 	end
 	return nil
 end
+
+-- The player a guid is, or whose pet it is: a warlock's dispels and
+-- interrupts are their felhunter's.
+local function PlayerOrOwner(guid)
+	return PlayerByGUID(guid)
+		or PlayerByGUID(current and current.petOwner and current.petOwner[guid])
+end
+
 
 local function OnInspectReady(guid)
 	if not (current and inspecting and HasSpecs() and GetInspectSpecialization) then return end
@@ -707,7 +713,8 @@ local function CreditKill(victimSide,victimGUID)
 	current.kills[scorer]=current.kills[scorer]+1
 	if not level then return end
 
-	local killer=PlayerByGUID(current.lastHit and current.lastHit[victimGUID])
+	-- Or whose pet landed it: a Felguard's killing blow credited nobody.
+	local killer=PlayerOrOwner(current.lastHit and current.lastHit[victimGUID])
 	if killer then killer.decisive=(killer.decisive or 0)+1 end
 end
 
@@ -762,13 +769,6 @@ end
 local function NoteTrinket(sourceGUID)
 	local player=PlayerByGUID(sourceGUID)
 	if player then player.trink=(player.trink or 0)+1 end
-end
-
--- The player a guid is, or whose pet it is: a warlock's dispels and
--- interrupts are their felhunter's.
-local function PlayerOrOwner(guid)
-	return PlayerByGUID(guid)
-		or PlayerByGUID(current and current.petOwner and current.petOwner[guid])
 end
 
 -- Dispels, counted two ways: a debuff taken off your own side ("disp", a party
@@ -857,7 +857,7 @@ local function Bank(key,target)
 	if source then source.cc=(source.cc or 0)+seconds end
 end
 
-local function NoteCC(sourceGUID,destGUID,spellID,spellName,applied)
+local function NoteCC(sourceGUID,destGUID,spellID,spellName,applied,refresh)
 	if not (current and ns.HARD_CC) then return end
 
 	local hard=ns.HARD_CC[spellID]
@@ -876,16 +876,21 @@ local function NoteCC(sourceGUID,destGUID,spellID,spellName,applied)
 	if applied then
 		-- A refresh lands on an aura that is already open. Bank what it has run
 		-- for before restarting the clock, or that time is simply lost.
-		if current.ccOpen[key] then Bank(key,target) end
+		local wasOpen=current.ccOpen[key]~=nil
+		if wasOpen then Bank(key,target) end
 
 		current.ccOpen[key]=GetTime()
 		current.ccSoft=current.ccSoft or {}
 		current.ccSoft[key]=soft and true or nil
 
-		-- The count lands on application; the seconds land when it ends.
-		target.ccTakenCount=(target.ccTakenCount or 0)+1
-		local source=PlayerByGUID(sourceGUID)
-		if source then source.ccCount=(source.ccCount or 0)+1 end
+		-- The count lands on application; the seconds land when it ends. A
+		-- refresh of one already open is the same control going on, not
+		-- another: a Polymorph recast counted twice (2026-10-09).
+		if not (refresh and wasOpen) then
+			target.ccTakenCount=(target.ccTakenCount or 0)+1
+			local source=PlayerByGUID(sourceGUID)
+			if source then source.ccCount=(source.ccCount or 0)+1 end
+		end
 		current.ccBy=current.ccBy or {}
 		current.ccBy[key]=sourceGUID
 		return
@@ -917,8 +922,11 @@ end
 -- damage done and healing done and nothing about what landed on you. Summed
 -- here instead, so soaking a match's pressure and living through it can count
 -- for something.
-local function NoteDamage(sourceGUID,destGUID,amount)
+local function NoteDamage(sourceGUID,destGUID,amount,overkill)
 	amount=tonumber(amount) or 0
+	-- Past the health bar is not damage taken: the killing blow inflated it.
+	overkill=tonumber(overkill) or 0
+	if overkill>0 then amount=amount-overkill end
 	if amount<=0 then return end
 
 	local target=PlayerByGUID(destGUID)
@@ -928,8 +936,10 @@ local function NoteDamage(sourceGUID,destGUID,amount)
 
 	-- UNIT_DIED says who died and nothing about who did it, so the last hand
 	-- on them is remembered and credited when they go down.
+	-- Not when the hand was their own (Shadow Word: Death's backlash): a
+	-- priest dying to it was credited with his own death (2026-10-09).
 	current.lastHit=current.lastHit or {}
-	current.lastHit[destGUID]=sourceGUID
+	if sourceGUID~=destGUID then current.lastHit[destGUID]=sourceGUID end
 end
 
 -- A spec read off something only that spec can cast.
@@ -959,12 +969,15 @@ local function OnCombatLog()
 
 	-- The fifteenth value is a spell's damage; a swing carries its amount in
 	-- the twelfth, where a spell carries its id.
-	local _,event,_,sourceGUID,_,_,_,destGUID,_,_,_,spellID,spellName,_,spellAmount=CombatLogGetCurrentEventInfo()
+	local _,event,_,sourceGUID,_,_,_,destGUID,_,_,_,spellID,spellName,_,spellAmount,overkill=CombatLogGetCurrentEventInfo()
 
 	-- Ahead of the damage handling below, which returns early -- and only for
 	-- events that carry a spell. A swing puts its damage where the id goes,
-	-- and a white hit for 1079 read as Rip and named the attacker Feral.
-	if event:sub(1,6)=="SPELL_" or event:sub(1,6)=="RANGE_" then
+	-- and a white hit for 1079 read as Rip and named the attacker Feral. A
+	-- broken aura names who broke it, under the aura's own spell: not a
+	-- cast of it (2026-10-09).
+	if (event:sub(1,6)=="SPELL_" or event:sub(1,6)=="RANGE_")
+		and event~="SPELL_AURA_BROKEN" and event~="SPELL_AURA_BROKEN_SPELL" then
 		NoteSpec(sourceGUID,spellID,spellName)
 	end
 
@@ -983,12 +996,12 @@ local function OnCombatLog()
 	end
 
 	if event=="SWING_DAMAGE" then
-		return NoteDamage(sourceGUID,destGUID,spellID)
+		return NoteDamage(sourceGUID,destGUID,spellID,spellName)   -- amount, overkill: a swing's places
 	end
 
 	if event=="SPELL_DAMAGE" or event=="SPELL_PERIODIC_DAMAGE"
 		or event=="RANGE_DAMAGE" or event=="SPELL_BUILDING_DAMAGE" then
-		return NoteDamage(sourceGUID,destGUID,spellAmount)
+		return NoteDamage(sourceGUID,destGUID,spellAmount,overkill)
 	end
 
 	-- The cast, before the death it causes.
@@ -1021,7 +1034,7 @@ local function OnCombatLog()
 		NoteDeath(destGUID)
 	elseif event=="SPELL_AURA_APPLIED" or event=="SPELL_AURA_REFRESH" then
 		if spellID==FEIGN_DEATH then NoteFeign(destGUID,true) end
-		NoteCC(sourceGUID,destGUID,spellID,spellName,true)
+		NoteCC(sourceGUID,destGUID,spellID,spellName,true,event=="SPELL_AURA_REFRESH")
 	elseif event=="SPELL_AURA_REMOVED" or event=="SPELL_AURA_BROKEN"
 		or event=="SPELL_AURA_BROKEN_SPELL" then
 		if spellID==FEIGN_DEATH then NoteFeign(destGUID,false) end
@@ -1111,7 +1124,7 @@ end
 local function FirstDeath(match)
 	if not match then return nil end
 	local first,order
-	for _,side in ipairs({match.mine,match.theirs}) do
+	for _,side in ipairs({match.mine or {},match.theirs or {}}) do
 		for _,player in ipairs(side or {}) do
 			local died=tonumber(player.died)
 			if died and (not order or died<order) then
@@ -1782,7 +1795,7 @@ local function ShowDetail(row,match)
 	local index=0
 
 	-- Your side first, then theirs, so the reading order matches the row above.
-	for side,team in ipairs({match.mine,match.theirs}) do
+	for side,team in ipairs({match.mine or {},match.theirs or {}}) do
 		for _,player in ipairs(team or {}) do
 			index=index+1
 			local line=DetailLine(detail,index)
@@ -3211,7 +3224,7 @@ local function ApplySpecFixups()
 	local filled=0
 	for _,list in pairs(store.matches or {}) do
 		for _,match in ipairs(list) do
-			for _,side in ipairs({match.mine,match.theirs}) do
+			for _,side in ipairs({match.mine or {},match.theirs or {}}) do
 				for _,player in ipairs(side or {}) do
 					local bare=player.n and player.n:match("^([^-]+)")
 					if not player.spec and bare and ns.SPEC_FIXUPS[bare] then
@@ -3242,7 +3255,7 @@ local function ClearMixedCCCounts()
 
 	for _,list in pairs(store.matches or {}) do
 		for _,match in ipairs(list) do
-			for _,side in ipairs({match.mine,match.theirs}) do
+			for _,side in ipairs({match.mine or {},match.theirs or {}}) do
 				for _,player in ipairs(side or {}) do
 					player.ccCount,player.ccTakenCount=nil,nil
 				end
@@ -3356,6 +3369,9 @@ watcher:SetScript("OnEvent",function(self,event,name)
 
 		if not InArena() then
 			if Gathered(current) then
+				-- What was still open is banked here, while the match is
+				-- in hand: parked, nothing could bank it (2026-10-09).
+				CloseOpenCC()
 				pending={ match=current, at=time() }
 			end
 			current=nil
@@ -3416,7 +3432,11 @@ function module:OnEnable()
 		-- Normally the result lands while you are still standing in the arena,
 		-- and `current` is right there. A match you walked out of announces
 		-- itself once you are already gone, and the parked copy is all there is.
-		local gathered,left=current,false
+		-- The match standing, if it is this bracket's: a 2v2 result landing
+		-- after the player had queued into the next arena filed that one's
+		-- players under it (2026-10-09).
+		local gathered,left=nil,false
+		if current and FitsBracket(current,info.bracket) then gathered=current end
 		if not gathered and pending and (time()-pending.at)<=PENDING_KEEP
 			and FitsBracket(pending.match,info.bracket) then
 			gathered=pending.match
@@ -3462,7 +3482,9 @@ function module:OnEnable()
 		}
 		while #list>KEEP_MAX do table.remove(list,1) end
 
-		current=nil
+		-- The match standing goes only if it was this one's: a newer one
+		-- goes on being gathered.
+		if current==gathered then current=nil end
 		pending=nil
 		if panel and panel:IsShown() then Refresh() end
 		if window and window:IsShown() then RefreshFull() end

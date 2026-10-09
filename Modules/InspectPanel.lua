@@ -765,7 +765,9 @@ local function DressWhenReady(gear)
 	Dress(gear)
 	if C_Timer and C_Timer.After then
 		C_Timer.After(0.1,function()
-			if frame and frame:IsShown() then Dress(gear) end
+			-- Still this gear: two rows clicked within the tenth put the
+			-- first's clothes on the second's model (2026-10-09).
+			if frame and frame:IsShown() and dressGear==gear then Dress(gear) end
 		end)
 	end
 end
@@ -1495,8 +1497,15 @@ function HasBuckle(record)
 	return worn>sockets
 end
 
+-- The items asked for and not yet answered: the watcher fills again for
+-- these alone. It filled for every item the client loaded anywhere -- an
+-- auction house page is hundreds -- and the shopping window lives beside
+-- the house (2026-10-09).
+local askedItems={}
+
 local function AskForItem(id)
 	if not id or id<=0 then return end
+	askedItems[id]=true
 	if C_Item and C_Item.RequestLoadItemDataByID then
 		pcall(C_Item.RequestLoadItemDataByID,id)
 	end
@@ -2092,7 +2101,9 @@ end
 local function WatchItems()
 	if not socketWatcher then
 		socketWatcher=CreateFrame("Frame")
-		socketWatcher:SetScript("OnEvent",function()
+		local refillQueued=false
+		local function Refill()
+			refillQueued=false
 			if shopJob and shop and shop:IsShown() then
 				FillSockets(shop.page,shopJob.gear,shopJob.glyphs,shopJob.class)
 				-- A name that arrives can be the first thing in its section,
@@ -2113,6 +2124,15 @@ local function WatchItems()
 			-- And the stats page, whose PvP totals are summed from those
 			-- same items and were left blank while they loaded.
 			if statsFor then FillStats(statsFor.v,statsFor.gear) end
+		end
+		socketWatcher:SetScript("OnEvent",function(_,_,itemID)
+			-- Only an item this panel asked for, and all of a frame's answers
+			-- in one fill.
+			if itemID and not askedItems[itemID] then return end
+			if itemID then askedItems[itemID]=nil end
+			if refillQueued then return end
+			refillQueued=true
+			if C_Timer and C_Timer.After then C_Timer.After(0,Refill) else Refill() end
 		end)
 	end
 	socketWatcher:RegisterEvent("GET_ITEM_INFO_RECEIVED")
@@ -2520,14 +2540,15 @@ local function BuildWindow()
 
 	-- Nothing outside this window cares what items have finished loading.
 	frame:SetScript("OnHide",function()
-		-- Unless the shopping window is still up: it is fed by the same
-		-- watcher, and would stop filling in gem names halfway.
+		-- Nothing for the watcher to fill here: with these left set, every
+		-- item that finished loading while the shopping window was up
+		-- re-filled seventeen hidden slots and re-summed the stats page
+		-- behind it -- which the early return below let happen (2026-10-09).
+		socketGear,socketTinkers,statsFor=nil,nil,nil
+		-- The watcher itself stays while the shopping window is up: it is
+		-- fed by the same one, and would stop filling in gem names halfway.
 		if shop and shop:IsShown() then return end
 		if socketWatcher then socketWatcher:UnregisterEvent("GET_ITEM_INFO_RECEIVED") end
-		-- And nothing for it to fill: with these left set, every item that
-		-- finished loading while the shopping window was up re-filled seventeen
-		-- hidden slots and re-summed the stats page behind it.
-		socketGear,socketTinkers,statsFor=nil,nil,nil
 	end)
 
 	-- The same band across the top as the ladder window, so the two read as
@@ -3290,7 +3311,11 @@ function ns.ShowInspect(entry,region,bracket)
 	local chosen={}
 	for _,spellID in ipairs(data.t or {}) do chosen[spellID]=true end
 
-	local grid=ns.TALENT_GRID and ns.TALENT_GRID[entry.class or ""]
+	-- The row's class, or the record's: a row with none drew eighteen
+	-- hidden cells and said the choices were not yet seen (2026-10-09).
+	local class=entry.class or data.c
+	if class=="null" then class=data.c end
+	local grid=ns.TALENT_GRID and ns.TALENT_GRID[class or ""]
 	local page=frame.pages.talents
 	local missing=0
 
@@ -3315,7 +3340,7 @@ function ns.ShowInspect(entry,region,bracket)
 			if page.levels and page.levels[tier] then page.levels[tier]:Hide() end
 		end
 
-		local layout=ns.TALENT_TREES_TBC and ns.TALENT_TREES_TBC[entry.class or ""]
+		local layout=ns.TALENT_TREES_TBC and ns.TALENT_TREES_TBC[class or ""]
 
 		-- What was taken, as [tree][talent] = { rank, spell }. The profile names a
 		-- talent by the spell of the rank that was bought, and q beside it says
@@ -3325,7 +3350,7 @@ function ns.ShowInspect(entry,region,bracket)
 		local taken={}
 		for index,spellID in ipairs(data.t or {}) do
 			local at=ns.TALENT_TBC_BY_SPELL and ns.TALENT_TBC_BY_SPELL[spellID]
-			if at and at[1]==entry.class then
+			if at and at[1]==class then
 				taken[at[2]]=taken[at[2]] or {}
 				taken[at[2]][at[3]]={ ranks[index] or at[4], spellID }
 			end

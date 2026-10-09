@@ -130,6 +130,15 @@ if (Test-Path $lockFile) {
     $owner = 0
     try { $owner = [int](Get-Content $lockFile -TotalCount 1 -ErrorAction Stop) } catch { }
 
+    # No id in it yet: a pass between creating the file and writing its id,
+    # as the four fetch passes allow for. Taken for a leftover, the live
+    # pass's lock was deleted and the copy ran while it wrote (2026-10-09).
+    if ($owner -le 0) {
+        $age = 0
+        try { $age = ((Get-Date) - (Get-Item $lockFile -ErrorAction Stop).LastWriteTime).TotalSeconds } catch { }
+        if ($age -lt 30) { Say "Waiting: a pass is starting. Nothing published."; return }
+    }
+
     if ($owner -gt 0 -and (Get-Process -Id $owner -ErrorAction SilentlyContinue)) {
         $busy = ""
         try { $busy = (Get-Content $lockFile -TotalCount 2)[1] } catch { }
@@ -238,7 +247,11 @@ try {
     }
 
     git add -A
+    if ($LASTEXITCODE -ne 0) { throw "git add failed ($LASTEXITCODE)" }
     git commit -q -m "Data $version"
+    # Checked: a commit that failed tagged the previous HEAD, and CurseForge
+    # built stale data as a new version (2026-10-09).
+    if ($LASTEXITCODE -ne 0) { throw "git commit failed ($LASTEXITCODE): nothing tagged" }
 
     # Take whatever is on origin before tagging, rather than assuming
     # nothing put it there.
@@ -277,6 +290,7 @@ try {
     }
 
     git tag $version
+    if ($LASTEXITCODE -ne 0) { throw "git tag failed ($LASTEXITCODE)" }
 
     # Which old tags go, worked out before the push rather than after it.
     #

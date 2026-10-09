@@ -170,8 +170,36 @@ if ($env:ARENAPLUS_REGIONAL_CREDS -eq "1" -and (Test-Path $regionalCred)) { $cre
 $TimeFormat = 'yyyy-MM-dd hh:mm tt'
 
 function Write-Log([string]$message) {
-    Add-Content -Path $logFile -Value ("{0}  {1}" -f (Get-Date -Format $TimeFormat), $message) -Encoding utf8
+    # The invariant culture: the dashboard reads the AM/PM off these lines,
+    # and a French PC's culture writes none (2026-10-09). And never a reason
+    # to stop the pass: under $ErrorActionPreference Stop a log that could
+    # not be written ended the run that was writing it.
+    try {
+        Add-Content -Path $logFile -Value ("{0}  {1}" -f (Get-Date).ToString($TimeFormat, [cultureinfo]::InvariantCulture), $message) -Encoding utf8
+    } catch { }
     Write-Host $message
+}
+
+# Whatever ends the pass is written down, and the lock and the progress
+# file are given back: under Stop a token exchange that failed left both
+# behind and wrote nothing, invisible under RunHidden.vbs (2026-10-09). The
+# lock goes only when this run holds it ($held): before that, the file is
+# another run's.
+trap {
+    try { Write-Log ("FAILED: " + $_.Exception.Message) } catch { }
+    try { if ($_.InvocationInfo) { Write-Log ("  " + $_.InvocationInfo.PositionMessage.Trim()) } } catch { }
+    try {
+        $heldHere = Get-Variable -Name held -ErrorAction SilentlyContinue
+        if ($heldHere -and $heldHere.Value) {
+            $w = Get-Variable -Name writer -ErrorAction SilentlyContinue
+            if ($w -and $w.Value) { $w.Value.Dispose() }
+            $pf = Get-Variable -Name progressFile -ErrorAction SilentlyContinue
+            if ($pf -and $pf.Value -and (Test-Path $pf.Value)) { Remove-Item $pf.Value -Force }
+            $lf = Get-Variable -Name lockFile -ErrorAction SilentlyContinue
+            if ($lf -and $lf.Value -and (Test-Path $lf.Value)) { Remove-Item $lf.Value -Force }
+        }
+    } catch { }
+    break
 }
 
 function Escape-Lua([string]$text) {
@@ -240,8 +268,12 @@ $script:lastBody = ''
 function Note-Snapshot([string]$stamp) {
     if (-not $stamp) { return }
     # The newest of them, though all four brackets have always shared one.
+    # An HTTP date, read as one: under a French culture TryParse failed on
+    # every stamp, the snapshot stayed empty and each pass went cold
+    # (2026-10-09).
     $when = [datetime]::MinValue
-    if ([datetime]::TryParse($stamp, [ref]$when)) {
+    $exact = [datetime]::TryParseExact($stamp, 'r', [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$when)
+    if ($exact -or [datetime]::TryParse($stamp, [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$when)) {
         $asText = $when.ToUniversalTime().ToString('yyyy-MM-dd HH:mm')
         if ($asText -gt $script:snapshot) { $script:snapshot = $asText }
     }
@@ -286,7 +318,10 @@ function Get-Api([string]$path, [string]$since = '') {
     # header back as an array, where Windows PowerShell 5.1 gives a string.
     $script:lastStamp = @($response.Headers['Last-Modified']) -join ''
     $script:lastBody = $response.Content
-    Note-Snapshot $script:lastStamp
+    # The boards alone say when Blizzard built the ladder: the realm index
+    # and the reward index, asked after them, inflated the snapshot and the
+    # cadence measured from it (2026-10-09).
+    if ($path -like '*/pvp-leaderboard/*') { Note-Snapshot $script:lastStamp }
 
     return $response.Content | ConvertFrom-Json
 }
@@ -459,7 +494,15 @@ function Live-Progress([int]$done,[int]$total) {
 # ---------------------------------------------------------------- season
 
 $season = (Get-Api "/data/wow/pvp-season/index").current_season.id
-if (-not $season) { Write-Log "No current season."; return }
+if (-not $season) {
+    Write-Log "No current season."
+    # Given back here: left behind, the next pass read a reused id as alive
+    # for its whole wait (2026-10-09).
+    if (Test-Path $progressFile) { Remove-Item $progressFile -Force }
+    if ($writer) { $writer.Dispose() }
+    if (Test-Path $lockFile) { Remove-Item $lockFile -Force }
+    return
+}
 
 # The addon indexes brackets 1-4; the API names them, and calls rated
 # battlegrounds BATTLEGROUNDS in rewards but rbg in leaderboards.
@@ -791,7 +834,7 @@ if ($Live) {
 
             if ($known -and $known.Written) {
                 $when = [datetime]::MinValue
-                if ([datetime]::TryParse($known.Written, [ref]$when)) {
+                if ([datetime]::TryParse($known.Written, [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$when)) {
                     $when = $when.ToUniversalTime()
                     if ($RestMinutes -gt 0 -and $when -gt $restSince) {
                         # Written within the last RestMinutes: see RestMinutes.
@@ -1116,7 +1159,7 @@ if ($Live) {
                     $mc = $cache[$mate]
                     if ($RestMinutes -gt 0 -and $mc -and $mc.Written) {
                         $w = [datetime]::MinValue
-                        if ([datetime]::TryParse($mc.Written, [ref]$w) -and $w.ToUniversalTime() -gt $restAgo) { continue }
+                        if ([datetime]::TryParse($mc.Written, [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$w) -and $w.ToUniversalTime() -gt $restAgo) { continue }
                     }
                     $null = $askedNow.Add($mate)
                     $followUps.Add($allWork[$mate])
@@ -1497,6 +1540,10 @@ foreach ($bracket in $brackets) {
         $seen = 0
         $previous = $null
         foreach ($row in $ordered) {
+            # A row kept under the cutoff for its games is not in sequence
+            # with the rows above it: numbered on, it read hundreds of places
+            # too good (2026-10-09). The ladder's own rank stands for it.
+            if ($null -ne $info.Floor -and $row.Rating -lt $info.Floor) { continue }
             $seen++
             if ($previous -eq $null -or $row.Rating -ne $previous) { $place = $seen; $previous = $row.Rating }
             $row.Rank = $place

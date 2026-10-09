@@ -133,6 +133,11 @@ end
 -- sharing them would measure each other's matches and average each other's
 -- points. The on/off setting stays account wide, since that is a preference
 -- rather than data.
+-- Whether the who stamp below is owed: at login, and on every zone. It was
+-- taken on every open of the store -- three and more times a tick, each a
+-- new table and four client calls (2026-10-09).
+local stampWho=true
+
 local function Store()
 	module.db.chars=module.db.chars or {}
 	ns.MigrateCharStore(module.db.chars)
@@ -153,6 +158,8 @@ local function Store()
 	-- never heard of. An alt at 576 is a thousand points below where the
 	-- leaderboard starts, so its class, race and realm are knowable only from
 	-- the character itself -- and only while it is the one logged in.
+	if not stampWho and store.who then return store end
+	stampWho=false
 	local class,classFile=UnitClass("player")
 	store.who={
 		class  = classFile and classFile:lower():gsub("%s",""),
@@ -414,10 +421,17 @@ end
 
 -- Clearing the shared line on a zone change is the core's job now.
 local watcher=CreateFrame("Frame")
-watcher:SetScript("OnEvent",function()
+watcher:SetScript("OnEvent",function(_,event)
 	-- Noted on the event as well as on the tick, so stepping into an arena
 	-- counts even if the ticker is not running yet.
 	NoteArena()
+	-- The answer to this module's own request: the ticker reads it on its
+	-- next look. Starting the watch over from it asked again at once, and
+	-- the server's reply to that asked again -- one request per round trip
+	-- for the whole session, on every character (2026-10-09).
+	if event=="PVP_RATED_STATS_UPDATE" and ticker then return end
+	-- The who stamp is owed again on a zone: a spec may have changed.
+	if event=="PLAYER_ENTERING_WORLD" then stampWho=true end
 	Watch()
 end)
 
@@ -491,17 +505,25 @@ function module:OnEnable()
 	-- two characters' matches were averaged together and the marks were
 	-- compared across them. It is a few matches to rebuild and worth nothing
 	-- as it stands, so it goes.
-	if self.db.dataVersion~=DATA_VERSION then
-		self.db.chars=nil
-		self.db.seen=nil
-		self.db.results=nil
-		self.db.lastMMR=nil
-		self.db.dataVersion=DATA_VERSION
+	local function CheckDataVersion()
+		if self.db.dataVersion~=DATA_VERSION then
+			self.db.chars=nil
+			self.db.seen=nil
+			self.db.results=nil
+			self.db.lastMMR=nil
+			self.db.dataVersion=DATA_VERSION
+		end
 	end
+	CheckDataVersion()
+	-- And again once QoLPlus's saved variables have been inherited, which
+	-- happens at login, after this: an older shape copied in then stood a
+	-- whole session before the next login's check wiped it (2026-10-09).
+	if ns.On then ns.On("INHERITED",CheckDataVersion) end
 
 	watcher:RegisterEvent("PLAYER_ENTERING_WORLD")
 	watcher:RegisterEvent("UPDATE_BATTLEFIELD_SCORE")
-	watcher:RegisterEvent("PVP_RATED_STATS_UPDATE")
+	-- As PVP_MATCH_COMPLETE below: an event a client lacks is an error.
+	pcall(watcher.RegisterEvent,watcher,"PVP_RATED_STATS_UPDATE")
 	-- Registering an event this client does not have is an error, and
 	-- PVP_MATCH_COMPLETE is a later addition: it is a bonus trigger here, not
 	-- the one being relied on.

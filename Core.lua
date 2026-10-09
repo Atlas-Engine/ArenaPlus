@@ -523,7 +523,10 @@ local function InitDB()
 	for _,key in ipairs(moduleOrder) do
 		local module=ns.modules[key]
 		local saved=db.modules[key]
-		if not saved then saved={} db.modules[key]=saved end
+		-- A value that is not a table -- a saved file edited by hand -- is
+		-- replaced: thrown on, InitDB stopped and every module after it had
+		-- no settings at all (2026-10-09).
+		if type(saved)~="table" then saved={} db.modules[key]=saved end
 		if module.defaults then
 			for k,v in pairs(module.defaults) do
 				-- A table default is copied rather than handed over: shared, the
@@ -1362,11 +1365,26 @@ local ladderIndex={}
 -- One name written two ways is still one name.
 --
 -- The game calls a realm "Ra-den" and the site calls it "Raden"; elsewhere
--- there are spaces and apostrophes. Only those three are taken out -- anything
--- broader, such as keeping letters and digits alone, would eat the bytes of an
+-- there are spaces and apostrophes, and the Oceanic realms carry their
+-- "(AU)" in parentheses where the site's slug has a hyphen -- "Arugal (AU)"
+-- against "arugal-au", which lit no row and disabled My rank for every
+-- Arugal player (2026-10-09). Only those are taken out -- anything broader,
+-- such as keeping letters and digits alone, would eat the bytes of an
 -- accented name and turn Bâz into Bz.
 function ns.PlainName(text)
-	return (text or ""):lower():gsub("[%s%-']","")
+	return (text or ""):lower():gsub("[%s%-'%(%)]","")
+end
+
+-- Lower case for an accented capital as well: Lua's lower() folds A-Z alone,
+-- so a typed "élodie" never found "Élodie" (2026-10-09). The Latin-1 capitals
+-- are the two-byte sequences C3 80 to C3 9E, each 0x20 above its lower-case
+-- form; C3 97 is the multiplication sign and stays.
+function ns.FoldCase(text)
+	return ((text or ""):lower():gsub("\195([\128-\158])",function(c)
+		local b=c:byte()
+		if b==151 then return nil end
+		return "\195"..string.char(b+32)
+	end))
 end
 
 -- Indexed per region as well as per bracket.
@@ -1549,6 +1567,16 @@ local function LadderFor(bracket,region)
 
 	ladderIndex[region][bracket]=index
 	return index
+end
+
+-- Built ahead of the first hover, one bracket a step: built on the hover,
+-- a bracket's index was tens of thousands of string allocations in one
+-- frame, three times over for the tooltip's three brackets (2026-10-09).
+function ns.PrebuildLadderIndex()
+	if not C_Timer then return end
+	for bracket=1,3 do
+		C_Timer.After(5+bracket,function() pcall(LadderFor,bracket) end)
+	end
 end
 
 function ns.LadderEntry(bracket,name,region)
@@ -1753,8 +1781,9 @@ function ns.CopyName(text,beside)
 			text=ns.L.LADDER_COPY,
 			button1=OKAY,
 			hasEditBox=1,
-			-- High, so this does not take a slot Blizzard's own dialogs want.
-			preferredIndex=8,
+			-- Off the first slot, which Blizzard's own code addresses by index;
+			-- there are four, and 8 fell past them (2026-10-09).
+			preferredIndex=3,
 			timeout=0,
 			whileDead=1,
 			hideOnEscape=1,
@@ -1774,8 +1803,11 @@ function ns.CopyName(text,beside)
 				if not box.arenaPlusCopyHooked then
 					box.arenaPlusCopyHooked=true
 					box:HookScript("OnKeyUp",function(edit,key)
-						if key=="C" and IsControlKeyDown() then
-							edit:GetParent():Hide()
+						-- Blizzard's dialogs share this box: only our own is
+						-- closed, and the way a dialog closes (2026-10-09).
+						local dialog=edit:GetParent()
+						if key=="C" and IsControlKeyDown() and dialog.which=="ARENAPLUS_COPY_NAME" then
+							StaticPopup_Hide("ARENAPLUS_COPY_NAME")
 						end
 					end)
 				end
@@ -2020,11 +2052,14 @@ loader:SetScript("OnEvent",function(self,event,name)
 	-- going to be. Does nothing on later logins.
 	if event=="PLAYER_LOGIN" then
 		if ArenaPlus_SavedVars then InheritFromQoLPlus(ArenaPlus_SavedVars) end
+		-- Said, so a module can look at what came in (ArenaMMR's version check).
+		if ns.Fire then ns.Fire("INHERITED") end
 
 		-- Chosen at login rather than at load: GetCurrentRegion is not
 		-- answerable until the world is up.
 		ChooseRegion()
 		CheckRegion()
+		if ns.PrebuildLadderIndex then ns.PrebuildLadderIndex() end
 		self:UnregisterEvent("PLAYER_LOGIN")
 	end
 end)

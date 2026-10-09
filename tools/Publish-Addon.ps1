@@ -48,8 +48,14 @@ $logFile = Join-Path $PSScriptRoot "Publish-Addon.log"
 
 function Say($text) {
     Write-Host $text
-    Add-Content -Path $logFile -Value ("{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $text) -Encoding utf8
+    # Never a reason to stop: under Stop, a log that could not be written
+    # ended the release that was writing it.
+    try { Add-Content -Path $logFile -Value ("{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $text) -Encoding utf8 } catch { }
 }
+
+# UTF-8 with no byte-order mark: Windows PowerShell's -Encoding utf8 writes
+# one, and the .toc's first line was no longer "## Interface" (2026-10-09).
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
 trap {
     Say ("FAILED: " + $_.Exception.Message)
@@ -111,7 +117,7 @@ try {
     # -NoNewline, and the encoding kept, so the only line that changes is the
     # version one. Rewriting the whole file's endings would put the entire .toc
     # in the diff of every release.
-    Set-Content -Path $tocPath -Value $content -Encoding utf8 -NoNewline
+    [System.IO.File]::WriteAllText($tocPath, $content, $utf8NoBom)
 
     # ------------------------------------------------------- the changelog
     #
@@ -142,16 +148,20 @@ try {
     $releasePath = Join-Path $Repo "CHANGELOG-RELEASE.md"
     $historyPath = Join-Path $Repo "CHANGELOG.md"
 
-    Set-Content -Path $releasePath -Value $entry -Encoding utf8
+    [System.IO.File]::WriteAllText($releasePath, $entry + "`n", $utf8NoBom)
 
     # Prepended, so the newest version is first and nothing already written is
     # touched. A missing file starts one rather than failing the release.
     $history = if (Test-Path $historyPath) { Get-Content $historyPath -Raw } else { "# Changelog`n" }
     $history = "# Changelog`n`n## $Version`n`n$entry`n`n" + ($history -replace '^# Changelog\s*', '')
-    Set-Content -Path $historyPath -Value $history -Encoding utf8
+    [System.IO.File]::WriteAllText($historyPath, $history + "`n", $utf8NoBom)
 
     git add -- $Toc CHANGELOG.md CHANGELOG-RELEASE.md
+    if ($LASTEXITCODE -ne 0) { throw "git add failed ($LASTEXITCODE)" }
     git commit -q -m "Version $Version"
+    # Checked: a commit that failed tagged the previous HEAD, and the release
+    # went out without its version bump (2026-10-09).
+    if ($LASTEXITCODE -ne 0) { throw "git commit failed ($LASTEXITCODE): nothing tagged" }
 
     # Take whatever is on origin before tagging.
     #
@@ -185,6 +195,7 @@ try {
     }
 
     git tag $Version
+    if ($LASTEXITCODE -ne 0) { throw "git tag failed ($LASTEXITCODE)" }
 
     # Explicit refspec rather than --tags: this sends the tag just made, not
     # whatever else happens to be lying around locally.

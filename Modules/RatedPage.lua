@@ -127,11 +127,10 @@ end
 local function UpdateRow(row,bracket)
 	if not row or not GetPersonalRatedInfo then return end
 
-	local rating,_,_,played,won=GetPersonalRatedInfo(bracket)
-	-- Assigned before converting: select returns everything from the eleventh
-	-- value on, and tonumber would take the twelfth -- the team size -- as a
-	-- number base, which blows up when it is 0.
-	local ranking=select(11,GetPersonalRatedInfo(bracket))
+	-- Read once, the eleventh value named outright: it was asked twice a
+	-- row, and tonumber(select(11,...)) would have taken the twelfth -- the
+	-- team size -- as a number base, which blows up when it is 0.
+	local rating,_,_,played,won,_,_,_,_,_,ranking=GetPersonalRatedInfo(bracket)
 	ranking=tonumber(ranking)
 
 	rating,played,won=tonumber(rating) or 0,tonumber(played) or 0,tonumber(won) or 0
@@ -246,7 +245,8 @@ function module:OnEnable()
 	else
 		watcher:RegisterEvent("ADDON_LOADED")
 	end
-	watcher:RegisterEvent("PVP_RATED_STATS_UPDATE")
+	-- An event a client lacks is an error to register (WOW-API.md).
+	pcall(watcher.RegisterEvent,watcher,"PVP_RATED_STATS_UPDATE")
 
 	-- Ask early so the numbers are already in hand the first time the panel is
 	-- opened, rather than arriving just after it is drawn.
