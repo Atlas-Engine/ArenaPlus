@@ -109,7 +109,7 @@ try {
         Say "Would set $Toc to $Version, write the changelog, commit, tag and push."
         Say "Nothing done (-WhatIf). The entry would read:"
         if ($ChangelogFile -and (Test-Path $ChangelogFile)) {
-            foreach ($line in (Get-Content $ChangelogFile)) { if ($line.Trim()) { Say ("   " + $line) } }
+            foreach ($line in (Get-Content $ChangelogFile -Encoding UTF8)) { if ($line.Trim()) { Say ("   " + $line) } }
         }
         return
     }
@@ -135,7 +135,9 @@ try {
     # since the history below writes its own heading from $Version.
     $Changelog = ""
     if ($ChangelogFile -and (Test-Path $ChangelogFile)) {
-        $Changelog = Get-Content $ChangelogFile -Raw
+        # As UTF-8: read under Windows PowerShell's default, an accent in a
+        # note arrived as two characters (2026-10-09).
+        $Changelog = Get-Content $ChangelogFile -Raw -Encoding UTF8
     }
 
     $entry = ($Changelog -split "`r?`n" |
