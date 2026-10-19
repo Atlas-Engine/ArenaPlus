@@ -2990,6 +2990,11 @@ local function CreatePanel()
 	-- far off you are.
 	panel.cutoffs.next=cutoffs:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
 	panel.cutoffs.next:SetPoint("TOPRIGHT",cutoffs,"TOPRIGHT",-14,-12)
+	-- Never over the heading: it starts after it and is cut short with an
+	-- ellipsis rather than running left into it ("Rank one is 25 places --
+	-- you are #26" covered "3v3 title cutoffs", 2026-10-19).
+	panel.cutoffs.next:SetPoint("LEFT",panel.cutoffs.title,"RIGHT",10,0)
+	panel.cutoffs.next:SetWordWrap(false)
 	panel.cutoffs.next:SetJustifyH("RIGHT")
 
 	panel.cutoffs.rows={}

@@ -192,7 +192,7 @@ L.CUTOFF_NEXT_TOP         = "|cff%s%s range|r"
 -- Rank one and Gladiator are a fixed number of places, so clearing the
 -- rating is necessary and not sufficient: 2404 beats a 2401 cutoff and still
 -- misses at #24 of 23 places. "+N rating" cannot say that -- N is negative.
-L.CUTOFF_NEXT_PLACES      = "|cff%s%s|r is %d places -- you are #%d"
+L.CUTOFF_NEXT_PLACES      = "|cff%s%s: top %d|r -- you're #%d"
 -- The date a user can act on. What they have is whatever shipped in the last
 -- release, and a release only happens when the numbers moved -- so this is when
 -- the companion script last read Blizzard, not when Blizzard last changed them.
