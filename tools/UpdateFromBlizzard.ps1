@@ -1267,6 +1267,41 @@ $cutoffBody = ($brackets | ForEach-Object {
     "`t[{0}] = {{ {1} }}, -- {2}" -f $_.Index,$parts,$_.Api
 }) -join "`n"
 
+# Rank one's and Gladiator's places as they were when Blizzard published
+# the cutoff, kept until it publishes the next. Counted afresh every run, they
+# drifted up on a busy day as players climbed past a cutoff not yet moved, and
+# fell back when it moved: US 3v3's rank one read 31 the evening before a new
+# cutoff made it 26, and those places also decide who wears the title. A
+# cutoff unchanged since the last file keeps that file's count; a moved one is
+# counted now, which is the first run after Blizzard published it. The same
+# rule as arenaplus.live's (2026-10-20). Duelist and below are shares of the
+# ladder, not places, and stay counted every run, as on the site.
+function Read-LuaRows([string]$Text) {
+    $rows = @{}
+    foreach ($m in [regex]::Matches($Text, '\[(\d+)\] = \{([^}]*)\}')) {
+        $row = @{}
+        foreach ($p in [regex]::Matches($m.Groups[2].Value, '(\w+)=(\d+)')) { $row[$p.Groups[1].Value] = [int]$p.Groups[2].Value }
+        $rows[[int]$m.Groups[1].Value] = $row
+    }
+    return $rows
+}
+if ($existing) {
+    $split = $existing.IndexOf('CUTOFF_SLOTS_BY_REGION')
+    if ($split -gt 0) {
+        $wasCut   = Read-LuaRows $existing.Substring(0, $split)
+        $wasSlots = Read-LuaRows $existing.Substring($split)
+        foreach ($bracket in $brackets) {
+            $i = $bracket.Index
+            foreach ($tier in @('r1', 'gladiator')) {
+                if ($slots[$i] -and $slots[$i].Contains($tier) -and $wasCut.ContainsKey($i) -and $wasSlots.ContainsKey($i) -and
+                        $wasCut[$i][$tier] -eq $cutoffs[$i][$tier] -and $wasSlots[$i].ContainsKey($tier)) {
+                    $slots[$i][$tier] = $wasSlots[$i][$tier]
+                }
+            }
+        }
+    }
+}
+
 $slotBody = ($brackets | ForEach-Object {
     $parts = ($slots[$_.Index].GetEnumerator() | ForEach-Object { "{0}={1}" -f $_.Key,$_.Value }) -join ", "
     "`t[{0}] = {{ {1} }}, -- {2}" -f $_.Index,$parts,$_.Api
