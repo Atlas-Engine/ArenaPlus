@@ -615,16 +615,20 @@ local function LiveStanding(bracket)
 	-- This line exists to correct a snapshot that has fallen behind, so when
 	-- the snapshot agrees it is not a correction: it is the same two numbers a
 	-- second time, three rows under the highlighted row that already has them.
+	local listed
 	for _,entry in ipairs(Ladder(bracket)) do
 		if IsPlayer(entry) then
 			if entry.rank==ranking and entry.rating==rating then return nil end
+			listed=entry.rating
 			break
 		end
 	end
 
 	local hex=ns.RankHex and ns.RankHex(bracket,{ rank=ranking, rating=rating },ViewKey())
 	hex=hex or "ffffff"
-	return L.LADDER_LIVE_SELF:format(hex,ranking,hex,rating)
+	-- Short: it shares its line with when Blizzard was read.
+	if listed==rating then return L.LADDER_LIVE_SELF:format(hex,ranking) end
+	return L.LADDER_LIVE_SELF_RATING:format(hex,ranking,hex,rating)
 end
 
 -- "13 minutes ago", from the stamp the companion script wrote.

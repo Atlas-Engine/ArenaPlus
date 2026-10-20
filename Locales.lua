@@ -207,7 +207,7 @@ L.CUTOFF_SOURCE_SNAPSHOT  = "|cff9a9a9aBlizzard|r %s UTC |cff6a6a6a(%s)|r"
 -- question is whether it is recent, and a clock time makes the reader work
 -- that out.
 L.LADDER_AGO_NOW          = "just now"
-L.LADDER_AGO_MINUTES      = "%d minutes ago"
+L.LADDER_AGO_MINUTES      = "%d min ago"
 L.LADDER_AGO_HOUR         = "an hour ago"
 L.LADDER_AGO_HOURS        = "%d hours ago"
 L.LADDER_AGO_DAY          = "a day ago"
@@ -400,7 +400,11 @@ L.LADDER_SWAP             = "History"
 L.LADDER_PAGE             = "page %d of %d"
 -- Tier colour, rank, rating. Said on the source line rather than in the list:
 -- the rows are a snapshot and stay one, and this is the live number.
-L.LADDER_LIVE_SELF        = "   |cff9a9a9a--|r  you are |cff%s#%d|r |cff6a6a6a(|r|cff%s%d|r|cff6a6a6a)|r"
+-- Your rank as the game has it now, beside the list's older one: said as the
+-- game's, or "you are #27" under a list saying #26 read as a contradiction
+-- (2026-10-20). The rating only when it differs from the list's.
+L.LADDER_LIVE_SELF        = "  |cff9a9a9a·|r  in game now |cff%s#%d|r"
+L.LADDER_LIVE_SELF_RATING = "  |cff9a9a9a·|r  in game now |cff%s#%d|r |cff6a6a6a(|r|cff%s%d|r|cff6a6a6a)|r"
 L.LADDER_EMPTY            = "No ladder recorded for this bracket."
 -- The My alts view: your own characters, numbered among themselves rather than
 -- by where they sit on the ladder. An alt at 1400 has no ladder place at all,
