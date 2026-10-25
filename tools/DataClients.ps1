@@ -55,6 +55,42 @@ function New-KeyTable {
     return New-Object 'System.Collections.Hashtable' ([System.StringComparer]::Ordinal)
 }
 
+# A board's entries with one per name and realm: where two carry different
+# character ids (deleted and restored, see UpdateFromBlizzard.ps1), the higher
+# id's. Order kept. $script:twice is how many were dropped.
+function Select-NewestCharacters($entries) {
+    $byKey = New-KeyTable
+    $script:twice = 0
+    foreach ($entry in $entries) {
+        $k = $entry.character.name.ToLower() + "|" + $entry.character.realm.slug
+        $other = $byKey[$k]
+        if ($other) {
+            $script:twice++
+            if ([long]$entry.character.id -le [long]$other.character.id) { continue }
+        }
+        $byKey[$k] = $entry
+    }
+    if ($script:twice -eq 0) { return $entries }
+    foreach ($entry in $entries) {
+        $k = $entry.character.name.ToLower() + "|" + $entry.character.realm.slug
+        if ([object]::ReferenceEquals($byKey[$k], $entry)) { $entry }
+    }
+}
+
+# Whether a character's own record ($mine: Won, Lost, Id) and the board's
+# ($entry) are two different characters under one name and realm: deleted and
+# restored, which starts the record again under a new id. Different ids say so
+# outright. Without an id on both, a record ahead on one count and behind on
+# the other does: both only ever go up within a season, so no two readings of
+# one character disagree that way.
+function Test-Restored($mine, $entry) {
+    $id = [long]$entry.character.id
+    if ($mine.Id -and $id) { return ([long]$mine.Id -ne $id) }
+    $won = [int]$entry.season_match_statistics.won
+    $lost = [int]$entry.season_match_statistics.lost
+    return (($won -gt $mine.Won -and $lost -lt $mine.Lost) -or ($won -lt $mine.Won -and $lost -gt $mine.Lost))
+}
+
 # Write a shipped table so no reader can ever see half of it.
 #
 # Set-Content truncates the file and then writes it, which leaves a window --

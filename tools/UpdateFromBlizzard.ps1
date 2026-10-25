@@ -627,6 +627,18 @@ foreach ($bracket in $brackets) {
     $lowest = if ($all.Count -gt 0) { ($all | Measure-Object rating -Minimum).Minimum } else { 0 }
     $capped = ($all.Count -gt 0 -and $null -ne $floor -and $lowest -gt $floor)
 
+    # One row a character. A character deleted and restored comes back under a
+    # new Blizzard character id with a fresh record, and the board can list
+    # both for a while, the old one frozen where it stopped. The rows are keyed
+    # by name and realm from here on, so the second would overwrite the first
+    # wherever the rows are looked up and come out twice wherever they are
+    # listed. Ids are handed out in order: the higher is the character now.
+    $kept = @(Select-NewestCharacters $kept)
+    if ($script:twice -gt 0) {
+        Write-Log ("{0}: the {1} board lists {2} characters twice under two ids; kept the newer of each." -f
+            $Region.ToUpper(), $bracket.Api, $script:twice)
+    }
+
     $fetched[$bracket.Index] = @{ Rows = $kept; Capped = $capped; Floor = $floor }
     $total += $kept.Count
 
@@ -714,7 +726,11 @@ if ($Live) {
                 # were last asked, came later; -1 is "not known yet".
                 $cachedBoard = -1
                 if ($bits.Count -ge 6) { $null = [int]::TryParse($bits[5], [ref]$cachedBoard) }
-                $cache[$bits[0]] = @{ Rating = [int]$bits[1]; Won = [int]$bits[2]; Lost = [int]$bits[3]; Written = $bits[4]; Board = $cachedBoard; Miss = ([int]$bits[1] -lt 0) }
+                # The tenth, Blizzard's id for the character the record is
+                # theirs (see Test-Restored); 0 is not known.
+                $cachedId = [long]0
+                if ($bits.Count -ge 10) { $null = [long]::TryParse($bits[9], [ref]$cachedId) }
+                $cache[$bits[0]] = @{ Rating = [int]$bits[1]; Won = [int]$bits[2]; Lost = [int]$bits[3]; Written = $bits[4]; Board = $cachedBoard; Miss = ([int]$bits[1] -lt 0); Id = $cachedId }
             }
         }
     }
@@ -755,7 +771,7 @@ if ($Live) {
                 $key = "{0}|{1}|{2}" -f $bracket.Index, $entry.character.name.ToLower(), $entry.character.realm.slug
                 $known = $cache[$key]
                 if ($known -and -not $known.Miss) {
-                    $liveRatings[$key] = @{ Rating = $known.Rating; Won = $known.Won; Lost = $known.Lost; Written = $known.Written }
+                    $liveRatings[$key] = @{ Rating = $known.Rating; Won = $known.Won; Lost = $known.Lost; Written = $known.Written; Id = $known.Id }
                 }
             }
         }
@@ -878,7 +894,7 @@ if ($Live) {
         foreach ($item in $work) {
             if ($cache.ContainsKey($item.Key) -and -not $cache[$item.Key].Miss -and -not $liveRatings.ContainsKey($item.Key)) {
                 $known = $cache[$item.Key]
-                $liveRatings[$item.Key] = @{ Rating = $known.Rating; Won = $known.Won; Lost = $known.Lost; Written = $known.Written }
+                $liveRatings[$item.Key] = @{ Rating = $known.Rating; Won = $known.Won; Lost = $known.Lost; Written = $known.Written; Id = $known.Id }
             }
         }
 
@@ -933,6 +949,7 @@ if ($Live) {
                     Rating  = [int]$body.rating
                     Won     = [int]$body.season_match_statistics.won
                     Lost    = [int]$body.season_match_statistics.lost
+                    Id      = [long]$body.character.id
                     # An array in PowerShell 7, a string in 5.1; see Get-Api.
                     Written = @($response.Headers['Last-Modified']) -join ''
                 }
@@ -1071,22 +1088,22 @@ if ($Live) {
                 if ($known -and $known.Miss) { $known = $null }
                 if ($answer -and $answer.Status -eq 'ok' -and $answer.Season -ne $season) {
                     $staleSeason++
-                    if ($known) { $liveRatings[$job.Item.Key] = @{ Rating = $known.Rating; Won = $known.Won; Lost = $known.Lost; Written = $known.Written } }
+                    if ($known) { $liveRatings[$job.Item.Key] = @{ Rating = $known.Rating; Won = $known.Won; Lost = $known.Lost; Written = $known.Written; Id = $known.Id } }
                 } elseif ($answer -and $answer.Status -eq 'ok') {
-                    $liveRatings[$job.Item.Key] = @{ Rating = $answer.Rating; Won = $answer.Won; Lost = $answer.Lost; Written = $answer.Written }
+                    $liveRatings[$job.Item.Key] = @{ Rating = $answer.Rating; Won = $answer.Won; Lost = $answer.Lost; Written = $answer.Written; Id = $answer.Id }
                     $fresh++
                     if ($known -and ($answer.Won -ne $known.Won -or $answer.Lost -ne $known.Lost)) { $null = $playedNow.Add($job.Item.Key) }
                     # A new write at all -- a logout -- for the character's other brackets.
                     if ($known -and $answer.Written -and $answer.Written -ne $known.Written) { $null = $touchedNow.Add(($job.Item.Key -split '\|', 2)[1]) }
                 } elseif ($answer -and $answer.Status -eq 'same' -and $known) {
                     # Nothing new since last time: keep what we had.
-                    $liveRatings[$job.Item.Key] = @{ Rating = $known.Rating; Won = $known.Won; Lost = $known.Lost; Written = $known.Written }
+                    $liveRatings[$job.Item.Key] = @{ Rating = $known.Rating; Won = $known.Won; Lost = $known.Lost; Written = $known.Written; Id = $known.Id }
                     $unchanged++
                 } else {
                     # A hidden profile, or one that has moved. The last thing it
                     # said is still better than the snapshot's guess.
                     if ($known) {
-                        $liveRatings[$job.Item.Key] = @{ Rating = $known.Rating; Won = $known.Won; Lost = $known.Lost; Written = $known.Written }
+                        $liveRatings[$job.Item.Key] = @{ Rating = $known.Rating; Won = $known.Won; Lost = $known.Lost; Written = $known.Written; Id = $known.Id }
                     } elseif ($answer -and $answer.Reason -and $answer.Reason -ne "HTTP 429") {
                         # Never readable -- a hidden profile, mostly. Remembered
                         # as a miss so it is not asked again every run: dated
@@ -1192,7 +1209,10 @@ if ($Live) {
         $boardWas = if ($cache.ContainsKey($key)) { $cache[$key].Board } else { -1 }
         $boardGames = if ($askedNow.Contains($key) -or $boardWas -lt 0) { $boardNow[$key] } else { $boardWas }
         if ($null -eq $boardGames) { $boardGames = $boardWas }
-        $null = $keep.Add(("{0}`t{1}`t{2}`t{3}`t{4}`t{5}" -f $key, $it.Rating, $it.Won, $it.Lost, $it.Written, $boardGames))
+        # The character's id in tracker.py's tenth column, the three before it
+        # at what tracker.py reads as nothing known.
+        $idColumns = if ($it.Id) { "`t0`t`t0`t" + $it.Id } else { "" }
+        $null = $keep.Add(("{0}`t{1}`t{2}`t{3}`t{4}`t{5}{6}" -f $key, $it.Rating, $it.Won, $it.Lost, $it.Written, $boardGames, $idColumns))
     }
     # Misses: new ones from this run, and old ones not asked this run. A miss
     # asked again and still unreadable was re-dated above; one on the board no
@@ -1373,6 +1393,7 @@ if ($baselineDate) {
 }
 
 $refused = 0
+$restoredRows = 0
 $rows = New-Object System.Collections.Generic.List[string]
 # Which realms this region's ladder actually mentions, so the name table
 # below carries those and not the fifty in Blizzard's index.
@@ -1423,6 +1444,7 @@ if (Test-Path $lastFile) {
 }
 
 $nextPoll = New-Object System.Collections.Generic.List[string]
+$boardIds = New-KeyTable
 $null = $nextPoll.Add("# Where everybody stood at the previous poll, to diff the next one against.")
 $null = $nextPoll.Add("# Not shipped. Safe to delete: it costs one poll to rebuild, losing one window.")
 $activity = New-Object System.Collections.Generic.List[string]
@@ -1533,8 +1555,23 @@ foreach ($bracket in $brackets) {
         # that says which reading came later. About 2.7% of rows take this path,
         # every one of them somebody who has not logged out since the last
         # rebuild.
+        #
+        # Except a character deleted and restored, which Blizzard lists under a
+        # new id with its record started again (Havitýx, Shek'zeer 2v2,
+        # 2026-10-24: 26-5 on the board under the new id, 24-22 frozen in the
+        # cache, and the cache won every run on games). The board is theirs
+        # now, and the move from the old record is not a session: no activity,
+        # and the season high starts again with it.
         $useMine = $false
-        if ($mine) {
+        $restored = $false
+        if ($mine -and (Test-Restored $mine $entry)) {
+            $restored = $true
+            $script:restoredRows++
+            Write-Host ("  restored: {0}-{1} bracket {2} -- ladder says {3} ({4}-{5}) under id {6}, character said {7} ({8}-{9}) under id {10}" -f `
+                $entry.character.name, $entry.character.realm.slug, $bracket.Index,
+                $entry.rating, $entry.season_match_statistics.won, $entry.season_match_statistics.lost, $entry.character.id,
+                $mine.Rating, $mine.Won, $mine.Lost, $(if ($mine.Id) { $mine.Id } else { "unknown" }))
+        } elseif ($mine) {
             $snapshotGames = [int]$entry.season_match_statistics.won + [int]$entry.season_match_statistics.lost
             $mineGames = $mine.Won + $mine.Lost
             $useMine = ($mineGames -ge $snapshotGames)
@@ -1563,6 +1600,8 @@ foreach ($bracket in $brackets) {
             Lost    = if ($useMine) { $mine.Lost } else { [int]$entry.season_match_statistics.lost }
             Rank    = [int]$entry.rank
             Key     = $key
+            Id      = [long]$entry.character.id
+            Restored = $restored
         })
     }
 
@@ -1587,6 +1626,7 @@ foreach ($bracket in $brackets) {
 
     foreach ($row in $ordered) {
         $null = $nextBaseline.Add(("{0}`t{1}`t{2}" -f $row.Key, $row.Rating, $row.Rank))
+        if ($row.Id) { $boardIds[$row.Key] = $row.Id }
 
         # Bracket in the key: one character plays several, and 2v2 games are
         # not 3v3 games.
@@ -1631,7 +1671,7 @@ foreach ($bracket in $brackets) {
         # disk stay readable and anything reading them must tolerate both
         # widths.
         $before = $lastPoll[$pollKey]
-        if ($Live -and $before) {
+        if ($Live -and $before -and -not $row.Restored) {
             $dw = $row.Won - $before.Won
             $dl = $row.Lost - $before.Lost
             if ($dw -ne 0 -or $dl -ne 0) {
@@ -1649,7 +1689,7 @@ foreach ($bracket in $brackets) {
         # Written on the row only when it beats what they are on now. Equal is
         # the common case by far -- anybody at their season high -- and "max
         # 2641" beside "2641" is a column of noise.
-        $peak = $best[$row.Key]
+        $peak = if ($row.Restored) { $null } else { $best[$row.Key] }
         if (-not $peak -or $row.Rating -gt $peak) { $peak = $row.Rating }
         $best[$row.Key] = $peak
 
@@ -1780,6 +1820,23 @@ foreach ($key in ($best.Keys | Sort-Object)) {
 # A temp file and a move, like the tables: Set-Content truncates first, and a
 # pass killed in the middle lost a season of peaks with it.
 Write-DataFile -Path $bestFile -Value ($bestLines -join "`n")
+
+# Blizzard's character id for every row written, for the site's ingest
+# (ArenaPlus-history's ingest.py), which keys a character by name and realm and
+# would otherwise not know when the one behind a name has been deleted and
+# restored. Not shipped: the addon has no use for it, and ten bytes a row is
+# half a megabyte on every data release.
+$idLines = New-Object System.Collections.Generic.List[string]
+$null = $idLines.Add("# Blizzard's character id for each ladder row: bracket|name|realm, a tab, the id.")
+$null = $idLines.Add("# Not shipped. Written every run from the board; safe to delete.")
+foreach ($key in ($boardIds.Keys | Sort-Object)) {
+    $null = $idLines.Add(("{0}`t{1}" -f $key, $boardIds[$key]))
+}
+Write-DataFile -Path (Join-Path $PSScriptRoot ("BoardIds-" + $Region + ".txt")) -Value ($idLines -join "`n")
+
+if ($restoredRows -gt 0) {
+    Write-Host ("Took the ladder's own figure for {0} rows whose character was deleted and restored." -f $restoredRows)
+}
 
 if ($refused -gt 0) {
     Write-Host ("Kept the ladder's own figure for {0} rows whose character reported fewer games than the ladder." -f $refused)
