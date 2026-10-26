@@ -81,11 +81,18 @@ local fire = watcher.scripts.OnEvent
 fire(watcher, "PLAYER_ENTERING_WORLD")
 
 -- Log events: GUIDs only, the rest of each unit's fields empty.
-local function log(event, src, dst, spellID, spellName, extraID, extraName, aura)
+local function rawlog(event, src, dst, ...)
+	local count=select("#",...)
+	local values={0,event,false,src,nil,0,0,dst,nil,0,0,...}
 	CombatLogGetCurrentEventInfo = function()
-		return 0, event, false, src, nil, 0, 0, dst, nil, 0, 0, spellID, spellName, 0, extraID, extraName, 0, aura
+		return unpack(values,1,11+count)
 	end
 	fire(watcher, "COMBAT_LOG_EVENT_UNFILTERED")
 end
+local function log(event, src, dst, spellID, spellName, extraID, extraName, aura)
+	rawlog(event,src,dst,spellID,spellName,0,extraID,extraName,0,aura)
+end
 
-return { log = log, handlers = handlers, module = module, advance = function(s) clock = clock + s end }
+return { log = log, rawlog = rawlog, handlers = handlers, module = module,
+	event = function(event) fire(watcher,event) end,
+	advance = function(s) clock = clock + s end }

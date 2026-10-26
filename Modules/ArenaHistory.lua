@@ -918,15 +918,46 @@ local function CloseOpenCC()
 	current.ccOpen,current.ccBy=nil,nil
 end
 
--- Damage taken, which the arena scoreboard does not report at all: it lists
--- damage done and healing done and nothing about what landed on you. Summed
--- here instead, so soaking a match's pressure and living through it can count
--- for something.
-local function NoteDamage(sourceGUID,destGUID,amount,overkill)
+-- Kept outside the roster entries until filing the match: scoreboard updates
+-- must never overwrite these observations or add them a second time.
+local function NoteTotal(sourceGUID,destGUID,field,amount)
+	if amount<=0 then return end
+	local source=PlayerOrOwner(sourceGUID)
+	local target=PlayerOrOwner(destGUID)
+	if not (source and target) then return end
+	local friendly=OnMine(source)==OnMine(target)
+	if (field=="dmg" and friendly) or (field=="heal" and not friendly) then return end
+	current.totals=current.totals or {}
+	local totals=current.totals[source.guid] or {}
+	current.totals[source.guid]=totals
+	totals[field]=(totals[field] or 0)+amount
+end
+
+local function NoteHealing(sourceGUID,destGUID,amount,overhealing)
+	NoteTotal(sourceGUID,destGUID,"heal",math.max(0,(tonumber(amount) or 0)-(tonumber(overhealing) or 0)))
+end
+
+-- SPELL_ABSORBED has a spell prefix for spells and starts with the shield
+-- caster for melee. Count only the amount consumed, credited to that caster.
+local function NoteAbsorb(destGUID,...)
+	local first=...
+	if type(first)=="number" then
+		NoteHealing(select(4,...),destGUID,select(11,...),0)
+	else
+		NoteHealing(first,destGUID,select(8,...),0)
+	end
+end
+
+-- Damage taken is always counted here: the scoreboard has no such column.
+-- Outgoing damage also stays available if we leave without a scoreboard.
+local function NoteDamage(sourceGUID,destGUID,amount,overkill,absorbed)
 	amount=tonumber(amount) or 0
 	-- Past the health bar is not damage taken: the killing blow inflated it.
 	overkill=tonumber(overkill) or 0
 	if overkill>0 then amount=amount-overkill end
+	-- Shields count towards damage done, but not damage taken. The separate
+	-- SPELL_ABSORBED event counts healing only, so it cannot double this.
+	NoteTotal(sourceGUID,destGUID,"dmg",math.max(0,amount)+math.max(0,tonumber(absorbed) or 0))
 	if amount<=0 then return end
 
 	local target=PlayerByGUID(destGUID)
@@ -969,7 +1000,7 @@ local function OnCombatLog()
 
 	-- The fifteenth value is a spell's damage; a swing carries its amount in
 	-- the twelfth, where a spell carries its id.
-	local _,event,_,sourceGUID,_,_,_,destGUID,_,_,_,spellID,spellName,_,spellAmount,overkill=CombatLogGetCurrentEventInfo()
+	local _,event,_,sourceGUID,_,_,_,destGUID,_,_,_,spellID,spellName,spellSchool,spellAmount,overkill,school,resisted,blocked,absorbed=CombatLogGetCurrentEventInfo()
 
 	-- Ahead of the damage handling below, which returns early -- and only for
 	-- events that carry a spell. A swing puts its damage where the id goes,
@@ -996,12 +1027,25 @@ local function OnCombatLog()
 	end
 
 	if event=="SWING_DAMAGE" then
-		return NoteDamage(sourceGUID,destGUID,spellID,spellName)   -- amount, overkill: a swing's places
+		return NoteDamage(sourceGUID,destGUID,spellID,spellName,school)   -- a swing's amount, overkill, absorbed
 	end
 
 	if event=="SPELL_DAMAGE" or event=="SPELL_PERIODIC_DAMAGE"
 		or event=="RANGE_DAMAGE" or event=="SPELL_BUILDING_DAMAGE" then
-		return NoteDamage(sourceGUID,destGUID,spellAmount,overkill)
+		return NoteDamage(sourceGUID,destGUID,spellAmount,overkill,absorbed)
+	end
+
+	if event=="SPELL_MISSED" and spellAmount=="ABSORB" then
+		return NoteTotal(sourceGUID,destGUID,"dmg",math.max(0,tonumber(school) or 0))
+	end
+	if event=="SWING_MISSED" and spellID=="ABSORB" then
+		return NoteTotal(sourceGUID,destGUID,"dmg",math.max(0,tonumber(spellSchool) or 0))
+	end
+	if event=="SPELL_HEAL" or event=="SPELL_PERIODIC_HEAL" then
+		return NoteHealing(sourceGUID,destGUID,spellAmount,overkill)
+	end
+	if event=="SPELL_ABSORBED" then
+		return NoteAbsorb(destGUID,select(12,CombatLogGetCurrentEventInfo()))
 	end
 
 	-- The cast, before the death it causes.
@@ -1071,11 +1115,22 @@ end
 -- Nothing replaced it because nothing can. See the note at the lookup below
 -- for what the client was asked and what it said.
 
-local function AsList(byName)
+local function AsList(byName,totals,left)
 	local list,seen={},{}
 
 	for _,player in pairs(byName or {}) do
 		local guid=player.guid
+		local observed=totals and totals[guid]
+		if observed then
+			for _,field in ipairs({"dmg","heal"}) do
+				local scored=tonumber(player[field]) or 0
+				-- A completed scoreboard wins. On departure it can be missing
+				-- or stale: keep whichever total reached further into the match.
+				if left or scored<=0 then
+					player[field]=math.max(scored,observed[field] or 0)
+				end
+			end
+		end
 
 		if guid and seen[guid] then
 			-- Keep whichever copy actually saw the match: an early duplicate is
@@ -3482,8 +3537,8 @@ function module:OnEnable()
 			-- without them had none: a match from before this has no such
 			-- field, and nobody's are known.
 			plays  = gathered and true or nil,
-			mine   = AsList(gathered and gathered.mine),
-			theirs = AsList(gathered and gathered.theirs),
+			mine   = AsList(gathered and gathered.mine,gathered and gathered.totals,left),
+			theirs = AsList(gathered and gathered.theirs,gathered and gathered.totals,left),
 		}
 		while #list>KEEP_MAX do table.remove(list,1) end
 
