@@ -25,7 +25,7 @@ What Gladiator, Duelist, Rival and Challenger cost right now, and how far you ar
 ### 📜 A match history that remembers
 The last matches of each bracket: your comp against theirs, rating and change, damage, healing, damage taken, crowd control landed and taken, trinkets used, dispels, interrupts and the crowd control somebody broke on their own team, and who earned the game. Expand a match to see every player, with their ladder standing **as it was when you fought them** — click it to find them on the ladder.
 
-Recorded from the scoreboard rather than guessed at, including the rating change for *every* player, not just yours.
+Completed matches use the scoreboard, including the rating change for *every* player, not just yours. If you leave early, damage and healing fall back to combat events observed up to your departure, including pets and consumed shields.
 
 ### 🔍 Inspect anyone on the ladder
 Click a row and see how they play: paper doll with every gem, enchant and tinker, their talents and glyphs, their rated record, and their actual stats — the played character, not the vendor's version of the gear.
