@@ -71,6 +71,7 @@ local function load(path)
 	assert(loadstring(text, "@" .. path))("ArenaPlus", ns)
 end
 load("HardCC.lua")
+load("SpecSpells.lua")
 load("Modules/ArenaHistory.lua")
 module:OnEnable()
 
@@ -88,4 +89,6 @@ local function log(event, src, dst, spellID, spellName, extraID, extraName, aura
 	fire(watcher, "COMBAT_LOG_EVENT_UNFILTERED")
 end
 
-return { log = log, handlers = handlers, module = module, advance = function(s) clock = clock + s end }
+return { log = log, handlers = handlers, module = module, units = units,
+	sample = function() fire(watcher, "UPDATE_BATTLEFIELD_SCORE") end,
+	advance = function(s) clock = clock + s end }
