@@ -494,7 +494,10 @@ local function Sample(request)
 						current.petOwner[petGUID]=guid
 					end
 					if unit:match("^arena") and GetArenaOpponentSpec then
-						player.spec=GetArenaOpponentSpec(index) or player.spec
+						-- Zero means unknown, and is truthy in Lua. Storing it
+						-- blocked NoteSpec and erased earlier spell detections.
+						local spec=GetArenaOpponentSpec(index)
+						if type(spec)=="number" and spec>0 then player.spec=spec end
 					elseif unit:match("^party") then
 						-- Not on Anniversary: with no specs the answer never
 						-- comes, and every teammate was asked every three
@@ -960,7 +963,8 @@ local function NoteSpec(guid,spellID,spellName)
 	if not spec then return end
 
 	local player=PlayerByGUID(guid)
-	if player and not player.spec then player.spec=spec end
+	local known=player and tonumber(player.spec)
+	if player and (not known or known<=0) then player.spec=spec end
 end
 
 local function OnCombatLog()
